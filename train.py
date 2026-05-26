@@ -108,6 +108,7 @@ class Config:
     ema_decay: float = 0.999
     ema_start_step: int = 50
     eval_raw_vs_ema: bool = False
+    ema_weights: bool = False
     lr_warmup_epochs: int = 0
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
@@ -161,6 +162,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         "surface_out_width_factor": (
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
+        ),
+        "ema_weights": (
+            "H144: enable EMA-of-weights (online Polyak averaging from step 1). "
+            "Overrides --use-ema swap-into-val pattern. Logs val_primary/* from LIVE model "
+            "and val_ema/* from EMA shadow. Saves two checkpoints (live-best and EMA-best) "
+            "and at terminal selects whichever has lower test_WSS as the headline result."
         ),
     }
     choices_text = {
@@ -638,7 +645,19 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
-        ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        # H144: EMA-of-weights mode. When enabled, build EMA with start_step=1
+        # (online Polyak averaging from EP0) and run DUAL validation (live + EMA).
+        # The legacy --use-ema swap-into-val pattern is disabled in this mode so
+        # val_primary/* reflects the LIVE model, not the EMA shadow.
+        if config.ema_weights:
+            ema = EMA(base_model, decay=config.ema_decay, start_step=1)
+            if state.is_main:
+                print(
+                    f"[H144] EMA-of-weights enabled: decay={config.ema_decay}, "
+                    f"start_step=1, dual-eval (val_primary=LIVE, val_ema=EMA shadow)"
+                )
+        else:
+            ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
         gradnorm_weights: GradNormWeights | None = None
         gradnorm_opt: torch.optim.Optimizer | None = None
@@ -694,13 +713,27 @@ def main(argv: Iterable[str] | None = None) -> None:
         output_dir = Path(config.output_dir) / f"run-{run.id}"
         output_dir.mkdir(parents=True, exist_ok=True)
         model_path = output_dir / "checkpoint.pt"
+        # H144 dual-mode paths (only used when --ema-weights). The standard
+        # model_path is reused as the "live" checkpoint location so single-mode
+        # downstream tooling (eval-only re-runs, artifact uploads) works unchanged.
+        model_path_live = output_dir / "checkpoint_live.pt"
+        model_path_ema = output_dir / "checkpoint_ema.pt"
         config_path = output_dir / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(asdict(config), f)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
-        best_checkpoint_source = "ema" if ema is not None else "raw"
+        # H144 dual-mode bests (only used when --ema-weights).
+        best_live_val = float("inf")
+        best_live_metrics: dict[str, float] = {}
+        best_ema_val = float("inf")
+        best_ema_metrics: dict[str, float] = {}
+        # In dual mode the headline source is whichever wins at terminal eval;
+        # default to "live" for in-flight logging.
+        best_checkpoint_source = (
+            "live" if config.ema_weights else ("ema" if ema is not None else "raw")
+        )
         global_step = 0
         nonfinite_skip_count = 0
         early_stop_reason: str | None = None
@@ -1154,8 +1187,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 continue
 
             raw_val_metrics = None
-            if config.eval_raw_vs_ema and ema is not None:
-                raw_val_metrics = {
+            val_ema_metrics = None  # H144 dual-mode: EMA shadow validation result
+            if config.ema_weights and ema is not None:
+                # H144 dual-eval: live first (no swap), then swap-and-eval EMA.
+                # val_metrics holds the LIVE result; val_ema_metrics holds EMA.
+                val_metrics = {
                     name: evaluate_split(
                         model,
                         loader,
@@ -1166,21 +1202,53 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                     for name, loader in val_loaders.items()
                 }
-            if ema is not None:
                 ema.store(base_model)
                 ema.copy_to(base_model)
-            val_metrics = {
-                name: evaluate_split(
-                    model,
-                    loader,
-                    transform,
-                    device,
-                    amp_mode=config.amp_mode,
-                    distributed_state=state,
-                )
-                for name, loader in val_loaders.items()
-            }
+                val_ema_metrics = {
+                    name: evaluate_split(
+                        model,
+                        loader,
+                        transform,
+                        device,
+                        amp_mode=config.amp_mode,
+                        distributed_state=state,
+                    )
+                    for name, loader in val_loaders.items()
+                }
+                # Defer ema.restore until after the EMA-best checkpoint save so we
+                # can torch.save the EMA-loaded state_dict via the swap. The
+                # restore happens below in the checkpoint-save block.
+            else:
+                if config.eval_raw_vs_ema and ema is not None:
+                    raw_val_metrics = {
+                        name: evaluate_split(
+                            model,
+                            loader,
+                            transform,
+                            device,
+                            amp_mode=config.amp_mode,
+                            distributed_state=state,
+                        )
+                        for name, loader in val_loaders.items()
+                    }
+                if ema is not None:
+                    ema.store(base_model)
+                    ema.copy_to(base_model)
+                val_metrics = {
+                    name: evaluate_split(
+                        model,
+                        loader,
+                        transform,
+                        device,
+                        amp_mode=config.amp_mode,
+                        distributed_state=state,
+                    )
+                    for name, loader in val_loaders.items()
+                }
 
+            improved_live = False
+            improved_ema = False
+            primary_val_ema = float("nan")
             if state.is_main:
                 if raw_val_metrics is not None:
                     raw_surface = raw_val_metrics["val_surface"]
@@ -1191,6 +1259,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
+                if config.ema_weights and val_ema_metrics is not None:
+                    # H144: dual-mode also logs EMA shadow's full eval under val_ema/*
+                    primary_val_ema = val_ema_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+                    log_metrics.update(primary_metric_log("val_ema", val_ema_metrics["val_surface"]))
+                    for split_name, metrics in val_ema_metrics.items():
+                        log_metrics.update(metric_namespace("val_ema", split_name, metrics))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
@@ -1208,35 +1282,110 @@ def main(argv: Iterable[str] | None = None) -> None:
                     early_stop_reason = local_stop_reason
                 if early_stop_reason is not None:
                     log_metrics["early_stop/triggered"] = 1.0
-                improved = should_update_best_checkpoint(primary_val, best_val)
-                if improved:
-                    best_val = primary_val
-                    best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
-                    torch.save(
-                        {
-                            "model": base_model.state_dict(),
-                            "config": asdict(config),
-                            "epoch": epoch + 1,
-                            "val_metrics": val_metrics,
-                            "checkpoint_source": best_checkpoint_source,
-                            "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
-                        },
-                        model_path,
+                if config.ema_weights:
+                    # H144 dual-mode: independent live-best and EMA-best tracking.
+                    # base_model is EMA-loaded right now (deferred swap restore). Save
+                    # EMA-best first while EMA weights are live in base_model, then
+                    # ema.restore happens below, then save live-best.
+                    improved_ema = (
+                        val_ema_metrics is not None
+                        and should_update_best_checkpoint(primary_val_ema, best_ema_val)
                     )
-                log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
-                log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
-                wandb.log(log_metrics)
-                tag = " *" if improved else ""
-                print(
-                    f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
-                    f"train_loss={epoch_train_loss:.5f} "
-                    f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
-                )
-                print_metrics("val_surface", val_metrics["val_surface"])
-            else:
-                wandb.log(log_metrics)
+                    if improved_ema:
+                        best_ema_val = primary_val_ema
+                        best_ema_metrics = {
+                            "epoch": float(epoch + 1),
+                            **val_ema_metrics["val_surface"],
+                        }
+                        torch.save(
+                            {
+                                "model": base_model.state_dict(),
+                                "config": asdict(config),
+                                "epoch": epoch + 1,
+                                "val_metrics": val_ema_metrics,
+                                "checkpoint_source": "ema",
+                                "selection_metric": "val_ema/abupt_axis_mean_rel_l2_pct",
+                            },
+                            model_path_ema,
+                        )
+                    improved_live = should_update_best_checkpoint(primary_val, best_live_val)
+                else:
+                    improved = should_update_best_checkpoint(primary_val, best_val)
+                    if improved:
+                        best_val = primary_val
+                        best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
+                        torch.save(
+                            {
+                                "model": base_model.state_dict(),
+                                "config": asdict(config),
+                                "epoch": epoch + 1,
+                                "val_metrics": val_metrics,
+                                "checkpoint_source": best_checkpoint_source,
+                                "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                            },
+                            model_path,
+                        )
+                    log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
+                    log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
+            # All ranks: restore EMA swap before continuing training.
             if ema is not None:
                 ema.restore(base_model)
+            if state.is_main:
+                if config.ema_weights:
+                    # Now base_model is back to live; save live-best checkpoint.
+                    if improved_live:
+                        best_live_val = primary_val
+                        best_live_metrics = {
+                            "epoch": float(epoch + 1),
+                            **val_metrics["val_surface"],
+                        }
+                        torch.save(
+                            {
+                                "model": base_model.state_dict(),
+                                "config": asdict(config),
+                                "epoch": epoch + 1,
+                                "val_metrics": val_metrics,
+                                "checkpoint_source": "live",
+                                "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                            },
+                            model_path_live,
+                        )
+                        # Mirror to the canonical model_path so existing tooling
+                        # (eval-only, artifact uploader) still has a checkpoint
+                        # available at the default location. The dual-mode
+                        # terminal eval picks the winner from the two paths.
+                        best_val = best_live_val
+                        best_metrics = best_live_metrics
+                    log_metrics["best_checkpoint_live/updated"] = 1.0 if improved_live else 0.0
+                    log_metrics["best_checkpoint_ema/updated"] = 1.0 if improved_ema else 0.0
+                    log_metrics["best_checkpoint/updated"] = (
+                        1.0 if (improved_live or improved_ema) else 0.0
+                    )
+                    log_metrics["best_checkpoint/valid_primary"] = (
+                        1.0 if is_valid_primary_metric(primary_val) else 0.0
+                    )
+                wandb.log(log_metrics)
+                if config.ema_weights and val_ema_metrics is not None:
+                    live_tag = " *L" if improved_live else ""
+                    ema_tag = " *E" if improved_ema else ""
+                    print(
+                        f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                        f"train_loss={epoch_train_loss:.5f} "
+                        f"val_live={primary_val:.4f}{live_tag} "
+                        f"val_ema={primary_val_ema:.4f}{ema_tag}"
+                    )
+                    print_metrics("val_surface_live", val_metrics["val_surface"])
+                    print_metrics("val_surface_ema", val_ema_metrics["val_surface"])
+                else:
+                    tag = " *" if improved else ""
+                    print(
+                        f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                        f"train_loss={epoch_train_loss:.5f} "
+                        f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
+                    )
+                    print_metrics("val_surface", val_metrics["val_surface"])
+            else:
+                wandb.log(log_metrics)
             stop_requested = distributed_any(state, early_stop_reason is not None, device)
             if stop_requested and early_stop_reason is None:
                 early_stop_reason = "rank 0 requested early stop"
@@ -1266,6 +1415,128 @@ def main(argv: Iterable[str] | None = None) -> None:
         distributed_barrier(state)
         if not state.is_main:
             wandb.summary.update({"total_train_minutes": total_minutes})
+            wandb.finish()
+            return
+
+        if config.ema_weights:
+            # H144 dual terminal eval: load both checkpoints, eval val+test for
+            # both, pick winner by test_WSS (wall_shear_rel_l2_pct), then call
+            # run_final_evaluation with the winner so the standard
+            # test_primary/*, full_val_primary/*, and best_* summary keys all
+            # reflect the H144 headline result. The loser's val+test metrics
+            # are also logged under ema_dual_*/* keys for record.
+            have_live = bool(best_live_metrics) and model_path_live.exists()
+            have_ema = bool(best_ema_metrics) and model_path_ema.exists()
+            if not have_live and not have_ema:
+                wandb.summary.update(
+                    {
+                        "run_invalid": 1.0,
+                        "run_invalid/reason": "no finite positive validation checkpoint was saved (live or ema)",
+                        "total_train_minutes": total_minutes,
+                    }
+                )
+                print("No finite positive validation checkpoint was saved (live or ema).")
+                wandb.finish()
+                return
+
+            def _eval_ckpt(path: Path):
+                ckpt = torch.load(path, map_location=device, weights_only=True)
+                base_model.load_state_dict(ckpt["model"])
+                full_val = {
+                    name: evaluate_split(
+                        base_model, loader, transform, device, amp_mode=config.amp_mode
+                    )
+                    for name, loader in final_val_loaders.items()
+                }
+                test = {
+                    name: evaluate_split(
+                        base_model, loader, transform, device, amp_mode=config.amp_mode
+                    )
+                    for name, loader in final_test_loaders.items()
+                }
+                return ckpt, full_val, test
+
+            live_eval = _eval_ckpt(model_path_live) if have_live else None
+            ema_eval = _eval_ckpt(model_path_ema) if have_ema else None
+
+            def _wss(e):
+                return (
+                    e[2]["test_surface"]["wall_shear_rel_l2_pct"]
+                    if e is not None
+                    else float("inf")
+                )
+
+            wss_live = _wss(live_eval)
+            wss_ema = _wss(ema_eval)
+            winner = "live" if wss_live <= wss_ema else "ema"
+            print(
+                f"[H144] dual terminal: live test_WSS={wss_live:.4f}, "
+                f"ema test_WSS={wss_ema:.4f}, winner={winner}"
+            )
+
+            # Log both live and ema eval results under ema_dual_*/* namespace
+            # so the comparison is preserved in W&B regardless of which wins.
+            dual_log: dict[str, float] = {"global_step": global_step}
+            if live_eval is not None:
+                _, full_val_l, test_l = live_eval
+                for k, v in primary_metric_log(
+                    "ema_dual_live_full_val_primary", full_val_l["val_surface"]
+                ).items():
+                    dual_log[k] = v
+                for k, v in primary_metric_log(
+                    "ema_dual_live_test_primary", test_l["test_surface"]
+                ).items():
+                    dual_log[k] = v
+            if ema_eval is not None:
+                _, full_val_e, test_e = ema_eval
+                for k, v in primary_metric_log(
+                    "ema_dual_ema_full_val_primary", full_val_e["val_surface"]
+                ).items():
+                    dual_log[k] = v
+                for k, v in primary_metric_log(
+                    "ema_dual_ema_test_primary", test_e["test_surface"]
+                ).items():
+                    dual_log[k] = v
+            wandb.log(dual_log)
+            wandb.summary.update(
+                {
+                    "ema_dual/winner": winner,
+                    "ema_dual/live_test_wss": wss_live,
+                    "ema_dual/ema_test_wss": wss_ema,
+                    "ema_dual/live_best_epoch": (
+                        int(best_live_metrics["epoch"]) if have_live else -1
+                    ),
+                    "ema_dual/ema_best_epoch": (
+                        int(best_ema_metrics["epoch"]) if have_ema else -1
+                    ),
+                }
+            )
+
+            if winner == "live":
+                winner_path = model_path_live
+                winner_metrics = best_live_metrics
+                winner_source = "live"
+            else:
+                winner_path = model_path_ema
+                winner_metrics = best_ema_metrics
+                winner_source = "ema"
+
+            run_final_evaluation(
+                run=run,
+                model=base_model,
+                model_path=winner_path,
+                config_path=config_path,
+                config=config,
+                transform=transform,
+                device=device,
+                final_val_loaders=final_val_loaders,
+                final_test_loaders=final_test_loaders,
+                best_metrics=winner_metrics,
+                best_checkpoint_source=winner_source,
+                n_params=n_params,
+                global_step=global_step,
+                total_minutes=total_minutes,
+            )
             wandb.finish()
             return
 
