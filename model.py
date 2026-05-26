@@ -419,6 +419,7 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_split_wss_z_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +435,16 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_split_wss_z_decoder = use_split_wss_z_decoder
+        if use_split_wss_z_decoder and self.surface_output_dim != 4:
+            raise ValueError(
+                "use_split_wss_z_decoder requires surface_output_dim=4 "
+                "(cp, tau_x, tau_y, tau_z)"
+            )
+        # Surface main-head output dim (3 channels when split, else full).
+        main_surface_out_dim = (
+            self.surface_output_dim - 1 if use_split_wss_z_decoder else self.surface_output_dim
+        )
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -523,7 +534,7 @@ class SurfaceTransolver(nn.Module):
             self.surface_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden),
                 nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
+                nn.Linear(n_hidden, main_surface_out_dim),
             )
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
@@ -535,8 +546,22 @@ class SurfaceTransolver(nn.Module):
             )
             self.volume_out.apply(_init_linear)
         else:
-            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+            self.surface_out = LinearProjection(n_hidden, main_surface_out_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        if use_split_wss_z_decoder:
+            # H138: dedicated wider 2-layer MLP for tau_z (wall-shear z component).
+            # n_hidden -> n_hidden*2 -> 1 with SiLU. Output concatenated with the
+            # 3-channel surface_out [cp, tau_x, tau_y] to restore the 4-channel
+            # contract expected by the loss / eval code.
+            self.wss_z_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden * 2),
+                nn.SiLU(),
+                nn.Linear(n_hidden * 2, 1),
+            )
+            self.wss_z_out.apply(_init_linear)
+        else:
+            self.wss_z_out = None
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -661,7 +686,11 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden)
+            if self.wss_z_out is not None:
+                wss_z_preds = self.wss_z_out(surface_hidden)
+                surface_preds = torch.cat([surface_preds, wss_z_preds], dim=-1)
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)

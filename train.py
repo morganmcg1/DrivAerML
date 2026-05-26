@@ -104,6 +104,7 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    use_split_wss_z_decoder: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -318,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_split_wss_z_decoder=config.use_split_wss_z_decoder,
     )
 
 
