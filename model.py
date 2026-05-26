@@ -538,6 +538,22 @@ class SurfaceTransolver(nn.Module):
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
+        # H-B2 (PR #1320): Auxiliary log-magnitude WSS head with DETACHED
+        # gradient. Predicts log(1 + ||tau||) per surface point. The detach
+        # at the input (in forward) prevents aux-loss gradients from flowing
+        # into the backbone, so the backbone remains shaped only by the
+        # primary rel_l2 loss (preserving H112's OOD generalization). The
+        # head itself still trains end-to-end as a diagnostic probe.
+        # Final layer zero-ish-init so aux loss is small at step 0 and
+        # train-start trajectory matches H112.
+        self.aux_log_mag_head = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden // 2),
+            nn.SiLU(),
+            nn.Linear(n_hidden // 2, 1),
+        )
+        nn.init.normal_(self.aux_log_mag_head[-1].weight, std=1e-3)
+        nn.init.zeros_(self.aux_log_mag_head[-1].bias)
+
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
         # Bridges geometry-aware surface features into the volume decoder
@@ -662,9 +678,16 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            # H-B2: aux head consumes a DETACHED copy of surface_hidden so its
+            # gradient cannot flow back into the backbone. The aux head's own
+            # weights still receive gradients from the aux loss term.
+            aux_log_mag_preds = self.aux_log_mag_head(
+                surface_hidden.detach()
+            ) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+            aux_log_mag_preds = volume_hidden.new_zeros(batch_size, 0, 1)
 
         if volume_x is not None:
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
@@ -675,6 +698,7 @@ class SurfaceTransolver(nn.Module):
         return {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
+            "aux_log_mag_preds": aux_log_mag_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,

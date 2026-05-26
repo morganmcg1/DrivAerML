@@ -356,12 +356,28 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+        # H-B2 (PR #1320): detached auxiliary log-magnitude WSS loss. The model
+        # already detaches surface_hidden before this head, so the gradient
+        # only updates the aux head itself — the backbone stays purely shaped
+        # by the primary rel_l2 loss. lambda=0.1 so the primary loss
+        # dominates the scalar `loss` at every step.
+        aux_log_mag_loss = surface_target.new_zeros(())
+        if "aux_log_mag_preds" in out and out["aux_log_mag_preds"].shape[1] > 0:
+            tau_target = surface_target[..., 1:4]
+            log_mag_target = torch.log1p(
+                torch.linalg.norm(tau_target, dim=-1, keepdim=True)
+            )
+            aux_log_mag_loss = masked_mse(
+                out["aux_log_mag_preds"], log_mag_target, batch.surface_mask
+            )
+            loss = loss + 0.1 * aux_log_mag_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "aux_log_mag_loss": float(aux_log_mag_loss.detach().cpu().item()),
     }
 
 
@@ -1092,6 +1108,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "aux_log_mag_loss" in batch_loss_metrics:
+                        train_log["train/aux_log_mag_loss"] = batch_loss_metrics["aux_log_mag_loss"]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
