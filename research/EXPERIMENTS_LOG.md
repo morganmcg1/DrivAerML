@@ -1,3 +1,55 @@
+## 2026-05-26 ~00:50 — PR #1320: H-B2 DETACHED AUX LOG-MAGNITUDE WSS HEAD (alphonse, **CLOSED C NULL** — straight baseline-trail on both val and test; aux-head class definitively CLOSED via H-B/H-B2 gradient-flow attribution)
+
+- **Branch**: `alphonse/detached-aux-loss-wss` (CLOSED, not merged)
+- **W&B run**: `tqkdhfqu`
+- **Hypothesis**: Same aux-log-magnitude WSS head as H-B but with `grad-stop` on backbone — isolates whether H-B's val signal came from backbone gradient shaping (mechanism alive) or from feature engineering (independent of gradient).
+- **Parameter overhead**: +131K params (same as H-B), 17.55M total
+
+### Terminal metrics (best EP13 EMA-source)
+
+| Metric | H-B2 | H112 | Δ vs H112 | H-B (#1307) | Δ vs H-B |
+|---|---:|---:|---:|---:|---:|
+| val_abupt | 6.2255% | 6.1358% | **+0.090pp MISS** | 6.1288% | +0.097pp behind |
+| val_WSS | 7.0915% | 6.9670% | +0.125pp | — | — |
+| val_WSS_z | 9.4677% | 9.3750% | +0.093pp | — | — |
+| **test_WSS** | **6.9302%** | **6.7523%** | **+0.178pp REGRESSION** | 6.7974% | **+0.133pp behind** |
+| test_WSS_z | 8.9432% | 8.7201% | +0.223pp | — | — |
+| test_VP | 3.5249% | 3.4213% | +0.104pp | 3.452% | +0.073pp |
+| test_SP | 3.7880% | 3.6947% | +0.093pp | 3.580% | +0.208pp |
+
+**Total wallclock**: 863.4 min = 14.39h | **Peak GPU mem**: ~82 GB (allocated)
+
+### Mechanism finding (load-bearing program-level)
+
+The H-B / H-B2 ablation confirms **gradient-flow attribution** for the aux-head mechanism:
+
+| Condition | val_abupt | test_WSS | Slope val→test | Class |
+|---|---:|---:|---:|---|
+| H112 (no aux) | 6.1358% | 6.7523% | +0.616pp | reference |
+| **H-B (aux, with grad)** | 6.1288% | 6.7974% | +0.668pp | val WIN + test LOSS — catastrophe |
+| **H-B2 (aux, no grad)** | 6.2255% | 6.9302% | +0.704pp | val LOSS + test LOSS — baseline-trail |
+
+- Detached aux **strictly worse than H-B on every metric**
+- Aux head's val signal is GRADIENT-DRIVEN — without it, the +131K params add only RNG-shift + optimizer-state pressure (no compensating representation benefit)
+- "Detach as safety net" pattern FALSIFIED
+
+### Banked findings (permanent program value)
+
+1. **Aux-head class definitively CLOSED at canonical 17.5M recipe** — H-B catastrophe + H-B2 baseline-trail bracket the class behavior
+2. **+131K param addition costs ~+0.10pp val/test** (RNG-shift baseline cost) — calibrates future architectural intervention cost
+3. **Aux-head mechanism is gradient-driven, not feature-engineering driven** — settles the H-B class attribution permanently
+4. **Pivot away from aux-head class** — productive directions are tau_z loss-weight escalation (H143/H144), split WSS_z decoder (H138), and architectural-tier interventions
+
+### Strategic implication
+
+The aux-head class joins the capacity-axis cohort as exhausted. Wave 38+ frontier is now:
+- **tau_z loss-weight escalation** (H143 at 4.0 showing EP2 −0.090pp WSS_z lead vs H112 — first cohort-aligned positive signal)
+- **Split WSS_z decoder** (H138 askeladd in flight — dedicated wider head for tau_z)
+- **Decoder-only SwiGLU** (H135 thorfinn in flight — TIED with H112 raw)
+- **Architectural/data-tier interventions** (untested at canonical capacity)
+
+---
+
 ## 2026-05-24 ~21:45 — PR #1297: H121 BACKBONE HIDDEN-DIM 512→576 (frieren, **CLOSED C NULL** — marginal val gate miss + test_WSS regression; **CAPACITY-AXIS × CANONICAL DROPPATH GENERALIZATION-BOUND LOCKED ACROSS BOTH DEPTH AND WIDTH**)
 
 - **Branch**: `frieren/h121-hidden-576` (CLOSED, not merged)
