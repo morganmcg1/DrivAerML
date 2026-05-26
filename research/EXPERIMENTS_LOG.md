@@ -1,3 +1,40 @@
+## 2026-05-26 ~09:40 — PR #1343: H150 EMA DECAY 0.9999 (nezuko, **CLOSED no_signal** — EMA composition lag too slow for 13-epoch training; kill threshold tripped at EP3 before hypothesis testable; mechanism UNTESTED not REFUTED)
+
+- **Branch**: `nezuko/h150-ema-0.9999` (CLOSED)
+- **W&B run**: `pjck0jt5` (KILLED at step 32,592, EP3, runtime 298 min / 4h58m)
+- **Hypothesis**: EMA decay 0.999→0.9999 (half-life ~6,931 steps vs 693) should produce a smoother, more stable late-train checkpoint by averaging over a much longer window. Prevents checkpoint-instantaneous val-overfit from masking true generalisation.
+- **Parameter overhead**: 0
+
+### Kill trajectory (observed)
+
+| Gate | Step | α composition | EMA val_abupt | Threshold | Status |
+|---|---:|---:|---:|---:|---|
+| EP1 | 10,864 | 0.6609 (66%) | 66.237% | WAIVED | — |
+| EP2 | 21,729 | 0.8856 (89%) | 51.277% | — | continue |
+| EP3 | 32,592 | 0.9614 (96%) | **21.512%** | < 10.5% | **KILL TRIGGERED** |
+
+α = 1 − 0.9999^(step − 50). At EP3, 3.86% raw-init weights still mixed in.
+
+### Root cause: EMA composition math was incompatible with 13-epoch training
+
+At ema_decay=0.9999, the EMA half-life is 6,931 steps. By EP3 (step 32,592), α = 96.1% — meaning 3.86% of the raw init weights are still mixed into the EMA checkpoint. This produces artifactual inflation of val metrics (EMA val_abupt=21.5% vs expected ~7% for a model training normally).
+
+The kill thresholds in the PR body (10.5% at EP3, 8.0% at EP9) were copied from the ema_decay=0.999 setup (half-life 693 steps, composition >99.9% by EP3). At 10× slower composition, the thresholds needed to be ~50% at EP3, ~30% at EP6 to match the EMA composition curve.
+
+The student correctly identified this in the EP2 publish and offered three options. Option 1 (continue + close_no_signal) was chosen because Option 2 (restart with super-loose thresholds) would consume ~10h GPU time to confirm a negative, and Option 3 is a dead end.
+
+### Banked findings
+
+1. **ema_decay > 0.999 is incompatible with 13-epoch training** unless kill thresholds use raw-weight val (`--eval-raw-vs-ema`) rather than EMA-smoothed val.
+2. **The mechanism is not falsified** — long-EMA for checkpoint-instantaneous val-overfit is untested. Could resurface in Wave 41 with epoch budget ≥20, or with ema_decay=0.9995 + `--eval-raw-vs-ema` for raw-weight kill gates.
+3. **EMA composition math is non-trivial at slow decay** — always verify α(t) before setting kill thresholds for non-standard decay values.
+
+### Reassignment
+
+nezuko reassigned to **H157 PR #1346** (cosine warm restarts SGDR T_0=4 — pure scheduler-axis mechanism, zero code apart from minimal implementation change in trainer_runtime.py).
+
+---
+
 ## 2026-05-26 ~06:00 — PR #1327: H140 SIGNED-LOG TAU_Z REPARAMETERIZATION (nezuko, **CLOSED C NULL** — val MISS +0.252pp, test_WSS REGRESSION +0.153pp vs H112; **SOFTEN CLASS DEFINITIVELY CLOSED via H139+H140 paired exhaustion**)
 
 - **Branch**: `nezuko/h140-tau-z-log-reparam` (CLOSED, not merged)
