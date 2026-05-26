@@ -1,3 +1,76 @@
+## 2026-05-26 ~03:10 — PR #1322: H135 DECODER-ONLY SWIGLU SURFACE HEAD (thorfinn, **CLOSED C NULL** — val gate marginal PASS (−0.005pp), but ALL test floors FAIL by +0.10pp universal regression; **SWIGLU CLASS DEFINITIVELY CLOSED** across all three locations: backbone, decoder, full)
+
+- **Branch**: `thorfinn/h135-swiglu-decoder-only` (CLOSED, not merged)
+- **W&B run**: `7kapfsiu`
+- **Hypothesis**: Decoder-only SwiGLU isolates gating to the prediction head — tests whether the SwiGLU "WSS_z slope benefit" (observed in H128) localizes to the decoder vs the backbone. Pairs with H134 (full SwiGLU param-parity) for clean SwiGLU location-of-benefit attribution.
+- **Parameter overhead**: +275K (+1.58%) — gate_proj + value_proj projections in surface decoder
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,652)
+
+| Metric | H135 val | H135 test | H112 (val / test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---:|---|
+| **abupt** | **6.1309%** | **5.9425%** | 6.1358% / 5.839% | **+0.104pp** | val PASS gate ✅, test FAIL ✗ |
+| **WSS** | **6.9534%** | **6.8501%** | — / 6.752% | **+0.098pp** | TEST_FLOOR 6.727%: MISS by +0.123pp ✗ |
+| WSS_x | 6.0590% | 6.0841% | — / 5.999% | +0.085pp | regression |
+| WSS_y | 7.6259% | 7.4761% | — / 7.360% | +0.116pp | regression |
+| WSS_z | 9.3781% | 8.8221% | 9.375% / 8.720% | +0.102pp | regression |
+| SP | 4.0653% | 3.8050% | — / 3.695% | +0.110pp | TEST_FLOOR 3.577%: FAIL ✗ |
+| VP | 3.5262% | 3.5253% | — / 3.421% | +0.104pp | TEST_FLOOR 3.421%: FAIL ✗ |
+
+**Total wallclock**: 872.3 min = 14.5h | **n_params**: 17.68M (+275K vs H112)
+
+### Cross-cohort SwiGLU attribution — definitive architectural closure
+
+Three-point SwiGLU class study at canonical 17.5M recipe:
+
+| Cohort | Mechanism location | val_abupt | test_WSS | Test verdict |
+|---|---|---:|---:|---|
+| H112 baseline | GELU (no SwiGLU) | 6.1358% | 6.752% | reference |
+| H134 edward | full SwiGLU (backbone+decoder, param-parity) | 6.2920% | 6.9460% | **+0.194pp regression** |
+| **H135 thorfinn** | **decoder-only SwiGLU** | **6.1309%** | **6.8501%** | **+0.098pp regression** |
+| H128 alphonse | full SwiGLU (backbone+decoder, +30% MLP capacity) | OOM | — | OOM/early-close |
+
+**Architectural conclusion**: NO SwiGLU configuration is productive on test_WSS at canonical recipe.
+- Backbone SwiGLU → +0.194pp regression
+- Decoder-only SwiGLU → +0.098pp regression (better than full, but still C NULL)
+- Full SwiGLU at increased capacity → OOM (capacity-axis catastrophe)
+
+**The SwiGLU class is definitively CLOSED at canonical 17.5M-param recipe.**
+
+### Per-channel val→test slope — slope-class diagnosis
+
+| Channel | H135 val | H135 test | val→test slope | H112 slope | Reading |
+|---|---:|---:|---:|---:|---|
+| WSS_x | 6.059% | 6.084% | **+0.025pp** (test WORSE than val) | ~ −0.10pp | **slope DEGRADED** (reversed sign) |
+| WSS_y | 7.626% | 7.476% | −0.150pp | ~ −0.25pp | slope shallower |
+| **WSS_z** | **9.378%** | **8.822%** | **−0.556pp** | **−0.655pp** | **slope SHALLOWER than H112** (not steeper) |
+| WSS (agg) | 6.953% | 6.850% | −0.103pp | ~ −0.215pp | slope degraded |
+
+**Slope-class diagnosis: VAL-OVERFIT CLASS.** H135's val→test slopes are SHALLOWER than H112's across all WSS channels — including WSS_z where the student initially mis-claimed "steeper than H112." Actual H112 WSS_z slope is −0.655pp; H135's is −0.556pp. This is the **same slope-degradation pathology as H120/H121/H125/H132** capacity-axis runs.
+
+**Critical implication**: +275K param overhead from SwiGLU projections acts as effective capacity expansion that triggers val-overfit failure mode, even though SwiGLU is conceptually architectural augmentation (gating, not added depth/width).
+
+### Banked findings (permanent program value)
+
+1. **SwiGLU class CLOSED at canonical 17.5M recipe** — no location (backbone, decoder, full) is productive on test_WSS
+2. **Param overhead acts as capacity expansion** even for "architectural" variants — +275K params trigger val-overfit slope degradation
+3. **val pass + universal test regression = val-overfit class** — joins H120/H121/H125/H132 cohort
+4. **Decoder-only SwiGLU val benefit is REAL but unproductive** — −0.005pp val gate lead vanishes (worse) on test
+5. **WSS_z slope finding cross-referenced**: H135 slope (−0.556pp) is shallower than H112 (−0.655pp) — slope-mechanism claim falsified
+6. **Three-point SwiGLU exhaustion complete**: H128 (full+capacity), H134 (full param-parity), H135 (decoder-only) — all close C NULL
+
+### Strategic implication
+
+**SwiGLU direction definitively CLOSED.** The architectural augmentation class proved equivalent to capacity expansion on test slope behavior. Wave 39 frontier remains:
+- **Architectural decoder split** (H138 in flight, H146 in flight) — DIFFERENT mechanism class (channel-isolated capacity, not multiplicative gating)
+- **Loss-weight escalation** (H143 widening, H144 in flight, H145 axis-extension) — pure gradient pressure, no architecture change
+
+**Do NOT continue SwiGLU class experiments.** All three locations have been tested at canonical capacity; all close C NULL on test.
+
+Student's "Suggested follow-ups" #1 (per-channel decoder gating, SwiGLU only for tau_z) is lower priority than the architectural-split class — same mechanism family, smaller search space, and slope-class diagnosis suggests the same val-overfit failure mode will recur. The architectural-split class (H138, H146) is mechanistically distinct: dedicated capacity per channel, not multiplicative gating over shared capacity.
+
+---
+
 ## 2026-05-26 ~01:30 — PR #1321: H134 SWIGLU PARAM-PARITY (backbone+decoder) (edward, **CLOSED C NULL** — val MISS +0.156pp, test_WSS REGRESSION +0.194pp vs H112; **BACKBONE SWIGLU CLASS DEFINITIVELY CLOSED** via H134/H135 cross-cohort attribution)
 
 - **Branch**: `edward/h134-swiglu-param-parity` (CLOSED, not merged)
