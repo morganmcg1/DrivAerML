@@ -32,7 +32,7 @@ All six Wave 38 mechanism classes exhausted:
 | Capacity-axis (depth/width) | H118, H120, H121, H125 | CLOSED | Val-overfit slope catastrophe |
 | Pure regularization | H132 (DP_max=0.15) | CLOSED C NULL | Null — no improvement |
 | SwiGLU gating | H128(OOM), H134(backbone), H135(decoder) | CLOSED | Val-overfit; param overhead acts as capacity expansion |
-| Architectural-split | H138 (WSS_z decoder), H146 (WSS_y decoder) | CLOSED | Same slope-flattening pathology — param overhead correlated |
+| Architectural-split | H138 (WSS_z decoder) | CLOSED | Slope-flattening pathology — param overhead correlated. **H146 (WSS_y decoder) IN FLIGHT — paired-class hypothesis IN QUESTION**: at step 48,326 (~EP6) val_abupt LEAD −0.584pp, val_WSS_y LEAD −0.839pp vs H112 same-step. If terminal holds, REOPENS class. |
 | Aux-head | H-B, H-B2 | CLOSED | Gradient-flow degradation; detached strictly worse |
 | SOFTEN (loss) | H139 (Charbonnier), H140 (signed-log) | CLOSED | Anti-aligned with WSS_z goals; heavy-tail residuals ARE the signal |
 
@@ -42,18 +42,19 @@ All six Wave 38 mechanism classes exhausted:
 
 ---
 
-## Wave 39 Active Fleet (2026-05-26 ~08:50Z)
+## Wave 39 Active Fleet (2026-05-26 ~11:00Z)
 
 | Student | PR | Hypothesis | Status | Priority |
 |---|---|---|---|---|
 | frieren | #1332 | H143 tau_z=4.0 ESCALATE | **CLOSED C NULL** (test_WSS_z +0.175pp REGRESSION; first non-overhead slope-flattening) | reassigned to H164 SWA |
-| fern | #1334 | H144 tau_z=6.0 ESCALATE | WIP EP9 (70%) terminal ~09:20Z | **PROGRAM-PIVOTAL — first projected A WIN** |
-| alphonse | #1337 | H145 tau_y=3.0 axis-extension | WIP | HIGH — axis-extension validation |
-| edward | #1338 | H146 split WSS_y decoder | WIP | Monitor — paired-class to H138 |
-| thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP9+ | HIGH — discovered tau_z>tau_y>tau_x>sp>vp hierarchy |
-| askeladd | #1341 | H148 y=0 mirror augmentation | WIP | HIGH — data invariance, EP2 cross-channel bleed observed |
-| tanjiro | #1342 | H149 AdamW optimizer swap | WIP | HIGH — program-pivotal Lion vs AdamW ablation |
-| nezuko | #1346 | H157 cosine warm restarts (SGDR T_0=4) | NEW — just assigned | Scheduler-axis, basin-escape, zero-param
+| fern | #1334 | H144 tau_z=6.0 ESCALATE | WIP step 65,851 (93%) terminal ~12:30Z. val_WSS_z LEAD −0.084pp at step 65,212; all other channels regress (val_abupt +0.083pp, val_WSS +0.139pp, val_WSS_x +0.209pp). Identical cross-channel pattern to H143; HIGH RISK of slope flattening on test transfer. | Awaiting terminal; ESCALATE class verdict-pending |
+| alphonse | #1337 | H145 tau_y=3.0 axis-extension | WIP EP8/13; EP7 (10:39Z) val_WSS_y LEAD coin-flip at terminal (sub-bp); val_abupt MISS gate +22bp; terminal ~15:00Z | C NULL trending; banked: tau_y direction productive but 2× insufficient magnitude |
+| edward | #1338 | H146 split WSS_y decoder | WIP step 48,326 (~EP6). val_abupt LEAD −0.584pp, val_WSS_y LEAD −0.839pp vs H112 same-step. WSS_z LEAD −0.742pp. Terminal ~13:30Z. | **PROGRAM-CRITICAL — strongest mid-train signal of Wave 39. If terminal holds, REOPENS architectural-split class.** |
+| thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP2 (09:25Z) — caught up dramatically, LEADING H112 on ALL WSS channels at EP2 (−0.182pp WSS, −0.105pp WSS_z, −0.268pp WSS_y). VP/SP lag from auto-downweight. tau_z weight stabilized at 1.54 (below H112's 2.0). Terminal ~21:00Z. | HIGH — dynamic balancing sidesteps static ESCALATE failure mode |
+| askeladd | #1341 | H148 y=0 mirror augmentation | WIP EP5 (54%). EP4 publish: WSS_y LEAD weakening (−0.095→−0.056pp), WSS_z LEAD reversed to flat, VP deficit +1.294pp (growth decelerating but plateau ~+1.3pp). VP merge floor disqualification likely. EP6 binding ~12:25Z. | HIGH — mechanism alive but VP floor critical |
+| tanjiro | #1342 | H149 AdamW optimizer swap | WIP EP5. EP4 (10:14Z) gap-closure decaying: EP1 +5.73 → EP4 +0.56pp. WSS_z/WSS_y ratio H149 1.169 vs H112 1.183 — **CROSS-CHANNEL BLEED IS OPTIMIZER-AGNOSTIC**. Terminal ~17-18Z. | HIGH — pivotal Lion-vs-AdamW; baseline ordering confirmed data-driven not optimizer-specific |
+| nezuko | #1346 | H157 cosine warm restarts (SGDR T_0=4) | Newly assigned — student pickup pending | Scheduler-axis basin-escape, zero capacity |
+| frieren (reassigned) | #1347 | H164 Stochastic Weight Averaging (SWA) | Newly assigned — student pickup pending | Averaging-axis flat-basin discovery; tests basin-geometry hypothesis from H143 directly |
 
 ---
 
