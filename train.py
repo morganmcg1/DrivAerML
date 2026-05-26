@@ -141,6 +141,8 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     tau_z_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
+    use_z_coord_wss_weight: bool = False
+    z_coord_weight_alpha: float = 1.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -161,6 +163,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         "surface_out_width_factor": (
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
+        ),
+        "use_z_coord_wss_weight": (
+            "H140: weight WSS loss terms (tau_x/y/z) by per-point factor "
+            "w_i = 1 + alpha * |z_i / z_max| in [1.0, 1.0+alpha]. Amplifies "
+            "gradient share for high-|z| surface points (roof/A-pillar/wheel arch). "
+            "Applies to the per-channel WSS MSE used by GradNorm AND the supplementary "
+            "WSS Charbonnier; does NOT touch surface_pressure (cp) or vol_p."
+        ),
+        "z_coord_weight_alpha": (
+            "H140 strength: w_i = 1 + alpha * |z_i / z_max|. alpha=1.0 -> w in [1, 2]."
         ),
     }
     choices_text = {
@@ -272,6 +284,100 @@ def masked_charbonnier(
     return weighted.sum() / (n_pts * n_ch)
 
 
+def per_channel_masked_mse_pointweighted(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    point_weight: torch.Tensor,
+) -> torch.Tensor:
+    """Per-channel masked MSE with a per-point scalar weight (H140).
+
+    point_weight: ``[B, N]`` non-negative weights, broadcast across channels.
+    Reduces as a weighted mean over masked points:
+    ``sum(w*mask*diff^2) / sum(w*mask)`` per channel. With ``w == 1`` this
+    reduces to :func:`per_channel_masked_mse`.
+    """
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    w = point_weight.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    weighting = mask_f * w
+    diff_sq = (pred - target).square()
+    weighted = diff_sq * weighting
+    denom = weighting.sum().clamp_min(1.0)
+    return weighted.sum(dim=(0, 1)) / denom
+
+
+def masked_charbonnier_pointweighted(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    point_weight: torch.Tensor,
+    eps: float = 1e-3,
+) -> torch.Tensor:
+    """Masked Charbonnier with per-point weights (H140).
+
+    point_weight: ``[B, N]``. Reduces as weighted mean over masked points and
+    plain mean over channels. With ``w == 1`` this matches
+    :func:`masked_charbonnier`.
+    """
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    w = point_weight.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    weighting = mask_f * w
+    delta = pred - target
+    values = torch.sqrt(eps * eps + delta * delta) - eps
+    weighted = values * weighting
+    n_pts = weighting.sum().clamp_min(1.0)
+    n_ch = float(pred.shape[-1])
+    return weighted.sum() / (n_pts * n_ch)
+
+
+def compute_z_coord_point_weight(
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    alpha: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """H140 per-point WSS weight w_i = 1 + alpha * |z_i / z_max|.
+
+    ``surface_x`` has channel layout ``[x, y, z, nx, ny, nz, area]`` so the
+    z-coordinate is index 2. ``z_max`` is computed per-sample over masked
+    points only. Padded points receive zero weighting in downstream losses
+    because ``mask`` zeros them out — the value assigned here for those rows
+    therefore does not affect the weighted average.
+    """
+    z = surface_x[..., 2]  # [B, N]
+    # Multi-view batches occasionally produce zero-row surface tensors when
+    # ``surface_view_count < volume_view_count`` for a case (data loader
+    # behaviour, see DrivAerMLSurfaceDataset._indices). amax() on an empty
+    # last dim raises IndexError, so short-circuit to a ones-tensor — the
+    # downstream masked sums clamp the denominator to 1.0 and produce a
+    # zero loss for empty surfaces, matching the H39 baseline path.
+    if z.numel() == 0 or z.shape[-1] == 0:
+        w = torch.ones_like(z)
+        stats = {
+            "z_coord_weight_mean": 1.0,
+            "z_coord_weight_max": 1.0,
+            "z_coord_weight_min_nonpad": 1.0,
+            "z_max_batch": 0.0,
+        }
+        return w, stats
+    mask_f = surface_mask.to(device=z.device, dtype=z.dtype)
+    z_abs_masked = z.abs() * mask_f  # masked-out rows contribute 0 to max
+    z_max = z_abs_masked.amax(dim=-1, keepdim=True).clamp_min(1e-6)  # [B, 1]
+    w = 1.0 + alpha * (z.abs() / z_max)  # [B, N], in [1, 1+alpha] on masked rows
+    masked_w = w * mask_f  # ignore padded rows
+    n_pts = mask_f.sum().clamp_min(1.0)
+    stats = {
+        "z_coord_weight_mean": float(
+            (masked_w.sum() / n_pts).detach().cpu().item()
+        ),
+        "z_coord_weight_max": float(masked_w.max().detach().cpu().item()),
+        "z_coord_weight_min_nonpad": float(
+            (w * mask_f + (1.0 - mask_f) * 1e9).min().detach().cpu().item()
+        ),
+        "z_max_batch": float(z_max.max().detach().cpu().item()),
+    }
+    return w, stats
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -357,6 +463,8 @@ def train_loss(
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
     tau_z_loss_weight: float = 1.0,
+    use_z_coord_wss_weight: bool = False,
+    z_coord_weight_alpha: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -378,6 +486,15 @@ def train_loss(
     )
     if surface_curvature is not None:
         forward_kwargs["surface_curvature"] = surface_curvature
+    z_coord_weight = None
+    z_coord_weight_stats: dict[str, float] = {}
+    if use_z_coord_wss_weight:
+        # H140: per-point WSS reweighting by 1 + alpha * |z/z_max|.
+        # Computed in fp32 outside autocast to keep z_max stable; the tensor
+        # is cast inside the per-channel/Charbonnier helpers as needed.
+        z_coord_weight, z_coord_weight_stats = compute_z_coord_point_weight(
+            batch.surface_x, batch.surface_mask, z_coord_weight_alpha
+        )
     with autocast_context(device, amp_mode):
         out = model(**forward_kwargs)
         surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
@@ -408,9 +525,26 @@ def train_loss(
             # step) absorbs the scaling so r-ratios cancel; the lever then acts
             # through gradient magnitudes (c_per_task / G_bar) and the total
             # backward signal, not through r-renormalisation.
-            surface_per_ch = per_channel_masked_mse(
-                out["surface_preds"], surface_target, batch.surface_mask
-            ) * surface_loss_weight  # [4]: cp, tau_x, tau_y, tau_z
+            if z_coord_weight is not None:
+                # H140: cp (idx 0) stays unweighted; tau_x/y/z (idx 1-3) use
+                # per-point z-magnitude weighting. Concatenate them so the
+                # GradNorm task_losses tensor keeps shape [4].
+                cp_per_ch = per_channel_masked_mse(
+                    out["surface_preds"][..., :1],
+                    surface_target[..., :1],
+                    batch.surface_mask,
+                )  # [1]
+                wss_per_ch = per_channel_masked_mse_pointweighted(
+                    out["surface_preds"][..., 1:4],
+                    surface_target[..., 1:4],
+                    batch.surface_mask,
+                    z_coord_weight,
+                )  # [3]
+                surface_per_ch = torch.cat([cp_per_ch, wss_per_ch]) * surface_loss_weight
+            else:
+                surface_per_ch = per_channel_masked_mse(
+                    out["surface_preds"], surface_target, batch.surface_mask
+                ) * surface_loss_weight  # [4]: cp, tau_x, tau_y, tau_z
             # H36: Asymmetric tau_z boost. Multiply ONLY index 3 (tau_z) by
             # tau_z_loss_weight. Same pre-GradNorm injection point as H26 —
             # L0 absorbs the scaling so the lever acts through gradient
@@ -458,9 +592,18 @@ def train_loss(
                 raise ValueError(
                     f"Unknown wss_charbonnier_axes={wss_charbonnier_axes}"
                 )
-            loss_wss_charb = masked_charbonnier(
-                pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
-            )
+            if z_coord_weight is not None:
+                loss_wss_charb = masked_charbonnier_pointweighted(
+                    pred_wss,
+                    target_wss,
+                    batch.surface_mask,
+                    z_coord_weight,
+                    eps=wss_charbonnier_eps,
+                )
+            else:
+                loss_wss_charb = masked_charbonnier(
+                    pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
+                )
             loss_wss_mse_diag = masked_mse(pred_wss, target_wss, batch.surface_mask)
             loss = loss + wss_charbonnier_weight * loss_wss_charb
             charb_metrics = {
@@ -506,6 +649,7 @@ def train_loss(
     }
     metrics.update(charb_metrics)
     metrics.update(vol_p_charb_metrics)
+    metrics.update(z_coord_weight_stats)
     return loss, metrics, task_losses
 
 
@@ -752,6 +896,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     vol_p_charbonnier_weight=config.vol_p_charbonnier_weight,
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
                     tau_z_loss_weight=config.tau_z_loss_weight,
+                    use_z_coord_wss_weight=config.use_z_coord_wss_weight,
+                    z_coord_weight_alpha=config.z_coord_weight_alpha,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -832,6 +978,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 f"train/loss_{wss_axes_label}_charb_weighted": charb_w,
                                 f"train/loss_{wss_axes_label}_charb_to_mse_ratio": ratio_to_mse,
                                 f"train/loss_{wss_axes_label}_charb_weighted_to_mse_ratio": weighted_ratio,
+                            }
+                        )
+                    if "z_coord_weight_mean" in batch_loss_metrics:
+                        # H140 diagnostics: per-point WSS reweighting by |z|/z_max.
+                        train_log.update(
+                            {
+                                "train/z_weight/mean": batch_loss_metrics[
+                                    "z_coord_weight_mean"
+                                ],
+                                "train/z_weight/max": batch_loss_metrics[
+                                    "z_coord_weight_max"
+                                ],
+                                "train/z_weight/min_nonpad": batch_loss_metrics[
+                                    "z_coord_weight_min_nonpad"
+                                ],
+                                "train/z_weight/z_max_batch": batch_loss_metrics[
+                                    "z_max_batch"
+                                ],
+                                "train/z_weight/alpha": config.z_coord_weight_alpha,
                             }
                         )
                     if "loss_vol_p_charb_unweighted" in batch_loss_metrics:
