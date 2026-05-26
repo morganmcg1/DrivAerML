@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~10:00Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~10:55Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -19,7 +19,11 @@ Merge gate: val_abupt < 6.1358%, test_WSS ≤ 6.727%, test_VP ≤ 3.421%, test_S
 
 ### THE PROGRAM-WIDE FINDING
 
-**Any capacity addition at canonical 17.5M recipe val-overfits.**
+**Any perturbation off the H112 operating point causes slope-flattening — NOT JUST CAPACITY ADDITIONS (H143 update 2026-05-26 10:55Z).**
+
+**MAJOR UPDATE from H143 terminal C NULL (2026-05-26 10:55Z)**: H143 tau_z=4.0 loss-weight escalation (zero parameter overhead) produces SAME slope-flattening pathology as 3% overhead architecture changes. **The pathology is basin-geometry-driven, not overhead-driven.** Per-channel slope flattening was −0.130pp on WSS aggregate (H138 with 3% overhead: −0.135pp). All channels flattened, including non-escalated ones.
+
+**Original Wave 38 finding (kept for history)**: Any capacity addition at canonical 17.5M recipe val-overfits.
 
 All six Wave 38 mechanism classes exhausted:
 
@@ -42,7 +46,7 @@ All six Wave 38 mechanism classes exhausted:
 
 | Student | PR | Hypothesis | Status | Priority |
 |---|---|---|---|---|
-| frieren | #1332 | H143 tau_z=4.0 ESCALATE | WIP step 62,492 (88%) terminal ~09:50Z | HIGH — late-cosine WSS_z TIED H112 EMA |
+| frieren | #1332 | H143 tau_z=4.0 ESCALATE | **CLOSED C NULL** (test_WSS_z +0.175pp REGRESSION; first non-overhead slope-flattening) | reassigned to H164 SWA |
 | fern | #1334 | H144 tau_z=6.0 ESCALATE | WIP EP9 (70%) terminal ~09:20Z | **PROGRAM-PIVOTAL — first projected A WIN** |
 | alphonse | #1337 | H145 tau_y=3.0 axis-extension | WIP | HIGH — axis-extension validation |
 | edward | #1338 | H146 split WSS_y decoder | WIP | Monitor — paired-class to H138 |
@@ -57,12 +61,12 @@ All six Wave 38 mechanism classes exhausted:
 
 These are the ONLY mechanism families with unexhausted potential. **Zero capacity increase for any of them.**
 
-### 1. ESCALATE class (H143/H144/H145) — strongest current evidence
-- **H144 fern (tau_z=6.0) at EP9: projected val_abupt 6.087% UNDER merge gate, val_WSS_z LEAD −0.281pp, val_WSS_y LEAD −0.204pp — FIRST projected A WIN of Wave 38+39.**
-- 3-point monotone-accelerating response curve on val_WSS_z: H112 (2.0)→H143 (4.0) −0.045pp, H143→H144 (6.0) −0.114pp (2.5× larger increment).
-- H143 frieren (tau_z=4.0): late-cosine convergence; deficit progressively narrowed from EP3 +0.80pp to step 62,492 ESSENTIALLY TIED H112 EMA (9.370% vs 9.375%).
-- Mechanism: increase gradient pressure on hard channels (opposite of SOFTEN, which was anti-aligned).
-- **Verdict event: H144 terminal val→test slope at ~09:20Z. Wave 40 cascade depends on this.**
+### 1. ESCALATE class (H143/H144/H145) — H143 CLOSED, H144 HIGH RISK, H145 trending C NULL
+- **H143 tau_z=4.0 CLOSED C NULL** (2026-05-26 10:55Z): test_WSS +0.203pp, test_WSS_z +0.175pp REGRESSION on target channel. val→test slope flattened 33% on WSS_z (basin-geometry pathology, not overhead-driven).
+- **H144 fern (tau_z=6.0) HIGH RISK of identical pathology**: mid-train val signal was strong (LEAD −0.114pp at EP9) but val→test slope for H143 invalidated this projection. Terminal ~11:00Z is the verdict — likely C NULL given H143 precedent.
+- **H145 alphonse (tau_y=3.0) trending C NULL**: 7-checkpoint mechanism alive on val_WSS_y but magnitude decaying geometrically (~50%/epoch). Terminal val_WSS_y ≈ 7.607-7.608% (coin-flip on banked-partial). val_abupt MISS by ~22bp projected.
+- Mechanism: ESCALATE direction was hypothesized to push gradient pressure on hard channels. But static per-axis escalation produces basin-geometry pathology — same root cause as capacity/architecture interventions.
+- **If H144 also closes C NULL, the entire ESCALATE class is exhausted.** Wave 40 frontier shifts decisively to basin-geometry-targeting mechanisms.
 
 ### 2. GradNorm dynamic weighting (H147 thorfinn)
 - Task names: `("sp", "tau_x", "tau_y", "tau_z", "vp")`
@@ -83,10 +87,17 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - If alive: Lion sign-accumulation contributes to slope pathology; opens SOFTEN-class revisit with AdamW
 - If closed: pathology is optimizer-agnostic — further constrains the search space
 
-### 5. Cosine warm restarts (H157 nezuko — NEWLY ASSIGNED)
+### 5. Cosine warm restarts (H157 nezuko) — HIGHEST PRIORITY post H143 finding
 - **Mechanism class**: Scheduler-axis (first time tested in programme)
 - Hypothesis: single-cosine tail → flat-basin entrapment → slope flattening. SGDR restarts (T_0=4) force basin escape at EP5/EP9.
 - Requires ~10-line code change (CosineAnnealingLR → CosineAnnealingWarmRestarts in trainer_runtime.py)
+- **Elevated priority after H143**: this is the ONLY scheduled experiment directly targeting basin-geometry root cause.
+
+### 6. Stochastic Weight Averaging (H164 frieren — NEWLY ASSIGNED post H143)
+- **Mechanism class**: Averaging-axis basin discovery (Izmailov et al. 2018)
+- Hypothesis: EMA's geometric decay accumulates a sharp-minimum average. SWA's uniform averaging over the last K epochs (with constant low LR) lands in a flatter region of the loss landscape with better generalization.
+- Implementation: `torch.optim.swa_utils.AveragedModel` wrapper + SWALR scheduler activated at EP9 onward
+- **Compounds with H157**: SWA over warm-restart cycles is the canonical basin-discovery combination
 
 ### 5. Wave 40 contingency cascade (depends on H144 terminal)
 - **H144 A WIN**: H144 × H145 joint escalation (tau_z=6.0 + tau_y=3.0); H144 × H147 (escalate + GradNorm); continue magnitude curve to tau_z=8.0

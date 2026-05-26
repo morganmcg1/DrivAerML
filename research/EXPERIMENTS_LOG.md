@@ -1,3 +1,86 @@
+## 2026-05-26 ~10:50 — PR #1332: H143 TAU_Z LOSS WEIGHT 2.0→4.0 (frieren, **CLOSED C NULL** — all test metrics regress; **FIRST NON-CAPACITY-ADDING SLOPE-FLATTENING — major Wave 40 program finding**)
+
+- **Branch**: `frieren/h143-tau-z-loss-weight-4` (CLOSED, not merged)
+- **W&B run**: `l70lc2z3`
+- **Hypothesis**: Upweight tau_z loss 2.0→4.0 to push gradient pressure on the heaviest-error WSS channel (z-shear). H112 raw tau_z weight 2.0; 4.0 = 2× escalation.
+- **Parameter overhead**: 0 (single CLI flag change)
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,664)
+
+| Metric | H143 val | H143 test | H112 (val / test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---:|---|
+| abupt | **6.1998%** | **6.0204%** | 6.1358% / 5.839% | **+0.181pp** | val MISS gate +0.064pp ✗ |
+| **WSS** | **7.0392%** | **6.9545%** | — / 6.752% | **+0.203pp REGRESSION** | TEST_FLOOR 6.727%: MISS by +0.228pp ✗ |
+| WSS_x | 6.1942% | 6.1990% | — / 5.999% | +0.200pp | regression |
+| WSS_y | 7.7126% | 7.5931% | — / 7.360% | +0.233pp | regression |
+| **WSS_z** | **9.34%** | **8.8952%** | 9.375% / 8.720% | **+0.175pp REGRESSION on target channel** | dominant deficit ON DESIGNED CHANNEL |
+| VP | 3.5841% | 3.5578% | — / 3.421% | +0.137pp | FAIL floor |
+| SP | 4.1226% | 3.8568% | — / 3.695% | +0.162pp | FAIL floor |
+
+**Total wallclock**: 886.18 min = 14h 46m | **n_params**: 17.41M (canonical, zero overhead) | **Peak VRAM**: 76.3 GB
+
+### Slope-flattening signature on the target channel — basin-geometry pathology, NOT overhead-driven
+
+| Channel | H143 val→test slope | H112 val→test slope | Δ slope | Direction |
+|---|---:|---:|---:|---|
+| abupt | +0.180pp | +0.297pp | −0.117pp | flattened |
+| **WSS** | **+0.085pp** | **+0.215pp** | **−0.130pp** | **flattened 60%** |
+| WSS_x | +0.005pp | +0.093pp | −0.088pp | flattened |
+| WSS_y | +0.120pp | +0.248pp | −0.128pp | flattened |
+| **WSS_z** | **−0.440pp** | **−0.655pp** | **−0.215pp** | **flattened 33% on DESIGNED channel** |
+| VP | +0.026pp | +0.127pp | −0.101pp | flattened |
+| SP | +0.266pp | +0.360pp | −0.094pp | flattened |
+
+**ALL channels' slopes flattened**, even the channel with zero loss-weight change (sp, vp, tau_x). The slope flattening is **global**, not localized to the escalated channel.
+
+### MAJOR PROGRAM FINDING — slope-flattening is NOT just overhead-driven
+
+Prior cohort attribution placed slope-flattening as parameter-overhead-correlated:
+
+| Mechanism class | Overhead | WSS slope flattening |
+|---|---:|---:|
+| H132 (DP_max=0.15 reg) | 0% | null |
+| H135 (decoder-only SwiGLU) | 1.58% | −0.10pp |
+| H138 (split WSS_z decoder) | 3.02% | −0.135pp |
+| H120/H121 (depth-6/width-768) | 20-26% | −0.20pp |
+| **H143 (tau_z=4.0 escalation)** | **0%** | **−0.130pp** |
+
+**H143 contradicts the overhead-correlation hypothesis.** Zero parameter overhead, slope flattening of equivalent magnitude to H138 (3.02% overhead). The pathology is **basin-geometry-driven, mechanism-class-agnostic** — any perturbation off the H112 operating point (capacity, architecture, OR loss-weight) shifts the optimization trajectory into a different region of the landscape that converges to a different basin.
+
+### Mid-train val signal does NOT predict test transfer for static loss-weight escalation
+
+H143 mid-train val_WSS_z trajectory:
+- EP3: 10.306% (+0.80pp behind H112 raw)
+- EP9: 9.578% (−0.045pp LEAD vs H112 raw)
+- step 62,492: 9.370% (TIED with H112 EMA terminal 9.375%, Δ −0.005pp)
+- EP13 terminal: 9.340%
+
+**The val convergence to TIED was real**, but **test transfer was poor**: val 9.340% → test 8.895% (−0.44pp) vs H112 val 9.375% → test 8.720% (−0.655pp). Slope flattened 33%.
+
+**Operational lesson**: val signal mid-train cannot be projected to test_WSS by extrapolation alone. The val→test slope must be inferred from same-mechanism prior data; for novel mechanism classes, terminal test is the only verdict.
+
+### Wave 40 strategic update
+
+If H143's slope-flattening is basin-geometry-driven (not overhead-driven), then the productive Wave 40 frontier shifts:
+
+| Mechanism class | Wave 39 status | Wave 40 priority |
+|---|---|---|
+| Loss-weight ESCALATE (static) | H143 CLOSED, H144 pending | LOW — if H144 also closes, class CLOSED |
+| GradNorm (dynamic balancing) | H147 alive | HIGH — sidesteps static escalation |
+| Mirror aug (data invariance) | H148 alive | MEDIUM — gradient-budget redirection |
+| AdamW (optimizer swap) | H149 alive | HIGH — basin geometry per-optimizer |
+| **Cosine warm restarts (SGDR)** | **H157 just assigned** | **HIGHEST — directly targets basin-escape mechanism** |
+| Stochastic Weight Averaging | NEW Wave 40 — to assign | HIGHEST — averaging-axis basin discovery |
+| Sharpness-Aware Minimization (SAM) | NEW Wave 40 candidate | HIGHEST — but 2× wallclock cost |
+
+The Wave 40 frontier is now: **basin-geometry-targeting mechanisms** (warm restarts, SWA, SAM, AdamW, GradNorm-dynamic). Static per-axis loss-weight escalation is exhausted unless H144 produces a surprising win.
+
+### frieren reassignment
+
+frieren → **H164 Stochastic Weight Averaging (SWA)** — averaging mechanism complementary to EMA, designed for flat-basin discovery (Izmailov et al. 2018). Direct test of basin-geometry hypothesis.
+
+---
+
 ## 2026-05-26 ~09:40 — PR #1343: H150 EMA DECAY 0.9999 (nezuko, **CLOSED no_signal** — EMA composition lag too slow for 13-epoch training; kill threshold tripped at EP3 before hypothesis testable; mechanism UNTESTED not REFUTED)
 
 - **Branch**: `nezuko/h150-ema-0.9999` (CLOSED)
