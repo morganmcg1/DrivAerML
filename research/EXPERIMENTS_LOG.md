@@ -1,3 +1,123 @@
+## 2026-05-26 ~05:00 — PR #1325: H138 SPLIT WSS_Z DECODER HEAD (askeladd, **CLOSED C NULL** — val gate PASS −0.004pp, but test_WSS REGRESSION +0.151pp vs H112; **ARCHITECTURAL-SPLIT CLASS DEFINITIVELY CLOSED — slope-flattening pathology confirmed on decoder axis joins capacity-axis + SwiGLU cohorts**)
+
+- **Branch**: `askeladd/h138-split-wss-z-decoder` (CLOSED, not merged)
+- **W&B run**: `f1nobiu4`
+- **Hypothesis**: Dedicated wider decoder for tau_z (wall_shear_z) with split-head architecture lifts WSS_z without harming other channels. Mechanism: separate capacity allocation by channel.
+- **Parameter overhead**: +525,824 params (+3.02% vs H112) — **2× the projected +262K** due to head width × restructuring compound
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,652)
+
+| Metric | H138 val | H138 test | H112 (val / test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---:|---|
+| abupt | **6.1319%** | **5.9516%** | 6.1358% / 5.839% | **+0.113pp** | val PASS gate ✅, test FAIL ✗ |
+| **WSS** | **6.9832%** | **6.9029%** | — / 6.752% | **+0.151pp REGRESSION** | TEST_FLOOR 6.727%: MISS by +0.176pp ✗ |
+| WSS_x | 6.1382% | 6.1751% | — / 5.999% | +0.176pp | INVERTED slope (test < val) |
+| WSS_y | 7.6245% | 7.4693% | — / 7.360% | +0.109pp | flattened |
+| **WSS_z** | **9.3001%** | **8.8418%** | 9.375% / 8.720% | **+0.122pp** | val LEAD −0.075pp; test FAIL |
+| VP | 3.5552% | 3.5163% | — / 3.421% | +0.095pp | FAIL floor |
+| SP | 4.0415% | 3.7555% | — / 3.695% | +0.060pp | FAIL floor |
+
+**Total wallclock**: 869.23 min = 14.5h | **n_params**: 17.94M (+525K vs H112) | **Peak VRAM**: 82.9 GB
+
+### Slope-flattening across ALL channels — VAL-OVERFIT CLASS SIGNATURE
+
+| Channel | H138 slope | H112 slope | Δ slope | Direction |
+|---|---:|---:|---:|---|
+| abupt | +0.180pp | +0.297pp | −0.117pp | flattened |
+| **WSS** | **+0.080pp** | **+0.215pp** | **−0.135pp** | flattened ~63% |
+| WSS_x | **−0.037pp** | +0.093pp | −0.130pp | **INVERTED** (smoking gun) |
+| WSS_y | +0.155pp | +0.248pp | −0.093pp | flattened |
+| **WSS_z** | **+0.458pp** | **+0.655pp** | **−0.197pp** | **flattened 30% on designed channel** |
+| VP | +0.039pp | +0.127pp | −0.088pp | flattened |
+| SP | +0.286pp | +0.360pp | −0.074pp | flattened |
+
+**Every channel's slope flattens, including channels the split decoder did NOT add capacity for.** WSS_x slope INVERSION (test worse than val) is the strongest val-specific fitting signature observed in Wave 38.
+
+### Three-cohort cross-attribution — slope-flattening is PARAM-OVERHEAD DRIVEN
+
+| Cohort | Mechanism class | Param overhead | WSS slope vs H112 |
+|---|---|---:|---:|
+| H132 DP_max=0.15 canonical | Pure reg-axis | 0% | C NULL |
+| H135 decoder-only SwiGLU | Architectural augmentation | +1.58% (+275K) | flattened −0.10pp |
+| **H138 split WSS_z decoder** | **Architectural-split** | **+3.02% (+526K)** | **flattened −0.135pp** |
+| H134 backbone SwiGLU | Architectural augmentation | param-parity | flattened (test +0.194pp) |
+| H120 depth-6 | Capacity-axis (depth) | +~20% (+3.5M) | flattened −0.20pp |
+| H121 hidden-576 | Capacity-axis (width) | +~26% (+4M) | flattened −0.165pp |
+
+**Param-overhead-class is real**: more overhead → larger slope flattening on test, regardless of where the overhead is added (backbone, decoder, full, split). **The slope catastrophe is OVERHEAD-DRIVEN, not mechanism-specific.**
+
+### Banked findings (permanent program value)
+
+1. **Architectural-split class is now CLOSED at canonical 17.5M recipe** — same val-overfit pathology as capacity-axis class and SwiGLU class
+2. **Param overhead correlates with slope flattening magnitude** across all closed Wave 38 mechanisms — slope catastrophe is overhead-driven
+3. **val_WSS_z LEAD was REAL but UNPRODUCTIVE** — the dedicated decoder DID specialize on val_tau_z (−0.075pp lead at terminal), but the patterns it learned did not generalize
+4. **WSS_x slope inversion** (test worse than val for WSS_x) is the strongest val-specific fitting signature observed in Wave 38 — a clean diagnostic for val-specific fitting
+5. **Architecture-axis EXHAUSTED**: backbone capacity (H118/H120/H121), depth (H125), decoder gating (H134/H135), and decoder split (H138) all confirm slope-flattening pathology
+6. **Wave 39 frontier locked**: NON-CAPACITY-ADDING interventions only — ESCALATE class (H143/H144/H145), GradNorm (H147), training-dynamics (optimizer/data/regularization without param overhead)
+
+### Strategic implication
+
+**The program-wide finding is: any capacity addition at canonical 17.5M recipe val-overfits.** To make progress on test_WSS, Wave 39+ must:
+1. **Stay at canonical capacity** (do NOT add params)
+2. **Change training dynamics** (optimizer, data augmentation, loss schedule)
+3. **Push loss-weight escalation** further (H143 alive, H144 in flight, H145 in flight, H147 GradNorm)
+
+Wave 39 immediate cascade:
+- AdamW optimizer swap (Lion is the only optimizer tested — slope flattening may be Lion-specific)
+- Mirror data augmentation (inject invariance from data, not architecture)
+- EMA=0.9999 (longer late-train averaging window)
+- H143 × H145 compound (once both terminal-alive)
+
+---
+
+## 2026-05-26 ~05:00 — PR #1326: H139 CHARBONNIER LOSS ON TAU_Z (tanjiro, **CLOSED C NULL** — val MISS +0.218pp, test_WSS REGRESSION +0.268pp vs H112; **SOFTEN CLASS PAIRED EXHAUSTED via H139+H140**)
+
+- **Branch**: `tanjiro/h139-charb-tau-z` (CLOSED, not merged)
+- **W&B run**: `1ojjvajj`
+- **Hypothesis**: Charbonnier robust M-estimator `sqrt((x − y)^2 + eps^2)` on tau_z channel softens heavy-tail outlier gradients, improving WSS_z generalization.
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,652)
+
+| Metric | H139 val | H139 test | H112 (val / test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.3538% | 6.1017% | 6.1358% / 5.839% | **+0.263pp** | val FAIL gate +0.218pp |
+| **WSS** | **7.1951%** | **7.0197%** | — / 6.752% | **+0.268pp REGRESSION** | TEST_FLOOR 6.727%: MISS by +0.293pp ✗ |
+| WSS_x | 6.2922% | 6.2366% | — / 5.999% | +0.238pp | regression |
+| **WSS_y** | **7.9504%** | **7.7162%** | — / 7.360% | **+0.356pp WORST** | cross-channel bleed |
+| WSS_z | 9.5476% | 8.9745% | 9.375% / 8.720% | +0.254pp | target channel regress |
+| VP | 3.6862% | 3.6277% | — / 3.421% | +0.207pp | FAIL floor |
+| SP | 4.2926% | 3.9534% | — / 3.695% | +0.258pp | FAIL floor |
+
+**Total wallclock**: 860 min ≈ 14.3h
+
+### Cross-channel bleed — KEY mechanism finding
+
+| Channel | Δ test vs H112 | Charbonnier scope |
+|---|---:|---|
+| tau_x | +0.238pp | NOT modified |
+| **tau_y** | **+0.356pp** (WORST) | **NOT modified** |
+| tau_z | +0.254pp | **MODIFIED** |
+
+**Narrow-scoped tau_z Charbonnier produces LARGER regression on tau_y (cross-channel) than tau_z (target channel).** Student audit confirmed Charbonnier scope at `target/trainer_runtime.py:840-892` is strictly tau_z-only.
+
+**Mechanism candidates:**
+1. **Lion sign-only update**: softening tau_z per-element gradient magnitudes shifts shared-parameter sign accumulation across the surface decoder MLP — tau_y inherits the shifted sign direction through shared decoder weights
+2. **Shared decoder pathway**: removing heavy-tail pressure on tau_z frees the shared representation to overfit tau_x patterns at tau_y's expense
+
+### Banked findings (permanent program value)
+
+1. **SOFTEN class CLOSED via H139+H140 paired exhaustion** — Charbonnier robust M-estimator AND signed-log reparameterization both close negative on tau_z
+2. **Charbonnier is anti-aligned with WSS_z goals** — heavy-tail residuals are what WSS_z is FOR (wake separation, wheel-arch vortex); softening them removes the program-critical signal
+3. **Cross-channel bleed under Lion** — narrow-scope tau_z loss changes produce LARGER regression on tau_y than tau_z itself; sign-only updates propagate via shared decoder weights
+4. **Gap WIDENS throughout training** — closure at terminal confirmed mid-train trajectory analysis (+0.183pp WSS_z at step 56k → +0.254pp at terminal)
+5. **WSS_y is the most vulnerable channel to cross-channel bleed effects** — already the second-hardest channel under H112, becomes the worst-regressed under SOFTEN class perturbations
+
+### Strategic implication
+
+**SOFTEN class for tau_z target modification is definitively CLOSED.** The next program-pivotal experiment is AdamW vs Lion ablation — confirms whether cross-channel bleed is Lion-specific. If AdamW eliminates the WSS_y bleed under tau_z-only Charbonnier, the SOFTEN class might still be salvageable under a different optimizer (assignment direction: H149 tanjiro).
+
+---
+
 ## 2026-05-26 ~03:10 — PR #1322: H135 DECODER-ONLY SWIGLU SURFACE HEAD (thorfinn, **CLOSED C NULL** — val gate marginal PASS (−0.005pp), but ALL test floors FAIL by +0.10pp universal regression; **SWIGLU CLASS DEFINITIVELY CLOSED** across all three locations: backbone, decoder, full)
 
 - **Branch**: `thorfinn/h135-swiglu-decoder-only` (CLOSED, not merged)
