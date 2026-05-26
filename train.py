@@ -139,6 +139,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    mirror_augmentation: bool = False
     debug: bool = False
 
 
@@ -237,6 +238,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the attention and MLP branches with a linear schedule from "
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
+        ),
+        "mirror_augmentation": (
+            "H148: Train-time y=0 yaw-mirror augmentation. DrivAerML is "
+            "bilaterally symmetric (symmetry-plane BC at y=0), so every case "
+            "has an exact physically valid mirror twin. Each train sample is "
+            "independently flipped with prob 0.5: negate y/normal_y in "
+            "surface_x and y in volume_x; negate tau_y in surface_y; cp, "
+            "tau_x, tau_z, panel_area, sdf, volume_pressure are invariant. "
+            "Off for val/test. Tests whether the val-overfit slope-flattening "
+            "pathology is a data-memorization artifact addressable by zero-"
+            "parameter data invariance injection."
         ),
     }
     for field in fields(Config):
@@ -693,6 +705,7 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        mirror_augmentation=config.mirror_augmentation,
     )
     train_sampler = None
     train_shuffle = True
