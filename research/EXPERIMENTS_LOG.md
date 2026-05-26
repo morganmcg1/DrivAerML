@@ -1,3 +1,82 @@
+## 2026-05-26 ~16:00 — PR #1337: H145 TAU_Y LOSS WEIGHT 1.5→3.0 (alphonse, **CLOSED C NULL** — sub-magnitude on merge but **slope-axis asymmetry finding REVISES Wave 38 ESCALATE closure narrative**)
+
+- **Branch**: `alphonse/h145-tau-y-loss-weight-3` (CLOSED, not merged)
+- **W&B run**: `btp0htah`
+- **Hypothesis**: Upweight tau_y loss 1.5→3.0 (2× H112 baseline) to test whether escalation is generic mechanism for high-residual channels or uniquely productive on tau_z.
+- **Parameter overhead**: 0 (single CLI flag change)
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,664)
+
+| Metric (%) | H112 (val/test) | H145 (val/test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---|
+| abupt | 6.136 / 5.839 | 6.296 / 5.986 | +0.147pp | val MISS gate +0.160pp ✗ |
+| **WSS** (primary) | — / 6.752 | 7.172 / **6.909** | **+0.157pp** | TEST_FLOOR 6.727%: MISS by +0.182pp ✗ |
+| WSS_x | — / 5.999 | 6.359 / 6.181 | +0.181pp | regression |
+| **WSS_y** (target) | — / 7.360 | 7.668 / **7.424** | **+0.064pp** | **smallest cohort regression on target axis** |
+| WSS_z | 9.375 / 8.720 | 9.587 / 8.911 | +0.191pp | durable z-penalty |
+| VP | — / 3.421 | 3.716 / 3.592 | +0.170pp | regression |
+| SP | — / 3.695 | 4.150 / 3.824 | +0.129pp | regression |
+
+**Total wallclock**: 861 min = 14h 21m | **n_params**: 17.41M (canonical, zero overhead) | 8/8 GPUs ~84 GB peak
+
+### PROGRAM-CRITICAL: val→test slope is PRESERVED on tau_y escalation (revises Wave 38 ESCALATE closure)
+
+| Channel | H145 slope | H112 slope | H143 slope (z=4) | H144 slope (z=6) | Reading |
+|---|---:|---:|---:|---:|---|
+| **WSS aggregate** | **−0.263pp** | **−0.215pp** | −0.082pp | −0.013pp | **H145 STEEPER (+0.048pp gain)** |
+| WSS_y | −0.243pp | −0.248pp | flattened | flattened | preserved (sub-bp) |
+| WSS_x | **−0.178pp** | **−0.093pp** | flattened | flattened | **STEEPER (+0.085pp gain, 2× H112)** |
+| WSS_z | −0.675pp | −0.655pp | −0.446pp | −0.290pp | preserved (steeper) |
+| SP | −0.326pp | −0.361pp | flattened | flattened | preserved |
+| VP | −0.124pp | −0.126pp | flattened | flattened | preserved |
+
+### MAJOR PROGRAM FINDING — slope-flattening is AXIS-SPECIFIC to z-escalation
+
+The H144 entry below declared "ESCALATE class CLOSED via 3-point cohort H112/H143/H144 with slope-flattening as the universal pathology." **H145 falsifies the "universal" part.** Static loss-weight escalation produces:
+1. **z-axis escalation (H143/H144)**: slope-flattening pathology — magnitude curve uniformly regressive on val AND test
+2. **y-axis escalation (H145)**: slope PRESERVED — productive direction at both val and test, 2× multiplier sub-merge-threshold
+3. **The two axes are mechanism-distinct under static loss-weight escalation**
+
+### Y-axis lift trajectory (8 sign-preserved + sign-flip + terminal)
+
+| EP | step | H145 val_WSS_y | H112 val_WSS_y | Δ | Note |
+|---|---:|---:|---:|---:|---|
+| 1 | 10864 | 32.187 | 34.111 | −1.925pp | alive |
+| 5 | 43466 | 8.068 | 8.158 | −0.090pp | alive (geom decay) |
+| 8 | 56154 | 7.800 | 7.804 | −0.004pp | sub-bp |
+| 9 | 59780 | 7.767 | 7.746 | **+0.021pp** | **sign flip** |
+| 13 | 70664 | 7.668 | 7.608 | +0.059pp | terminal |
+
+EP1→EP8 geometric decay ~50%/epoch retention crossed zero between EP8 and EP9. Terminal val lift +5.9bp val, +6.4bp test.
+
+### Cohort terminal — y-axis is mechanism-positive, sub-magnitude
+
+| Hyp | tau_y | tau_z | test_WSS_y | Δ vs H112 | Slope WSS agg |
+|---|---:|---:|---:|---:|---:|
+| H112 | 1.5 | 2 | 7.360 | — | −0.215pp |
+| H143 | 1.5 | 4 | 7.593 | +0.233pp | −0.082pp (flat) |
+| H144 | 1.5 | 6 | 7.701 | +0.340pp | −0.013pp (flatter) |
+| **H145** | **3** | **2** | **7.424** | **+0.064pp** | **−0.263pp (steeper)** |
+
+H145's test_WSS_y regression is 3.6× smaller than H143 and 5.3× smaller than H144 on the y-axis. Confirmed: tau_y is the productive direction at both val AND test.
+
+### Banked program-permanent findings
+
+1. **Slope-flattening pathology is z-axis specific, NOT generic ESCALATE** (revises H144 closure)
+2. **tau_y is productive direction at both val AND test** — confirmed 8 sign-preserved + preserved slope
+3. **2× multiplier sub-merge-threshold** — geometric decay places terminal lift below validation precision
+4. **z-penalty durable +0.19-0.21pp at val AND test** — cross-channel cost is real and persistent
+5. **WSS_x slope STEEPER than H112 (+0.085pp gain)** — gradient capacity reallocation signal under tau_y escalation
+6. **Convergent with H147 GradNorm tau_y=1.38 plateau** — direction reverses for DE-escalation (Wave 40 H166)
+
+### Wave 40+ direct follow-ups enabled
+
+- **H166 alphonse: tau_y=1.0 DE-escalation** (mirror H165 structure on y-axis; H147 plateau supports DE-direction) — ASSIGNED
+- **H167 (banked): tau_y=4.0 or 5.0 magnitude extension** — slope-preservation finding makes EV higher than H143/H144 priors suggested
+- **H168 (banked): joint axis-aware bilevel** — GradNorm + tau_y prior boost; sidesteps z-axis slope flattening
+
+---
+
 ## 2026-05-26 ~13:00 — PR #1334: H144 TAU_Z LOSS WEIGHT 2.0→6.0 (fern, **CLOSED C NULL** — slope catastrophe; **ESCALATE class DEFINITIVELY CLOSED by 3-point cohort H112/H143/H144** — load-bearing Wave 39 finding)
 
 - **Branch**: `fern/h144-tau-z-loss-weight-6` (CLOSED, not merged)

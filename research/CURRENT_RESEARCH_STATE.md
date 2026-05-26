@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~13:10Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~16:05Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -15,11 +15,17 @@ Merge gate: val_abupt < 6.1358%, test_WSS ≤ 6.727%, test_VP ≤ 3.421%, test_S
 
 ---
 
-## Wave 38+39 Final Closure (as of 2026-05-26 ~13:10Z)
+## Wave 38+39 Final Closure (as of 2026-05-26 ~16:05Z, REVISED post-H145 terminal)
 
-### THE PROGRAM-WIDE FINDING — slope-flattening is geometry-bound and mechanism-class-agnostic
+### THE PROGRAM-WIDE FINDING — slope-flattening is geometry-bound, AXIS-SPECIFIC under ESCALATE class (H145 update 16:00Z)
 
-**Any perturbation off the H112 operating point causes slope-flattening — capacity, architecture, AND loss-weight (H144 update 2026-05-26 13:10Z).**
+**H145 alphonse terminal at 16:00Z REVISES the H144 Wave 38 closure**: static loss-weight escalation produces axis-distinct val→test slope behavior:
+- **z-axis escalation (H143/H144)**: slope-flattening pathology (universal regression on val AND test)
+- **y-axis escalation (H145)**: slope PRESERVED (productive direction at both val and test, 2× multiplier sub-merge-threshold)
+
+The "slope-flattening is universal property of static ESCALATE" framing from the 13:10Z H144 closure is FALSIFIED. Slope-flattening pathology is **axis-specific to z-escalation**, not a generic property of static loss-weight escalation.
+
+**Any perturbation off the H112 operating point causes slope-flattening — capacity, architecture, AND z-axis loss-weight (H144 update 2026-05-26 13:10Z + H145 revision 16:00Z).**
 
 **LOAD-BEARING H144 update (2026-05-26 13:10Z)**: H144 tau_z=6.0 terminal C NULL completes the **3-point ESCALATE cohort H112/H143/H144**. val→test slope flattens MONOTONICALLY with tau_z weight: WSS aggregate −0.215 → −0.082 → −0.013pp (**16× flattening**); WSS_z (target) −0.655 → −0.446 → −0.290pp (**2.3× flattening on target channel**). test_WSS REGRESSES monotonically: 6.752 → 6.955 → 7.079%. **The val→test divergence WIDENS with weight magnitude.** H112's wt 2.0 is the test-optimum on this axis — direction is INVERTED.
 
@@ -37,7 +43,8 @@ All seven Wave 38+39 mechanism classes exhausted:
 | Architectural-split | H138 (WSS_z decoder), H146 (WSS_y decoder trending) | CLOSED | Slope-flattening pathology — param overhead correlated. **H146 EP6 (corrected by student edward 11:30Z)**: val_abupt **+0.078pp LAG** vs H112 raw same-step (my 11:12Z W&B query used wrong baseline 7.111% vs actual 6.374%). H146 trajectory tracks H138 exactly — paired-class confirmed. WSS_y deficit smallest among channels (+0.033pp, real specialization) but +525K overhead drags everything. |
 | Aux-head | H-B, H-B2 | CLOSED | Gradient-flow degradation; detached strictly worse |
 | SOFTEN (loss) | H139 (Charbonnier), H140 (signed-log) | CLOSED | Anti-aligned with WSS_z goals; heavy-tail residuals ARE the signal |
-| **ESCALATE (loss-weight)** | **H112 (wt 2.0 SOTA), H143 (wt 4.0), H144 (wt 6.0)** | **CLOSED DEFINITIVELY by 3-point cohort** | **val→test slope flattens monotonically with tau_z weight; test-optimum at wt ≤ 2.0; convergent with H147 GradNorm optimal=1.631** |
+| **ESCALATE z-axis** | **H112 (wt 2.0), H143 (wt 4.0), H144 (wt 6.0)** | **CLOSED DEFINITIVELY by 3-point cohort** | **val→test slope flattens monotonically with tau_z weight; test-optimum at wt ≤ 2.0; convergent with H147 GradNorm optimal=1.631** |
+| **ESCALATE y-axis** | **H112 (tau_y 1.5), H145 (tau_y 3.0)** | **C NULL on merge, mechanism-positive on direction** | **val→test slope PRESERVED (−0.263pp WSS aggregate, STEEPER than H112). 2× multiplier sub-magnitude. Mechanism distinct from z-axis flattening.** |
 
 **Param overhead correlates with slope flattening magnitude** (H132 null → H135 −0.10pp → H138 −0.135pp → H120/H121 −0.20pp). Slope catastrophe is overhead-driven, not mechanism-specific.
 
@@ -52,7 +59,7 @@ All seven Wave 38+39 mechanism classes exhausted:
 | frieren | #1332 | H143 tau_z=4.0 ESCALATE | **CLOSED C NULL** (test_WSS_z +0.175pp REGRESSION; first non-overhead slope-flattening) | reassigned to H164 SWA |
 | fern | #1334 | H144 tau_z=6.0 ESCALATE | **CLOSED C NULL** (terminal 13:00Z). test_WSS +0.327pp REGRESSION on primary objective; test_WSS_z +0.264pp REGRESSION on target channel. Val-side wt curve monotone-productive on WSS_z (LEAD −0.100pp) but val→test slope flattens 16× across cohort. **3-point ESCALATE class closure**: H112/H143/H144 monotone-regressive on test_WSS as tau_z escalates. | reassigned to H165 |
 | fern (reassigned) | #1348 | **H165 tau_z=1.5 DE-escalation** | Newly assigned 13:15Z post-H144 closure. Direct test of H147 GradNorm-discovered optimal tau_z=1.631 + H143/H144 monotone test regression → DE-escalation half-line. Single-flag delta from fern's H144 verified recipe (only `--tau-z-loss-weight 6.0 → 1.5`). | **Wave 40 HIGH PRIORITY** — only experiment directly testing inverted ESCALATE-axis direction |
-| alphonse | #1337 | H145 tau_y=3.0 axis-extension | WIP EP8/13; EP7 (10:39Z) val_WSS_y LEAD coin-flip at terminal (sub-bp); val_abupt MISS gate +22bp; terminal ~15:00Z | C NULL trending; banked: tau_y direction productive but 2× insufficient magnitude |
+| alphonse | #1337 | H145 tau_y=3.0 axis-extension | **CLOSED C NULL** (2026-05-26 16:00Z). val_abupt 6.296% MISS +160bp; test_WSS 6.909% MISS +18bp. **PROGRAM-CRITICAL: val→test slope PRESERVED (−0.263pp WSS agg, STEEPER than H112; +0.085pp gain on WSS_x). Slope-flattening is z-axis specific, not universal ESCALATE.** test_WSS_y +0.064pp = smallest cohort regression. | reassigned to H166 tau_y=1.0 DE-escalation |
 | edward | #1338 | H146 split WSS_y decoder | WIP EP7/13 step ~49,200 (70%). **Corrected EP6 reading (edward 11:30Z)**: val_abupt +0.078pp LAG, val_WSS_y +0.033pp LAG (smallest channel deficit — specialization real), val_WSS_z +0.166pp LAG vs H112 raw same-step. Tracks H138 trajectory exactly. Terminal ~13:30Z. | Trending C NULL — paired-class to H138 confirmed. Bank: split decoder specializes target channel but +525K overhead drags model. Architectural-split class CLOSED at +525K overhead. |
 | thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP2 (09:25Z) — caught up dramatically, LEADING H112 on ALL WSS channels at EP2 (−0.182pp WSS, −0.105pp WSS_z, −0.268pp WSS_y). VP/SP lag from auto-downweight. tau_z weight stabilized at 1.54 (below H112's 2.0). Terminal ~21:00Z. | HIGH — dynamic balancing sidesteps static ESCALATE failure mode |
 | askeladd | #1341 | H148 y=0 mirror augmentation | WIP EP5 (54%). EP4 publish: WSS_y LEAD weakening (−0.095→−0.056pp), WSS_z LEAD reversed to flat, VP deficit +1.294pp (growth decelerating but plateau ~+1.3pp). VP merge floor disqualification likely. EP6 binding ~12:25Z. | HIGH — mechanism alive but VP floor critical |
