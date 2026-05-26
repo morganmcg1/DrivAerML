@@ -1,5 +1,35 @@
 # SENPAI Research State
 
+## 2026-05-26 05:50Z — H140 EP15 leads H39 (+wd-drift mechanism interaction insight) + H146 EP3 borderline
+
+**H140 tanjiro EP15 GATE PASSED with positive H39-comparison signal.** val_WSS=6.7615% — **leading H39 EP15 (6.7956%) by -0.034pp**. The H140 mechanism (wd-drift + z-coord-weighted WSS loss) IS producing late-epoch gains, despite the wd-only H146 (no mechanism) being +0.10pp WORSE than H39 at EP3.
+
+**Refined attribution picture (more nuanced than EP1 alone):**
+
+| Run | Drifts | Mechanism | EP3 vs H39 | EP15 vs H39 | Conclusion |
+|-----|--------|-----------|-----------:|------------:|------------|
+| H146 (`9aeprogu`) | wd only | none | +0.10pp | TBD | wd alone slightly hurts early |
+| H145 (`1mpz6zlp`) | none | curvature-Charb-z | +0.14pp (kill) | — | mechanism null early |
+| H140 (`jtyglnxu`) | wd | z-coord-weighted WSS | TBD | **-0.034pp ✓** | wd+z-coord helps late |
+| H138 (`4m8f7rme`) | wd+β₁+β₂ | curv-Charb-z | -0.21pp | -0.044pp | 3 drifts + mech, strongest |
+
+**Updated insight**: The wd-drift may be NEUTRAL (or slightly harmful) at early epochs but BENEFICIAL at late epochs. The β-drift appears to drive the early-epoch advantage (per H146 EP1=18.27% ruling out wd as early driver). Late-epoch behavior may benefit from BOTH wd reduction AND the mechanism (z-coord or curvature). The early-vs-late asymmetry is a real phenomenon worth investigating.
+
+**H146 EP3=7.3018%** passes the loose 7.40% hard-abort gate but is +0.10pp worse than H39. Likely to fail the EP6>7.00% gate (projected ~7.10%). Student will close at EP6 if so.
+
+**H140 VP-floor concern remains**: val_VP=3.7839% at EP15 — still +0.14pp ABOVE the 3.643% floor. If H140 terminal lands with VP>3.643%, it's not a valid submission even with strong WSS.
+
+## H147 lion-β-only ablation — STILL the highest-priority next experiment
+
+H147 (clean H39 + ONLY `--lion-beta1 0.95 --lion-beta2 0.98`) remains the cleanest test for early-epoch β contribution. To dispatch to dl24-nezuko after H146 closes (likely at EP6 ~06:30Z).
+
+## Active fleet snapshot (2026-05-26 05:50Z)
+
+- **#1324 H138 frieren** (EP21 of 30, `4m8f7rme`): val_WSS=6.7565%, leading H39 EP21 by -0.021pp. Descent resumed after EP20 noise. Terminal ETA ~14:00Z.
+- **#1329 H140 tanjiro** (EP15 of 30, `jtyglnxu`): val_WSS=6.7615%, leading H39 EP15 by -0.034pp ✓. VP-floor concern (3.7839%). Continue to terminal ETA ~13:30Z.
+- **#1335 H144 fern** (EP6 of 30, `wybzhel9`): val_primary=7.43% (+0.48pp behind H39), val_ema=7.14% (+0.20pp behind H39). EMA mechanism functioning correctly but primary unexpectedly slow. Continue to EP10 gate.
+- **#1339 H146 nezuko** (EP3 of 30, `9aeprogu`): val_WSS=7.30% (+0.10pp behind H39). Passes 7.40% hard-abort but borderline. EP6 gate may trip.
+
 ## 2026-05-26 05:30Z — H146 wd-only EP1 BREAKING: wd-drift is NOT the driver, lion-β is
 
 **Critical new data point.** H146 (`9aeprogu`, clean H39 + ONLY `--weight-decay 0.0001`) just logged EP1:
