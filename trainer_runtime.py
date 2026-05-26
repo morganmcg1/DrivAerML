@@ -1311,6 +1311,36 @@ def build_lr_scheduler(
     )
 
 
+def build_swa_components(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    config,
+) -> tuple[nn.Module | None, torch.optim.lr_scheduler.LRScheduler | None]:
+    """Construct an AveragedModel + SWALR pair for Stochastic Weight Averaging.
+
+    Izmailov et al. 2018 (https://arxiv.org/abs/1803.05407): after a burn-in,
+    switch to a constant low LR and uniformly average the model weights over
+    the remaining epochs. The averaged model lands in a flatter region of the
+    loss landscape than any single snapshot.
+
+    Wrapping convention: pass the *unwrapped* base model (no DDP, no compile).
+    DDP keeps base_model.parameters() synchronized across ranks via gradient
+    allreduce, so per-rank `update_parameters` produces identical SWA weights
+    on every rank. AveragedModel deepcopies the module, so its parameters are
+    independent storage from the live training weights.
+    """
+    if not getattr(config, "use_swa", False):
+        return None, None
+    swa_model = torch.optim.swa_utils.AveragedModel(model)
+    swa_scheduler = torch.optim.swa_utils.SWALR(
+        optimizer,
+        anneal_strategy="linear",
+        anneal_epochs=max(1, int(getattr(config, "swa_anneal_epochs", 1))),
+        swa_lr=float(getattr(config, "swa_lr", 1e-5)),
+    )
+    return swa_model, swa_scheduler
+
+
 def global_grad_norm(parameters: Iterable[torch.nn.Parameter], device: torch.device) -> torch.Tensor:
     total = torch.zeros((), device=device, dtype=torch.float32)
     for param in parameters:
@@ -1355,6 +1385,11 @@ def define_wandb_metrics() -> None:
         "full_val_primary/*",
         "test/*",
         "test_primary/*",
+        "full_val_swa/*",
+        "full_val_swa_primary/*",
+        "test_swa/*",
+        "test_swa_primary/*",
+        "swa/*",
         "train/slope/*",
         "val/slope/*",
         "full_val/slope/*",
@@ -1519,3 +1554,115 @@ def run_final_evaluation(
         test_metrics=test_metrics,
         n_params=n_params,
     )
+
+
+def run_swa_evaluation(
+    *,
+    run,
+    swa_model: nn.Module,
+    train_loader: DataLoader,
+    config,
+    transform: TargetTransform,
+    device: torch.device,
+    final_val_loaders: dict[str, DataLoader],
+    final_test_loaders: dict[str, DataLoader],
+    global_step: int,
+    output_dir: Path,
+    swa_active_epochs: int,
+) -> None:
+    """Final evaluation cohort for the SWA-averaged model.
+
+    Logs full_val_swa/* and test_swa/* in parallel to the EMA cohort
+    (full_val/* and test/*), so SWA-vs-EMA basin-geometry comparisons can
+    be read directly off W&B without rerunning training.
+
+    DrivAerML uses GroupNorm only, so `torch.optim.swa_utils.update_bn` has
+    no momenta to refresh and returns early before iterating the loader; we
+    still skip the call defensively because the loader yields SurfaceBatch
+    objects rather than the (input, target) tuples update_bn expects.
+    """
+    if swa_active_epochs <= 0 or int(swa_model.n_averaged.item()) == 0:
+        print("SWA: no SWA-active epochs completed; skipping SWA evaluation.")
+        wandb.summary.update(
+            {
+                "swa/active_epochs": float(swa_active_epochs),
+                "swa/n_averaged": float(int(swa_model.n_averaged.item())),
+                "swa/skipped": 1.0,
+            }
+        )
+        return
+
+    bn_modules = [
+        m for m in swa_model.modules() if isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
+    ]
+    if bn_modules:
+        torch.optim.swa_utils.update_bn(train_loader, swa_model, device=device)
+        print(f"SWA: refreshed BN running stats over {len(bn_modules)} BN modules.")
+    else:
+        print("SWA: no BatchNorm modules detected; skipping update_bn (GroupNorm-only model).")
+
+    swa_path = output_dir / f"swa_{run.id}.pt"
+    torch.save(
+        {
+            "swa_model": swa_model.module.state_dict(),
+            "n_averaged": int(swa_model.n_averaged.item()),
+            "swa_active_epochs": int(swa_active_epochs),
+            "swa_start_epoch": int(getattr(config, "swa_start_epoch", -1)),
+            "swa_lr": float(getattr(config, "swa_lr", 0.0)),
+            "swa_anneal_epochs": int(getattr(config, "swa_anneal_epochs", 0)),
+            "config": asdict(config),
+        },
+        swa_path,
+    )
+    print(
+        f"SWA: averaged {swa_active_epochs} epoch(s) "
+        f"(n_averaged={int(swa_model.n_averaged.item())}); saved to {swa_path}"
+    )
+
+    full_val_metrics = {
+        name: evaluate_split(swa_model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in final_val_loaders.items()
+    }
+    full_val_log: dict[str, object] = {
+        "global_step": global_step,
+        "swa/active_epochs": float(swa_active_epochs),
+        "swa/n_averaged": float(int(swa_model.n_averaged.item())),
+        **{
+            f"full_val_swa_primary/{key}": full_val_metrics["val_surface"][key]
+            for key in PRIMARY_METRIC_KEYS
+        },
+    }
+    for split_name, metrics in full_val_metrics.items():
+        full_val_log.update(metric_namespace("full_val_swa", split_name, metrics))
+    try:
+        assert_required_finite_metrics(full_val_log, "full_val_swa_primary")
+    except RuntimeError as exc:
+        wandb.summary.update({"swa/invalid": 1.0, "swa/invalid_reason": str(exc)})
+        raise
+    wandb.log(full_val_log)
+    wandb.summary.update(numeric_metric_items(full_val_log))
+    print_metrics("full_val_swa", full_val_metrics["val_surface"])
+
+    test_metrics = {
+        name: evaluate_split(swa_model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in final_test_loaders.items()
+    }
+    test_log: dict[str, object] = {
+        "global_step": global_step,
+        "swa/active_epochs": float(swa_active_epochs),
+        "swa/n_averaged": float(int(swa_model.n_averaged.item())),
+        **{
+            f"test_swa_primary/{key}": test_metrics["test_surface"][key]
+            for key in PRIMARY_METRIC_KEYS
+        },
+    }
+    for split_name, metrics in test_metrics.items():
+        test_log.update(metric_namespace("test_swa", split_name, metrics))
+    try:
+        assert_required_finite_metrics(test_log, "test_swa_primary")
+    except RuntimeError as exc:
+        wandb.summary.update({"swa/invalid": 1.0, "swa/invalid_reason": str(exc)})
+        raise
+    wandb.log(test_log)
+    wandb.summary.update(numeric_metric_items(test_log))
+    print_metrics("test_swa", test_metrics["test_surface"])

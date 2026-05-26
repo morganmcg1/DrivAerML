@@ -40,6 +40,7 @@ from trainer_runtime import (
     TargetTransform,
     autocast_context,
     build_lr_scheduler,
+    build_swa_components,
     check_kill_thresholds,
     cleanup_distributed,
     collect_gradient_metrics,
@@ -61,6 +62,7 @@ from trainer_runtime import (
     primary_metric_log,
     print_metrics,
     run_final_evaluation,
+    run_swa_evaluation,
     should_update_best_checkpoint,
     timeout_budget_minutes,
     unwrap_model,
@@ -115,6 +117,13 @@ class Config:
     ema_decay: float = 0.999
     ema_start_step: int = 50
     eval_raw_vs_ema: bool = False
+    # SWA (Izmailov et al. 2018, https://arxiv.org/abs/1803.05407): after
+    # swa_start_epoch, switch the LR schedule to a constant swa_lr and average
+    # the model weights uniformly at the end of each remaining epoch.
+    use_swa: bool = False
+    swa_start_epoch: int = 9
+    swa_lr: float = 1e-5
+    swa_anneal_epochs: int = 1
     lr_warmup_epochs: int = 0
     lr_cosine_t_max: int = 0
     lr_min: float = 1e-6
@@ -793,6 +802,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        swa_model, swa_scheduler = build_swa_components(base_model, optimizer, config)
+        swa_active_epochs = 0
+        if swa_model is not None and state.is_main:
+            print(
+                f"SWA enabled: start_epoch={config.swa_start_epoch} "
+                f"swa_lr={config.swa_lr:g} anneal_epochs={config.swa_anneal_epochs} "
+                f"(uniform-mean averaging at end of each SWA-active epoch; "
+                f"DDP keeps params synced so per-rank averaging produces identical weights)"
+            )
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
@@ -1055,7 +1073,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
-                current_lr = scheduler.get_last_lr()[0]
+                # Read LR from the optimizer directly so SWA-active epochs (where
+                # swa_scheduler controls the LR and cosine `scheduler` is no
+                # longer stepped) still report the correct value.
+                current_lr = optimizer.param_groups[0]["lr"]
                 loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
                 skip_step = distributed_any(state, loss_is_nonfinite, device)
                 should_log_model_telemetry = (
@@ -1186,7 +1207,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                         )
                     break
 
-            scheduler.step()
+            # SWA replaces the cosine scheduler from swa_start_epoch onward and
+            # snapshots the current weights into the running uniform mean once
+            # per epoch, after the last optimizer step.
+            if swa_model is not None and epoch >= config.swa_start_epoch:
+                swa_model.update_parameters(base_model)
+                swa_scheduler.step()
+                swa_active_epochs += 1
+            else:
+                scheduler.step()
             epoch_train_loss = train_loss_sum / max(n_batches, 1)
             dt = time.time() - t0
             peak_gb = torch.cuda.max_memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
@@ -1199,10 +1228,13 @@ def main(argv: Iterable[str] | None = None) -> None:
 
             log_metrics: dict[str, object] = {
                 "train/epoch_loss": epoch_train_loss,
-                "train/lr": scheduler.get_last_lr()[0],
-                "lr": scheduler.get_last_lr()[0],
+                "train/lr": optimizer.param_groups[0]["lr"],
+                "lr": optimizer.param_groups[0]["lr"],
                 "epoch_time_s": dt,
                 "global_step": global_step,
+                "swa/active": 1.0 if (swa_model is not None and epoch >= config.swa_start_epoch) else 0.0,
+                "swa/active_epochs": float(swa_active_epochs),
+                "swa/n_averaged": float(int(swa_model.n_averaged.item())) if swa_model is not None else 0.0,
             }
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
@@ -1390,6 +1422,20 @@ def main(argv: Iterable[str] | None = None) -> None:
             global_step=global_step,
             total_minutes=total_minutes,
         )
+        if swa_model is not None:
+            run_swa_evaluation(
+                run=run,
+                swa_model=swa_model,
+                train_loader=train_loader,
+                config=config,
+                transform=transform,
+                device=device,
+                final_val_loaders=final_val_loaders,
+                final_test_loaders=final_test_loaders,
+                global_step=global_step,
+                output_dir=output_dir,
+                swa_active_epochs=swa_active_epochs,
+            )
         wandb.finish()
     finally:
         cleanup_distributed(state)
