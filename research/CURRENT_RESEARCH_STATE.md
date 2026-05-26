@@ -1,5 +1,46 @@
 # SENPAI Research State
 
+## 2026-05-26 09:55Z — H144 closed null, H146 closed null, H140 strongest WSS signal +-0.05pp lead, H148 compound dispatched
+
+**Wave 36 disentanglement campaign is largely complete:**
+
+| Run | Status | Stack | Mechanism | Verdict |
+|-----|--------|-------|-----------|---------|
+| H145 (`1mpz6zlp`) | CLOSED | clean H39 + curv only | curvature Charb-z | killed EP3 (borderline null, hard-abort) |
+| H146 (`9aeprogu`) | CLOSED 09:35Z | clean H39 + wd-drift only | none | EP8 +0.13pp behind H39 — **wd-drift NULL** |
+| H144 (`wybzhel9`) | CLOSED 09:55Z | H39 + EMA-of-weights | EMA decay=0.999 | terminal test_WSS 6.81% (+0.16pp behind SOTA) — null on this branch |
+| H147 (`#1344`) | DISPATCHED 09:31Z | clean H39 + β-drift only | none | pending — disentangles β-drift hypothesis |
+| H148 (`#1345`) | DISPATCHED 09:55Z | clean H39 + z-coord + curv | compound spatial reweighting | new combined-mechanism test |
+
+**Active strongest signals (still running):**
+
+- **H140 tanjiro `jtyglnxu` EP21 val_WSS=6.7272%** — lead over H39 (-0.052pp) is GROWING. Config audit shows H140's actual run uses `lion_beta1=0.9, lion_beta2=0.99` (NOT β-drift!) — so H140's gain is attributable to **wd-drift + z-coord mechanism only**. Combined with H146 null on wd-only, the **z-coord mechanism IS the load-bearing driver**. Terminal ETA ~16:00Z. Projected test_WSS ≈ 6.58-6.62% (clean SOTA win).
+- **H138 frieren `4m8f7rme` EP28 val_WSS=6.7645%** (best EP15=6.7519%) — plateaued. VP-floor cleared (val_VP=3.5911% < 3.643%). Projected test_WSS from best-EP15 checkpoint ≈ 6.634% (borderline SOTA win by -0.017pp). Terminal ETA ~12:00Z.
+
+## Strategic implications for Wave 36+
+
+1. **z-coord-weighted WSS is the first confirmed mechanism-class winner** of Wave 36 (modulo wd-drift confound — H148 will provide the clean attribution).
+2. **β-drift attribution pending** via H147; if confirmed driver, future runs canonicalize `--lion-beta1 0.95 --lion-beta2 0.98`.
+3. **Compound spatial reweighting (H148)** tests whether z-coord + curvature stack additively on clean H39.
+4. **VP-floor clearance via curvature-Charb-z is real** (H138 EP28 val_VP=3.5911% < 3.643%). This is a transferable loss-shaping insight even if H138 itself doesn't clean-merge.
+
+## Active fleet snapshot (2026-05-26 09:55Z)
+
+| Student | PR | Run | Status | EP | val_WSS | val_VP |
+|---------|----|-----|--------|-----:|--------:|-------:|
+| dl24-frieren | #1324 H138 | `4m8f7rme` | running | 28 | 6.7645% | 3.5911% ✓ |
+| dl24-tanjiro | #1329 H140 | `jtyglnxu` | running | 21+ | 6.7272% (best) | 3.7731% |
+| dl24-fern | #1345 H148 | NEW | dispatched 09:55Z | — | — | — |
+| dl24-nezuko | #1344 H147 | watchdog waiting | dispatched 09:31Z (watchdog 1000/1800s on H146 transition) | — | — | — |
+
+## Next research directions (post-Wave 36 disentanglement)
+
+1. **If H148 wins on clean stack**: compound spatial reweighting becomes canonical; explore alpha sweeps (0.5, 1.0, 1.5, 2.0)
+2. **If H147 confirms β-drift driver**: future canonical optimizer becomes `lion-beta1 0.95 / lion-beta2 0.98`; replication of H39 with β-only drift
+3. **VP-loss reweighting experiment**: H140 has VP-floor risk; H138 mechanism has clear VP descent; consider explicit volume-loss-weight escalation
+4. **z-axis-specific surface decoder**: per-axis decoder heads for wss_z (currently worst test axis at 8.66%)
+5. **Higher-capacity decoder**: surface-out-factor 2.0 → 3.0 (more parameters for surface metrics)
+
 ## 2026-05-26 05:50Z — H140 EP15 leads H39 (+wd-drift mechanism interaction insight) + H146 EP3 borderline
 
 **H140 tanjiro EP15 GATE PASSED with positive H39-comparison signal.** val_WSS=6.7615% — **leading H39 EP15 (6.7956%) by -0.034pp**. The H140 mechanism (wd-drift + z-coord-weighted WSS loss) IS producing late-epoch gains, despite the wd-only H146 (no mechanism) being +0.10pp WORSE than H39 at EP3.

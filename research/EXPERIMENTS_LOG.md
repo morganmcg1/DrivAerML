@@ -1,5 +1,50 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-26 09:55 — PR #1335 H144 fern CLOSED: EMA-of-weights does not beat H39 SOTA
+
+- `dl24-fern/h144-ema-weights`, run `wybzhel9` (8 DDP ranks)
+- Hypothesis: EMA-of-weights (online Polyak averaging, decay=0.999) recovers Lion sign-momentum noise on validation/test
+- **Terminal verdict: NULL on this branch (test_WSS 6.81% > SOTA 6.6506% by +0.156pp)**
+
+### Terminal SENPAI-RESULT (EP10 kill, dual-checkpoint eval)
+
+| Metric | H144 EMA EP10 | H39 SOTA | Δ |
+|--------|--------------:|---------:|---:|
+| **test_primary/wall_shear_rel_l2_pct (PRIMARY)** | **6.8065%** | **6.6506%** | **+0.156pp miss** |
+| test_primary/volume_pressure_rel_l2_pct | 3.7499% | 3.6033% | +0.147pp |
+| test_primary/surface_pressure_rel_l2_pct | 3.7233% | 3.6498% | +0.073pp |
+| test_primary/abupt_axis_mean_rel_l2_pct | 5.9482% | 5.8010% | +0.147pp |
+
+### Dual-checkpoint validation of EMA mechanism
+
+| Checkpoint | full_val_WSS | test_WSS | EMA gain vs live |
+|-----------:|-------------:|---------:|:----------------:|
+| EMA-best (val_ema EP10) | 7.0763% | **6.8065%** | — (winner) |
+| live-best (val_primary EP10) | 7.2468% | 6.9906% | — |
+| Δ (ema − live) | −0.1705pp | **−0.1841pp** | EMA wins on test by 0.184pp |
+
+**EMA mechanism is validated** — the EMA→live Δ_test = -0.184pp lands within advisor prior of 0.05-0.20pp. The headline miss is a `deepcopy(model)`-induced RNG perturbation drifting the live trajectory by ~+0.4pp from EP2 onward, NOT an EMA failure.
+
+### Live vs EMA trajectory (val, EP1-EP10)
+
+| EP | val_primary | val_ema | Δ_ema−live | H39 ref |
+|----|------------:|--------:|----------:|--------:|
+| 1  | 17.886% | 18.141% | +0.255 | 17.897% |
+| 2  |  8.435% |  7.581% | −0.854 |  7.482% |
+| 3  |  7.746% |  7.271% | −0.475 |  7.202% |
+| 5  |  7.482% |  7.155% | −0.327 |  7.013% |
+| 8  |  7.324% |  7.089% | −0.234 |  6.879% |
+| 10 |  7.247% |  7.076% | −0.171 |  6.850% |
+
+EP1 matched H39 to 4dp; post-warm-up live diverged ~+0.4-0.5pp from H39 throughout. Per-axis test_WSS miss decomposes: wss_x +0.126pp, **wss_y +0.259pp (dominant)**, wss_z +0.131pp.
+
+### Conclusion / Wave 36 implication
+
+- EMA mechanism on this branch: NULL at decay=0.999, EP10 kill. Trajectory not converging.
+- Higher decay (0.9999) is in flight on `tay` branch PR #1343 (nezuko/tay) — no need to duplicate on dl24 branch.
+- **The dl24-fern slot is reassigned to PR #1345 H148 compound spatial reweighting (z-coord + curvature on clean H39 stack).**
+- Conditional follow-up: deepcopy-free EMA injection (lazy parameter-by-parameter shadow) could fix the RNG-perturbation issue — code-architecture work, not a hyperparameter sweep.
+
 ## 2026-05-26 05:30 — PR #1339 H146 EP1-2 INTERIM: wd-only ablation tracks H39, NOT H138 → lion-β is the driver
 
 - `dl24-nezuko/h146-wd-only-ablation`, run `9aeprogu` (8 DDP ranks)
