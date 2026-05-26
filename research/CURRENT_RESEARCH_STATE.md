@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~06:00Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~08:50Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -38,17 +38,18 @@ All six Wave 38 mechanism classes exhausted:
 
 ---
 
-## Wave 39 Active Fleet (2026-05-26 ~06:00Z)
+## Wave 39 Active Fleet (2026-05-26 ~08:50Z)
 
 | Student | PR | Hypothesis | Status | Priority |
 |---|---|---|---|---|
-| edward | #1338 | H146 split WSS_y decoder | WIP EP6-13 | Monitor |
-| thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP6-13 | HIGH — dynamic loss-weighting |
-| askeladd | #1341 | H148 y=0 mirror augmentation | NEW — just assigned | HIGH — data invariance, zero-overhead |
-| tanjiro | #1342 | H149 AdamW optimizer swap | NEW — just assigned | HIGH — program-pivotal optimizer ablation |
-| alphonse | (check) | H143 ESCALATE tau_z=3.0 | WIP likely terminal | HIGH — ESCALATE class leader |
-| frieren | (check) | H144 ESCALATE widening | WIP | Monitor |
-| (others) | (check) | H145 axis-extension ESCALATE | WIP | Monitor |
+| frieren | #1332 | H143 tau_z=4.0 ESCALATE | WIP step 62,492 (88%) terminal ~09:50Z | HIGH — late-cosine WSS_z TIED H112 EMA |
+| fern | #1334 | H144 tau_z=6.0 ESCALATE | WIP EP9 (70%) terminal ~09:20Z | **PROGRAM-PIVOTAL — first projected A WIN** |
+| alphonse | #1337 | H145 tau_y=3.0 axis-extension | WIP | HIGH — axis-extension validation |
+| edward | #1338 | H146 split WSS_y decoder | WIP | Monitor — paired-class to H138 |
+| thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP9+ | HIGH — discovered tau_z>tau_y>tau_x>sp>vp hierarchy |
+| askeladd | #1341 | H148 y=0 mirror augmentation | WIP | HIGH — data invariance, EP2 cross-channel bleed observed |
+| tanjiro | #1342 | H149 AdamW optimizer swap | WIP | HIGH — program-pivotal Lion vs AdamW ablation |
+| nezuko | #1343 | H150 EMA 0.999→0.9999 | WIP | Monitor — late-train averaging
 
 ---
 
@@ -56,14 +57,17 @@ All six Wave 38 mechanism classes exhausted:
 
 These are the ONLY mechanism families with unexhausted potential. **Zero capacity increase for any of them.**
 
-### 1. ESCALATE class (H143/H144/H145) — highest current evidence
-- H143 EP3: val_WSS_z −0.114pp lead over H112 — first cohort-aligned positive signal in Wave 38
-- Mechanism: increase gradient pressure on hard channels (opposite of SOFTEN, which was anti-aligned)
-- Compounds with GradNorm once H147 terminates
+### 1. ESCALATE class (H143/H144/H145) — strongest current evidence
+- **H144 fern (tau_z=6.0) at EP9: projected val_abupt 6.087% UNDER merge gate, val_WSS_z LEAD −0.281pp, val_WSS_y LEAD −0.204pp — FIRST projected A WIN of Wave 38+39.**
+- 3-point monotone-accelerating response curve on val_WSS_z: H112 (2.0)→H143 (4.0) −0.045pp, H143→H144 (6.0) −0.114pp (2.5× larger increment).
+- H143 frieren (tau_z=4.0): late-cosine convergence; deficit progressively narrowed from EP3 +0.80pp to step 62,492 ESSENTIALLY TIED H112 EMA (9.370% vs 9.375%).
+- Mechanism: increase gradient pressure on hard channels (opposite of SOFTEN, which was anti-aligned).
+- **Verdict event: H144 terminal val→test slope at ~09:20Z. Wave 40 cascade depends on this.**
 
-### 2. GradNorm dynamic weighting (H147)
+### 2. GradNorm dynamic weighting (H147 thorfinn)
 - Task names: `("sp", "tau_x", "tau_y", "tau_z", "vp")`
 - Alpha=1.5, tau_y=1.0/tau_z=1.0 balanced starting point
+- **Validated**: autonomously discovered tau_z > tau_y > tau_x > sp > vp weight hierarchy. Effective tau_z weight (1.45 × base 2.0 = 2.9) sits BETWEEN H112 (2.0) and H143 (4.0).
 - If alive: dynamic loss-weighting sidesteps static ESCALATE search-space problem
 - Requires `--no-compile-model` for `full` mode
 
@@ -79,9 +83,18 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - If alive: Lion sign-accumulation contributes to slope pathology; opens SOFTEN-class revisit with AdamW
 - If closed: pathology is optimizer-agnostic — further constrains the search space
 
-### 5. ESCALATE × compound (Wave 40 candidate)
-- H143 × H147 compound: once both terminal-alive
-- AdamW × ESCALATE (H150, candidate): if H149 alive, rerun ESCALATE class under AdamW
+### 5. Wave 40 contingency cascade (depends on H144 terminal)
+- **H144 A WIN**: H144 × H145 joint escalation (tau_z=6.0 + tau_y=3.0); H144 × H147 (escalate + GradNorm); continue magnitude curve to tau_z=8.0
+- **H144 A TIED** (val PASS, test marginal MISS): H144 × H148 mirror compound; H144 × H147 GradNorm
+- **H144 slope catastrophe**: pivot harder to H149 AdamW, H150 EMA 0.9999, fresh mechanism families
+
+### Cross-channel bleed under Lion — 3-class paired confirmation
+Bidirectionally symmetric under Lion sign-only updates:
+- **H139 SOFTEN** (tau_z→tau_y bleed +0.356pp)
+- **H146 ARCHITECTURAL-SPLIT** (tau_y→tau_z bleed +2.2pp)
+- **H148 DATA-AUGMENTATION** (tau_y mirror→tau_z +1.98pp early EP)
+
+Any narrow-axis intervention propagates through shared decoder weights — must verify cross-channel impact in every loss-weight or augmentation experiment.
 
 ---
 
