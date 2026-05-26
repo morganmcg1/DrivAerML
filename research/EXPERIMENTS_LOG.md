@@ -1,3 +1,65 @@
+## 2026-05-26 ~06:00 — PR #1327: H140 SIGNED-LOG TAU_Z REPARAMETERIZATION (nezuko, **CLOSED C NULL** — val MISS +0.252pp, test_WSS REGRESSION +0.153pp vs H112; **SOFTEN CLASS DEFINITIVELY CLOSED via H139+H140 paired exhaustion**)
+
+- **Branch**: `nezuko/h140-tau-z-log-reparam` (CLOSED, not merged)
+- **W&B run**: `9blexqdp` (FINISHED at step 70,652, ~03:00Z 2026-05-26)
+- **Hypothesis**: Apply signed-log target transform `sign(x) * log1p(|x|/scale)` to tau_z targets, compressing dynamic range from 3 orders of magnitude to 1 order. MSE in log-space ≈ scale-invariant relative error. Inverse transform at metric computation. Scale measured from training data: p95(|tau_z|) = 2.27 Pa.
+- **Parameter overhead**: 0 (target-space transform only)
+
+### Terminal metrics (best EMA checkpoint, step 70,652)
+
+| Metric | H140 val | H140 test | H112 (val / test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---:|---|
+| abupt | **6.388%** | **5.9467%** | 6.1358% / 5.839% | **+0.108pp** | val MISS gate +0.252pp ✗ |
+| **WSS** | **7.279%** | **6.9054%** | — / 6.752% | **+0.153pp REGRESSION** | TEST_FLOOR 6.727%: MISS by +0.178pp ✗ |
+| WSS_x | 6.412% | 6.0807% | — / 5.999% | +0.082pp | regression |
+| WSS_y | 7.879% | 7.4015% | — / 7.360% | +0.042pp | regression |
+| **WSS_z** | **10.06%** | **9.2185%** | 9.375% / 8.720% | **+0.499pp REGRESSION on target channel** | dominant deficit |
+| VP | 3.624% | 3.4025% | — / 3.421% | **−0.019pp LEAD** | numerically marginal |
+| SP | 4.143% | 3.6304% | — / 3.695% | **−0.065pp LEAD** | numerically marginal |
+
+**Total wallclock**: ~14h | **n_params**: 17.41M (canonical, no overhead)
+
+### Cross-channel localization — REGRESSION LOCALIZES ON TARGET
+
+| Channel | Δ test vs H112 | Modification scope |
+|---|---:|---|
+| tau_x (test_WSS_x) | +0.082pp | NOT modified |
+| tau_y (test_WSS_y) | +0.042pp | NOT modified |
+| **tau_z (test_WSS_z)** | **+0.499pp** | **MODIFIED** (signed-log reparam) |
+
+**The regression localizes precisely on the target channel.** test_WSS_z deficit is 6× larger than test_WSS_x and 12× larger than test_WSS_y. This is the cleanest negative diagnostic for the signed-log mechanism: it specifically REGRESSES on the channel it was meant to help.
+
+### Structural mismatch — DYNAMIC-RANGE COMPRESSION + LINEAR-SPACE METRIC
+
+Signed-log compresses tau_z dynamic range during training; inverse transform restores linear space for metric computation. The mismatch creates a fundamental tension:
+
+- **Loss landscape** in log-space is well-behaved near zero → model spends gradient on small-magnitude predictions
+- **Metric** (WSS_z = relative L2 in linear space) is dominated by large-magnitude regions (wheel arches, wake separation, underbody)
+- **Result**: model accurate where loss looks small (post-compression), inaccurate where metric looks large (linear space)
+
+### SOFTEN class definitively CLOSED via paired exhaustion
+
+| Mechanism | Class | val_WSS_z gap vs H112 | test_WSS gap vs H112 | Verdict |
+|---|---|---:|---:|---|
+| H139 Charbonnier (loss shape) | SOFTEN | +0.173pp | +0.268pp | C NULL |
+| **H140 signed-log (target reparam)** | **SOFTEN** | **+0.685pp** | **+0.153pp** | **C NULL** |
+
+Both SOFTEN-class variants soften the model's response to heavy-tail residuals. But **heavy-tail residuals ARE the WSS_z signal** — wake separation, wheel-arch vortex, near-wall z-shear are all heavy-tail by physics. Softening them removes the program-critical gradient pressure on the target channel.
+
+### Banked findings (permanent program value)
+
+1. **SOFTEN class CLOSED** — both loss-shape (H139) and target-reparam (H140) variants close negative on tau_z
+2. **Heavy-tail residuals are the WSS_z signal** — softening mechanisms structurally remove the signal they were meant to refine
+3. **Target-space transformation + linear-space metric is a structural anti-pattern** — compression that helps training stability HURTS the metric computed in linear space
+4. **Test deficit < val deficit on WSS_z** — H140 has +0.685pp val_WSS_z but only +0.499pp test_WSS_z gap. Test-side recovery on val-overfit-class mechanisms is weak but non-zero
+5. **VP and SP marginally improve** under signed-log tau_z — suggests gradient bandwidth freed from tau_z (via reduced heavy-tail pressure) re-allocates to volume pressure & surface pressure channels. Small effect but mechanistically coherent
+
+### Strategic implication
+
+**SOFTEN direction definitively CLOSED for tau_z target modification.** Wave 39 frontier confirmed: ESCALATE (H143/H144/H145), GradNorm (H147), training dynamics (H148 mirror, H149 AdamW, H150 ema=0.9999 just assigned). DO NOT continue SOFTEN class on tau_z.
+
+---
+
 ## 2026-05-26 ~05:00 — PR #1325: H138 SPLIT WSS_Z DECODER HEAD (askeladd, **CLOSED C NULL** — val gate PASS −0.004pp, but test_WSS REGRESSION +0.151pp vs H112; **ARCHITECTURAL-SPLIT CLASS DEFINITIVELY CLOSED — slope-flattening pathology confirmed on decoder axis joins capacity-axis + SwiGLU cohorts**)
 
 - **Branch**: `askeladd/h138-split-wss-z-decoder` (CLOSED, not merged)
