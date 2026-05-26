@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~08:50Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~10:00Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -49,7 +49,7 @@ All six Wave 38 mechanism classes exhausted:
 | thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP9+ | HIGH — discovered tau_z>tau_y>tau_x>sp>vp hierarchy |
 | askeladd | #1341 | H148 y=0 mirror augmentation | WIP | HIGH — data invariance, EP2 cross-channel bleed observed |
 | tanjiro | #1342 | H149 AdamW optimizer swap | WIP | HIGH — program-pivotal Lion vs AdamW ablation |
-| nezuko | #1343 | H150 EMA 0.999→0.9999 | WIP | Monitor — late-train averaging
+| nezuko | #1346 | H157 cosine warm restarts (SGDR T_0=4) | NEW — just assigned | Scheduler-axis, basin-escape, zero-param
 
 ---
 
@@ -77,22 +77,29 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - Implementation: `target/data/loader.py:428`, prob=0.5 train-only, yaw flip about y=0
 - Falsifiable: if alive → data invariance closes slope catastrophe; if closed → optimizer/architecture problem
 
-### 4. AdamW optimizer (H149 — just assigned)
+### 4. AdamW optimizer (H149 tanjiro, EP3 alive)
 - Program-pivotal: does slope-flattening persist without Lion?
-- `--optimizer adamw --lr 3e-4` vs Lion `--lr 9e-5`
+- EP3 val_abupt 7.836% — gap vs H112 EP3 closing (5.73→1.36→0.86pp per epoch). Linear extrapolation: gap closes EP5-6. Run healthy.
 - If alive: Lion sign-accumulation contributes to slope pathology; opens SOFTEN-class revisit with AdamW
 - If closed: pathology is optimizer-agnostic — further constrains the search space
+
+### 5. Cosine warm restarts (H157 nezuko — NEWLY ASSIGNED)
+- **Mechanism class**: Scheduler-axis (first time tested in programme)
+- Hypothesis: single-cosine tail → flat-basin entrapment → slope flattening. SGDR restarts (T_0=4) force basin escape at EP5/EP9.
+- Requires ~10-line code change (CosineAnnealingLR → CosineAnnealingWarmRestarts in trainer_runtime.py)
 
 ### 5. Wave 40 contingency cascade (depends on H144 terminal)
 - **H144 A WIN**: H144 × H145 joint escalation (tau_z=6.0 + tau_y=3.0); H144 × H147 (escalate + GradNorm); continue magnitude curve to tau_z=8.0
 - **H144 A TIED** (val PASS, test marginal MISS): H144 × H148 mirror compound; H144 × H147 GradNorm
-- **H144 slope catastrophe**: pivot harder to H149 AdamW, H150 EMA 0.9999, fresh mechanism families
+- **H144 slope catastrophe**: pivot harder to H149 AdamW, H157 cosine warm restarts, fresh mechanism families (H150 EMA 0.9999 CLOSED — incompatible with 13-epoch training)
 
-### Cross-channel bleed under Lion — 3-class paired confirmation
+### Cross-channel bleed under Lion — 2-class confirmed (H148 EP2 reference error corrected)
 Bidirectionally symmetric under Lion sign-only updates:
-- **H139 SOFTEN** (tau_z→tau_y bleed +0.356pp)
-- **H146 ARCHITECTURAL-SPLIT** (tau_y→tau_z bleed +2.2pp)
-- **H148 DATA-AUGMENTATION** (tau_y mirror→tau_z +1.98pp early EP)
+- **H139 SOFTEN** (tau_z→tau_y bleed +0.356pp, confirmed at terminal)
+- **H146 ARCHITECTURAL-SPLIT** (tau_y→tau_z bleed +2.2pp, confirmed at terminal)
+- ~~H148 DATA-AUGMENTATION~~: EP2 claim retracted — H112 raw EP2 val_WSS_z = 11.752% (not 9.673%). H148 EP2 actually showed −0.105pp LEAD on WSS_z.
+
+**H148 EP3 clean mechanism signal**: WSS_y LEAD −0.095pp, WSS_z LEAD −0.085pp, WSS_x FLAT (invariant channel). WATCH val_VP deficit growing (+0.43→+1.06→+1.22pp at EP1/2/3 — gradient reallocation from volume pressure to surface). VP floor (test_VP ≤ 3.421%) is make-or-break for merge.
 
 Any narrow-axis intervention propagates through shared decoder weights — must verify cross-channel impact in every loss-weight or augmentation experiment.
 
