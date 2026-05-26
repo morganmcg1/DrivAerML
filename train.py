@@ -335,8 +335,16 @@ def compute_z_coord_weights(
     Padded points (mask=False) contribute 0 to z_max and receive weight
     based on their |z|/z_max ratio — but they're zeroed out by the mask
     in the downstream loss, so their weight value is harmless.
+
+    DrivAerML joint-view sampling can yield 0-surface views (when a case's
+    volume_view_count > surface_view_count): in that case return a
+    shape-preserving unit-weight tensor and a sentinel z_max so the
+    downstream Charbonnier loss (denominator clamp_min(1.0)) still
+    evaluates to 0 without crashing on an empty reduction.
     """
     z = surface_x[..., 2].abs()  # [B, N]
+    if z.numel() == 0:
+        return torch.ones_like(z), z.new_tensor(1e-6)
     mask_bool = surface_mask.to(dtype=torch.bool)
     masked_z = torch.where(mask_bool, z, torch.zeros_like(z))
     z_max = masked_z.max().clamp_min(1e-6)
