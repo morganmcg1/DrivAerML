@@ -1,5 +1,34 @@
 # SENPAI Research State
 
+## 2026-05-26 03:00Z — H145 CLEAN DISENTANGLEMENT: Curvature mechanism is NULL on H39 stack → Wave 36 pivots to wd/β ablations
+
+**Definitive negative result.** PR #1336 H145 (`1mpz6zlp`) was killed at EP3 hard-abort gate (val_WSS=7.3398% > 7.30%). With clean H39 hyperparameters + curvature-weighted Charbonnier-z mechanism only, the trajectory is:
+
+| EP | H39 SOTA | H138 (3 drifts) | H145 (clean) | H145 vs H39 |
+|----|---------:|----------------:|-------------:|------------:|
+| 1  | 17.90% | 12.83% | **17.71%** | -0.19pp |
+| 3  |  7.20% |  7.00% |  **7.34%** | +0.14pp (kill) |
+
+**Mechanism contribution at EP1: -0.19pp.** H138's spectacular -5.07pp early-epoch advantage at EP1 (12.83% vs 17.90%) is therefore driven ~96% by the hyperparameter drifts (wd=0.0001 + β₁=0.95 + β₂=0.98), NOT by the intended curvature mechanism. The curvature-weighted Charbonnier-z mechanism is removed from active research candidates.
+
+**Strategic implication for H138 merge decision**: H138 frieren currently at EP18 val_WSS=6.7565%, val_VP=3.6082%, val_abupt=5.9994% (best ever). If H138 terminal beats H39 SOTA test_WSS 6.6506%, it remains MERGE-eligible per Morgan's directive (test_WSS first), but attribution is to drift not mechanism — and we must document this clearly. Future Wave 36 work will canonicalize the dominant drift dimension.
+
+## Wave 36 strategic pivot: drift attribution ablation campaign
+
+The H145 result reorients Wave 36 around isolating which of the three H138 drifts (wd, β₁, β₂) is the dominant driver. Two clean ablations are required:
+
+1. **H146 wd-only ablation** (DISPATCHED to dl24-nezuko PR #1339): H39 exact setup + ONLY `--weight-decay 0.0001`. Most likely candidate (50× reduction in regularization). If H146 EP1 ≈ 13%, wd is the driver and Wave 36 canonicalizes wd=0.0001.
+2. **H147 lion-beta ablation** (to dispatch when next slot opens): H39 exact setup + ONLY `--lion-beta1 0.95 --lion-beta2 0.98`. β-changes are non-trivial (β₂ change especially: faster second-moment estimation interacts unpredictably with Lion's sign updates).
+
+If both drifts contribute, the new canonical for Wave 36 becomes `--weight-decay 0.0001 --lion-beta1 0.95 --lion-beta2 0.98`. If only one is load-bearing, we canonicalize just that dimension.
+
+## Active fleet snapshot (2026-05-26 03:00Z)
+
+- **#1324 H138 frieren** (EP18 of 30, `4m8f7rme`): val_WSS=6.7565%, val_VP=3.6082% (below floor ✓), val_abupt=5.9994% (best ever in fleet ✓). 3-drift confound (wd+β₁+β₂). Terminal ETA ~17:00Z. Merge-eligible if test_WSS < 6.6506% but attribution is to drift not mechanism.
+- **#1329 H140 tanjiro** (EP12 of 30, `jtyglnxu`): val_WSS=6.7792%, val_VP=3.8032% (above floor, mechanism may be hurting VP), val_abupt=6.0811%. wd-only drift (clean betas). z-coord-weighted WSS mechanism. EP15 gate ~05:00Z.
+- **#1335 H144 fern** (EP2 of 30, `wybzhel9`): val_WSS=8.4349% (vs H39 EP2=7.48%, +0.95pp). EMA-of-weights mechanism, dual val logging active. Pre-EMA-activation early epochs running slower than H39 — EP3-6 will tell us if EMA averaging recovers.
+- **#1339 H146 nezuko** (DISPATCHED): wd-only ablation, PR just created.
+
 ## CRITICAL HUMAN DIRECTIVE — 2026-05-24 07:35Z (Issue #1056, Morgan)
 **test_WSS IS THE PRIMARY OBJECTIVE.** All experiment ranking, wave decisions, and merge criteria are subordinate to beating test_WSS < 5.85% (Transolver-3 SOTA). The 3-floor structure (WSS + SP + VP floors) defines a valid submission, but WSS leads all ranking. Do NOT treat abupt or vol_p as co-equal primaries. WSS first, always.
 

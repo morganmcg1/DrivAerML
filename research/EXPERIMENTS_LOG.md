@@ -1,5 +1,47 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-26 03:00 — PR #1336 H145 CLOSED: Curvature-weighted Charbonnier-z is NULL on clean H39 stack (decisive disentanglement)
+
+- `dl24-nezuko/h145-curv-charb-z-wd005`, run `1mpz6zlp` (8 DDP ranks)
+- Hypothesis: Re-test H138's curvature-weighted Charbonnier-z mechanism on the **clean H39 hyperparameter stack** (`weight_decay=0.005, lion_beta1=0.9, lion_beta2=0.99`) to disentangle the mechanism signal from H138's 3-drift confound.
+
+### Gate data — KILLED at EP3 hard-abort
+
+| EP | Step | H39 SOTA `yym5oa8x` | H138 `4m8f7rme` (3 drifts) | **H145 `1mpz6zlp` (clean)** | H145 vs H39 |
+|----|------|--------------------:|--------------------------:|----------------------------:|------------:|
+| 1  | 10,975 | 17.8972% | 12.8321% | **17.7090%** | -0.19pp (curvature contribution alone) |
+| 2  | 21,951 |  7.4818% |  7.3039% |  **7.6054%** | +0.12pp (mechanism mildly harmful) |
+| 3  | 32,927 |  7.2016% |  6.9955% |  **7.3398%** | +0.14pp (gate tripped, >7.30%) |
+
+### Mechanism diagnosis — decisive negative
+
+The curvature-weighted Charbonnier-z mechanism (per-point residual × `1 + α·κ_i`, α=1.0) on the clean H39 optimizer regime produces a **marginally worse trajectory than H39 baseline**. The mechanism contributes only -0.19pp at EP1, compared to the combined -5.07pp early-epoch gain of H138 — meaning the **curvature mechanism explains ~4% of H138's early-epoch advantage; the remaining ~96% comes from the wd+β drifts**.
+
+### Strategic implication
+
+1. **H138's val_WSS=6.7565% breakthrough is NOT a curvature-mechanism win.** It is a hyperparameter-drift win (wd=0.0001 + β₁=0.95 + β₂=0.98).
+2. **Curvature-weighted Charbonnier-z removed from active research candidates.** Null on clean stack at α=1.0; α-tuning is unlikely to recover the mechanism since the EP1-3 trajectory is flat-to-mildly-harmful.
+3. **Wave 36 pivot**: dispatch wd-only ablation (H146) and lion-beta ablation (H147) to identify which drift is the dominant driver of H138's gains.
+
+### Resource economics
+
+EP3 hard-abort saved 22.5h × 8 GPUs vs running to terminal. Disentanglement experiments should always set tight early-epoch kill gates to extract maximum information per GPU-hour.
+
+### W&B and PR
+- Run: `1mpz6zlp`
+- PR: #1336 (CLOSED)
+
+---
+
+## 2026-05-26 03:00 — H146 DISPATCHED to dl24-nezuko: wd-only ablation (PR #1339)
+
+- Hypothesis: Isolate `weight_decay=0.0001` as the dominant driver of H138's gains. Clean H39 hyperparameter stack with ONE change: `--weight-decay 0.0001`. Tracks ablation of wd vs lion-beta contributions to H138.
+- PR #1339: `dl24-nezuko/h146-wd-ablation`
+- Predicted EP1 signal: 13-16% if wd dominates; 16-17% if beta drifts dominate
+- If terminal test_WSS < 6.6506%, **merge-eligible as a wd-only SOTA**.
+
+---
+
 ## 2026-05-25 23:40 — PR #1333 H143 CLOSED: Lookahead(k=5,α=0.5) EP3 hard-abort gate miss
 
 - `dl24-nezuko/h143-lookahead-lion-v2`, run `mzk2tpu7` (8 DDP ranks)
