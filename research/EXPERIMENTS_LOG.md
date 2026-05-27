@@ -1,3 +1,70 @@
+## 2026-05-27 ~04:58 — PR #1347: H164 SWA STOCHASTIC WEIGHT AVERAGING (frieren, **CLOSED C NULL — basin-geometry hypothesis FALSIFIED, slope-as-trajectory-drift hypothesis PROGRAM-CRITICAL**)
+
+- **Branch**: `frieren/h164-stochastic-weight-averaging` (CLOSED, not merged)
+- **W&B run**: `15m7gbu5` (DDP8 rank0, full 13 epochs + K=4 SWA averaging EP10-EP13)
+- **Hypothesis**: SWA at swa_start_epoch=9, K=4, constant LR=1e-5 captures wider basin than EMA → val→test slope should differ from EMA's (STEEPER if better val→test transfer, FLATTER if wider but worse transfer).
+- **Parameter overhead**: ~32MB SWA checkpoint, ~3% wallclock overhead
+
+### Terminal val + test metrics (best EMA EP13 + SWA-averaged)
+
+| Channel | H112 EMA test | H164 EMA test | H164 SWA test | EMA Δ vs H112 | SWA Δ vs EMA |
+|---|---:|---:|---:|---:|---:|
+| abupt | 5.839 | 5.966 | 5.985 | +0.127 | +0.019 |
+| WSS | 6.752 | 6.917 | 6.934 | **+0.165** | +0.017 |
+| WSS_z | 8.720 | 8.897 | 8.925 | +0.177 | +0.028 |
+| VP | 3.421 | 3.498 | 3.507 | +0.077 | +0.009 |
+| SP | 3.695 | 3.763 | 3.775 | +0.068 | +0.012 |
+
+All merge gates MISS. SWA uniformly WORSE than EMA by 0.01-0.05pp.
+
+### Binding diagnostic: val_swa→test_swa slope vs val_ema→test_ema slope
+
+| Channel | H112 EMA slope | H164 EMA slope | H164 SWA slope | SWA − EMA |
+|---|---:|---:|---:|---:|
+| WSS | **−0.215** | **−0.134** | **−0.135** | **−0.001** |
+| WSS_z | −0.655 | −0.541 | −0.542 | −0.001 |
+| WSS_x | −0.188 | −0.024 | −0.027 | −0.002 |
+| abupt | −0.297 | −0.249 | −0.249 | +0.001 |
+| WSS_y | −0.120 | −0.155 | −0.152 | +0.003 |
+| VP | −0.127 | −0.138 | −0.142 | −0.004 |
+| SP | −0.360 | −0.384 | −0.384 | +0.000 |
+
+**Max SWA-EMA divergence = 0.004pp on VP**. SWA centroid is inside the same loss-landscape basin as EMA terminal. **K=4 SWA at constant LR=1e-5 does NOT escape EMA's basin.** Izmailov 2018 thesis falsified at this regime.
+
+### Program-critical finding — slope-flattening cohort joins H164
+
+H164 EMA val→test WSS aggregate slope = **−0.134pp**, +0.081pp FLATTER than H112's −0.215pp. H164 joins slope-FLATTENING cohort with magnitude that **mirrors H148's slope-STEEPENING** (also +0.081pp). Symmetric cohort magnitudes:
+- Slope-PRESERVATION (STEEPER): H145 −0.048, H148 −0.081, H149 −0.036, H157 −0.036
+- Slope-FLATTENING (FLATTER): H143 +0.133, H144 +0.202, H165 +0.169, H164 +0.081, H147 +0.105
+
+**Magnitudes are 0.036-0.202pp**. If RNG-level seed variance produces ±0.05-0.10pp slope deviations, the entire slope-cohort framework could be within noise floor.
+
+### Frieren's PROGRAM-CRITICAL hypothesis
+
+*"slope-flattening is an artifact of any trajectory deviation from H112's exact path, not a positive program signal arising from a specific mechanism. The 6-axis cohort hasn't been showing 'different ways to win'; it's been showing 'different ways to drift slightly off H112 SOTA in a way that happens to look mechanistically interesting.'"*
+
+If true:
+1. Slope-preservation cohort framework (H145/H148/H149/H157) is INVALID as program signal
+2. Slope-flattening cohort framework is INVALID as mechanism diagnostic
+3. All cohort-level closure claims based on slope direction must be re-evaluated
+4. WSS_x reversal cohort signature (just banked 04:25Z) also pending validation
+
+### Reassignment
+
+Frieren reassigned to PR #1357 **H164d (H112-rerun RNG-baseline)** — highest-EV pre-Wave-41 sanity check. Single-flag-delta from H112 = zero flag changes; natural RNG divergence is the perturbation (train.py exposes NO seed flag).
+
+Two outcomes:
+- A: H164d slope WITHIN ±0.02pp of H112 → cohort framework REAL, continue compounding
+- B: H164d slope DEVIATES by ±0.05-0.15pp → cohort framework COLLAPSES, refocus on absolute test metrics
+
+The H164d result reframes every cohort closure decision from the last 36 hours.
+
+### SWA infrastructure preserved
+
+H164 SWA wrapper, scheduler, and W&B logging are well-tested. Future Wave 40+ experiments can compose `--use-swa` with novel mechanisms (AdamW+SWA, mirror-aug+SWA) as a cheap "is this averaging-friendly?" gate. Marginal cost: 4 extra training epochs at constant LR + 1 extra eval pass.
+
+---
+
 ## 2026-05-27 ~04:25 — PR #1348: H165 TAU_Z=1.5 DE-ESCALATE (fern, **CLOSED C NULL slope-FLATTER bilaterally — LOCKS 4-point z-axis closure**)
 
 - **Branch**: `fern/h165-tau-z-de-escalation-1p5` (CLOSED, not merged)

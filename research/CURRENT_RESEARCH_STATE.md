@@ -1,6 +1,14 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-27 ~04:30Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-27 ~05:25Z | Branch: `tay` | SOTA: H112 PR #1283
+
+## PROGRAM-CRITICAL OPEN QUESTION (banked 04:58Z, H164 SWA terminal)
+
+**Is the slope-cohort framework REAL or RNG-LEVEL NOISE?** H164 surfaced the hypothesis that slope-flattening/preservation may be an artifact of any trajectory deviation from H112's exact RNG path, NOT a mechanism signal. The 4-axis slope-preservation cohort, z-axis flattening sub-cohort, and WSS_x reversal signature are all PROVISIONAL pending H164d (frieren PR #1357 — H112-recipe rerun for RNG noise floor measurement).
+
+H164d outcome reframes every cohort closure decision:
+- A: slope WITHIN ±0.02pp of H112 → cohort framework REAL, continue compounding (H183 etc.)
+- B: slope DEVIATES by ±0.05-0.15pp → cohort framework COLLAPSES, refocus on absolute test metrics only
 
 ---
 
@@ -62,20 +70,21 @@ Every z-axis perturbation (H143, H144, H165) shows positive WSS_x slope (test_WS
 
 ---
 
-## Active Fleet (2026-05-27 ~04:30Z)
+## Active Fleet (2026-05-27 ~05:25Z)
 
 | Student | PR | Hypothesis | Status | ETA |
 |---|---|---|---|---|
-| frieren | #1347 | H164 SWA (swa_start_epoch=9) | EP12 SWA n_averaged=3 due ~03:23Z; EP13 final ~04:18Z; terminal SWA eval imminent | terminal ~04:30Z |
-| **fern** | **#1356** | **H183 mirror-aug + tau_y=3.0 compound (slope-preservation x slope-preservation factorial)** | **Freshly assigned** | **terminal ~22:00Z** |
+| **frieren** | **#1357** | **H164d H112-rerun RNG-baseline (PROGRAM-CRITICAL slope-cohort sanity check)** | **Freshly assigned** | **terminal ~19:25Z+1** |
+| fern | #1356 | H183 mirror-aug + tau_y=3.0 compound (slope-preservation x slope-preservation factorial) | Freshly assigned | terminal ~22:00Z |
 | alphonse | #1349 | H166 tau_y=1.0 DE-escalate | EP7-range step 60,204 val_abupt 6.328% (W&B-direct read) | terminal ~06:25Z |
-| edward | #1350 | H170 surface:vol 8:1 rebalance | EP9-range step 51,031 val_abupt 6.310% (W&B-direct read) | terminal ~04:30-05:00Z |
+| edward | #1350 | H170 surface:vol 8:1 rebalance | EP9-range step 51,031 val_abupt 6.310% (W&B-direct read) | terminal ~06:40Z |
 | thorfinn | #1353 | H171 plateau-exact static (vol=0.5, tau_y=1.30, tau_z=1.67) | v2 r6zoibfi at EP2.5 step 27,221 val_abupt 7.97% | terminal ~14:30Z |
 | askeladd | #1354 | H181b H148+ema=0.9999 (corrected gates) | EP1 val 67.97% PASS (DROPPED gate); EP3 first real gate ~05:50Z | terminal ~12:55Z |
 | tanjiro | #1351 | H180 Lookahead(AdamW k=5 alpha=0.5) | EP3.5 step 38030 val 8.01% (catchup decay 1.34×); EP6 binding ~05:07Z | terminal ~13:00Z |
 | nezuko | #1355 | H167 tau_y=4.0 ESCALATE (y-axis extension) | EP1 val 26.83% PASS | terminal ~15:15Z |
 
 **Closed at 04:25Z**: PR #1348 H165 fern (tau_z=1.5 DE-escalate) C NULL slope-FLATTER bilaterally — locks 4-point z-axis cohort.
+**Closed at 04:58Z**: PR #1347 H164 frieren (SWA averaging) C NULL — basin-geometry hypothesis FALSIFIED, slope-as-trajectory-drift hypothesis PROGRAM-CRITICAL.
 
 ---
 
