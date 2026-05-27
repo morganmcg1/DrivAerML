@@ -1,0 +1,156 @@
+W0517 00:10:58.361000 921072 torch/distributed/run.py:851] 
+W0517 00:10:58.361000 921072 torch/distributed/run.py:851] *****************************************
+W0517 00:10:58.361000 921072 torch/distributed/run.py:851] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0517 00:10:58.361000 921072 torch/distributed/run.py:851] *****************************************
+Device: cuda:0, DDP world_size=2
+Volume-points curriculum: ep0->16384
+DrivAerML: train=347657 views/400 cases, val=29133 views/34 cases, test=44275 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=29133 views/34 cases, test=44275 views/50 cases
+Model: SurfaceTransolver grouped surface+volume (17.41M params)
+Surface channel weights: cp=1.0 tau_x=1.0 tau_y=1.5 tau_z=2.0
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260517_001103-uphcoerv
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/tangent-frame-wss-smoke-rank0
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/uphcoerv
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260517_001104-fjrfgzbg
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/tangent-frame-wss-smoke-rank1
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/fjrfgzbg
+Epoch 1/2:   0%|          | 0/86914 [00:00<?, ?it/s]/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+                                                    /usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+[rank1]:[W517 00:11:06.718357002 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank1]:[E517 00:21:06.826892979 ProcessGroupNCCL.cpp:689] [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=8, OpType=ALLREDUCE, NumelIn=1, NumelOut=1, Timeout(ms)=600000) ran for 600090 milliseconds before timing out.
+[rank1]:[E517 00:21:06.827602730 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 1]  failure detected by watchdog at work sequence id: 8 PG status: last enqueued work: 8, last completed work: 7
+[rank1]:[E517 00:21:06.827849304 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 all_reduce from /usr/local/lib/python3.10/dist-packages/torch/distributed/distributed_c10d.py:3068
+#1 wrapper from /usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83
+#2 distributed_any from /workspace/senpai/target/trainer_runtime.py:135
+#3 main from /workspace/senpai/target/train.py:1056
+#4 <module> from /workspace/senpai/target/train.py:1398
+
+[rank1]:[E517 00:21:06.827908456 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 1] First PG on this rank to signal dumping.
+[rank1]:[E517 00:21:07.826635766 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 1] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 8, last completed NCCL work: 7.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank1]:[E517 00:21:07.826779387 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 1] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+Traceback (most recent call last):
+  File "/workspace/senpai/target/train.py", line 1398, in <module>
+    main()
+  File "/workspace/senpai/target/train.py", line 1042, in main
+    loss, batch_loss_metrics = train_loss(
+  File "/workspace/senpai/target/train.py", line 343, in train_loss
+    out = model(
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py", line 1699, in forward
+    else self._run_ddp_forward(*inputs, **kwargs)
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py", line 1524, in _run_ddp_forward
+    return self.module(*inputs, **kwargs)  # type: ignore[index]
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/workspace/senpai/target/model.py", line 664, in forward
+    "alpha_t1_absmax": (alpha_t1.abs() * mask_float).amax().detach(),
+RuntimeError: amax(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/workspace/senpai/target/train.py", line 1398, in <module>
+[rank0]:     main()
+[rank0]:   File "/workspace/senpai/target/train.py", line 1042, in main
+[rank0]:     loss, batch_loss_metrics = train_loss(
+[rank0]:   File "/workspace/senpai/target/train.py", line 343, in train_loss
+[rank0]:     out = model(
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py", line 1699, in forward
+[rank0]:     else self._run_ddp_forward(*inputs, **kwargs)
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py", line 1524, in _run_ddp_forward
+[rank0]:     return self.module(*inputs, **kwargs)  # type: ignore[index]
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:   File "/workspace/senpai/target/model.py", line 664, in forward
+[rank0]:     "alpha_t1_absmax": (alpha_t1.abs() * mask_float).amax().detach(),
+[rank0]: RuntimeError: amax(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.
+[rank1]:[E517 00:22:06.334476631 ProcessGroupNCCL.cpp:750] [Rank 1] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank1]:[E517 00:22:06.334509967 ProcessGroupNCCL.cpp:764] [Rank 1] To avoid data inconsistency, we are taking the entire process down.
+[rank1]:[E517 00:22:06.335113403 ProcessGroupNCCL.cpp:2119] [PG ID 0 PG GUID 0(default_pg) Rank 1] Process group watchdog thread terminated with exception: [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=8, OpType=ALLREDUCE, NumelIn=1, NumelOut=1, Timeout(ms)=600000) ran for 600090 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x793623165eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x7935b396b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x7935b3971041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x7935b397268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x79364ee54ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x79364fd62ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x79364fdf48d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+terminate called after throwing an instance of 'c10::DistBackendError'
+  what():  [PG ID 0 PG GUID 0(default_pg) Rank 1] Process group watchdog thread terminated with exception: [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=8, OpType=ALLREDUCE, NumelIn=1, NumelOut=1, Timeout(ms)=600000) ran for 600090 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x793623165eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x7935b396b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x7935b3971041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x7935b397268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x79364ee54ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x79364fd62ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x79364fdf48d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+Exception raised from run at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:2125 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x793623165eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x306f2c61 (0x7935b39abc61 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: <unknown function> + 0xf6ca6 (0x79364ee54ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #3: <unknown function> + 0x94ac3 (0x79364fd62ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #4: <unknown function> + 0x1268d0 (0x79364fdf48d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+W0517 00:22:07.071000 921072 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 921154 closing signal SIGTERM
+E0517 00:22:07.072000 921072 torch/distributed/elastic/multiprocessing/api.py:986] failed (exitcode: -6) local_rank: 1 (pid: 921155) of binary: /usr/bin/python3
+Traceback (most recent call last):
+  File "/usr/local/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/run.py", line 990, in main
+    run(args)
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/run.py", line 981, in run
+    elastic_launch(
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/launcher/api.py", line 170, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/launcher/api.py", line 317, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+==========================================================
+train.py FAILED
+----------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-05-17_00:22:07
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 0 (local_rank: 0)
+  exitcode  : -15 (pid: 921154)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 921154
+----------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-05-17_00:22:07
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 1 (local_rank: 1)
+  exitcode  : -6 (pid: 921155)
+  error_file: <N/A>
+  traceback : Signal 6 (SIGABRT) received by PID 921155
+==========================================================

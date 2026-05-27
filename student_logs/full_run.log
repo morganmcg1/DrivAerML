@@ -1,0 +1,181 @@
+W0514 16:59:03.560000 344429 torch/distributed/run.py:851] 
+W0514 16:59:03.560000 344429 torch/distributed/run.py:851] *****************************************
+W0514 16:59:03.560000 344429 torch/distributed/run.py:851] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0514 16:59:03.560000 344429 torch/distributed/run.py:851] *****************************************
+Device: cuda:0, DDP world_size=8
+Volume-points curriculum: ep0->16384, ep3->32768, ep6->49152, ep9->65536
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+
+
+
+
+
+
+Model: SurfaceTransolver grouped surface+volume (17.41M params)
+Surface channel weights: cp=1.0 tau_x=1.0 tau_y=1.5 tau_z=2.0
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165910-bfcu8l1c
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank0
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/bfcu8l1c
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165911-o39gkabe
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank1
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/o39gkabe
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165911-e7oc8f92
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank2
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/e7oc8f92
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165912-ownxg7c9
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank3
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/ownxg7c9
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165913-jzcbk50p
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank4
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/jzcbk50p
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165914-wnjg74x8
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank5
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/wnjg74x8
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run f13dr3o2
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165915-f13dr3o2
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank6
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/f13dr3o2
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_165916-2wc4un4g
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/sdf-stratified-surface-sampling-rank7
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/2wc4un4g
+Epoch 1/30:   0%|          | 0/10864 [00:00<?, ?it/s]/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+[rank1]:[W514 16:59:37.155969012 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+[rank4]:[W514 16:59:59.344495155 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank7]:[W514 16:59:59.344719859 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank5]:[W514 16:59:59.345140756 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank3]:[W514 16:59:59.354116389 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/30:   0%|          | 1/10864 [00:41<126:34:25, 41.95s/it][rank6]:[W514 16:59:59.856746545 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank2]:[W514 16:59:59.856889865 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/30:   0%|          | 2/10864 [00:42<53:04:22, 17.59s/it] [rank0]:[W514 17:00:00.374741458 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/30:   0%|          | 3/10864 [00:43<29:34:48,  9.80s/it]Epoch 1/30:   0%|          | 4/10864 [00:59<37:38:04, 12.48s/it]Epoch 1/30:   0%|          | 5/10864 [01:00<24:57:06,  8.27s/it]Epoch 1/30:   0%|          | 6/10864 [01:00<17:01:03,  5.64s/it]Epoch 1/30:   0%|          | 7/10864 [01:01<11:59:06,  3.97s/it]Epoch 1/30:   0%|          | 8/10864 [01:21<27:31:47,  9.13s/it]Epoch 1/30:   0%|          | 9/10864 [01:22<19:25:47,  6.44s/it]Epoch 1/30:   0%|          | 10/10864 [01:22<13:55:55,  4.62s/it]Epoch 1/30:   0%|          | 11/10864 [01:23<10:09:52,  3.37s/it]Epoch 1/30:   0%|          | 12/10864 [01:42<24:38:41,  8.18s/it]Epoch 1/30:   0%|          | 13/10864 [02:05<37:53:30, 12.57s/it]Epoch 1/30:   0%|          | 14/10864 [02:05<26:56:03,  8.94s/it]Epoch 1/30:   0%|          | 15/10864 [02:06<19:18:07,  6.40s/it]Epoch 1/30:   0%|          | 16/10864 [02:06<13:58:39,  4.64s/it]Epoch 1/30:   0%|          | 17/10864 [02:17<19:50:29,  6.59s/it]Epoch 1/30:   0%|          | 18/10864 [02:18<14:21:40,  4.77s/it]Epoch 1/30:   0%|          | 19/10864 [02:40<29:41:49,  9.86s/it]Epoch 1/30:   0%|          | 20/10864 [02:40<21:15:51,  7.06s/it]Epoch 1/30:   0%|          | 21/10864 [02:41<15:22:06,  5.10s/it]Epoch 1/30:   0%|          | 22/10864 [02:45<14:33:37,  4.83s/it]Epoch 1/30:   0%|          | 23/10864 [03:17<39:17:55, 13.05s/it]Epoch 1/30:   0%|          | 24/10864 [03:18<27:59:33,  9.30s/it]Epoch 1/30:   0%|          | 25/10864 [03:18<20:04:43,  6.67s/it]Epoch 1/30:   0%|          | 26/10864 [03:28<22:45:52,  7.56s/it]Epoch 1/30:   0%|          | 27/10864 [03:36<23:08:48,  7.69s/it]Epoch 1/30:   0%|          | 28/10864 [03:36<16:41:15,  5.54s/it]Epoch 1/30:   0%|          | 29/10864 [03:37<12:09:50,  4.04s/it]Epoch 1/30:   0%|          | 30/10864 [03:55<25:16:07,  8.40s/it]Epoch 1/30:   0%|          | 31/10864 [03:56<18:10:24,  6.04s/it]Epoch 1/30:   0%|          | 32/10864 [03:58<14:55:34,  4.96s/it]Epoch 1/30:   0%|          | 33/10864 [03:59<10:56:03,  3.63s/it]Epoch 1/30:   0%|          | 34/10864 [04:14<20:48:54,  6.92s/it]Epoch 1/30:   0%|          | 35/10864 [04:14<15:03:14,  5.00s/it]Epoch 1/30:   0%|          | 36/10864 [04:17<13:21:08,  4.44s/it]Epoch 1/30:   0%|          | 37/10864 [04:18<9:50:15,  3.27s/it] Epoch 1/30:   0%|          | 38/10864 [04:36<23:39:04,  7.86s/it]Epoch 1/30:   0%|          | 39/10864 [04:44<23:39:11,  7.87s/it]Epoch 1/30:   0%|          | 40/10864 [04:45<17:02:34,  5.67s/it]Epoch 1/30:   0%|          | 41/10864 [04:45<12:24:50,  4.13s/it]Epoch 1/30:   0%|          | 42/10864 [04:46<9:10:22,  3.05s/it] Epoch 1/30:   0%|          | 43/10864 [04:46<6:54:14,  2.30s/it]Epoch 1/30:   0%|          | 44/10864 [04:47<5:19:03,  1.77s/it]Epoch 1/30:   0%|          | 45/10864 [05:01<16:39:54,  5.55s/it]Epoch 1/30:   0%|          | 46/10864 [05:02<12:08:59,  4.04s/it]Epoch 1/30:   0%|          | 47/10864 [05:05<11:50:13,  3.94s/it]Epoch 1/30:   0%|          | 48/10864 [05:48<46:47:45, 15.58s/it]Epoch 1/30:   0%|          | 49/10864 [05:49<33:14:26, 11.06s/it]Epoch 1/30:   0%|          | 50/10864 [05:49<23:45:09,  7.91s/it]Epoch 1/30:   0%|          | 51/10864 [05:50<17:06:41,  5.70s/it]Epoch 1/30:   0%|          | 52/10864 [06:08<28:33:39,  9.51s/it]Epoch 1/30:   0%|          | 53/10864 [06:09<20:28:36,  6.82s/it]Epoch 1/30:   0%|          | 54/10864 [06:09<14:49:06,  4.93s/it]Epoch 1/30:   1%|          | 55/10864 [06:10<10:51:32,  3.62s/it]Epoch 1/30:   1%|          | 56/10864 [06:26<22:20:25,  7.44s/it]Epoch 1/30:   1%|          | 57/10864 [06:27<16:07:21,  5.37s/it]Epoch 1/30:   1%|          | 58/10864 [06:31<15:20:57,  5.11s/it]Epoch 1/30:   1%|          | 59/10864 [06:32<11:13:48,  3.74s/it]Epoch 1/30:   1%|          | 60/10864 [06:49<22:59:45,  7.66s/it]Epoch 1/30:   1%|          | 61/10864 [06:49<16:35:01,  5.53s/it]Epoch 1/30:   1%|          | 62/10864 [06:50<12:43:14,  4.24s/it]Epoch 1/30:   1%|          | 63/10864 [06:53<11:27:36,  3.82s/it]Epoch 1/30:   1%|          | 64/10864 [07:06<19:43:28,  6.57s/it]Epoch 1/30:   1%|          | 65/10864 [07:07<14:17:31,  4.76s/it]Epoch 1/30:   1%|          | 66/10864 [07:13<15:50:17,  5.28s/it]Epoch 1/30:   1%|          | 67/10864 [07:16<13:19:52,  4.44s/it]Epoch 1/30:   1%|          | 68/10864 [07:31<23:21:36,  7.79s/it]Epoch 1/30:   1%|          | 69/10864 [07:33<18:15:52,  6.09s/it]Epoch 1/30:   1%|          | 70/10864 [07:35<13:47:06,  4.60s/it]Epoch 1/30:   1%|          | 71/10864 [07:35<10:07:53,  3.38s/it]Epoch 1/30:   1%|          | 72/10864 [08:12<40:29:26, 13.51s/it]Epoch 1/30:   1%|          | 73/10864 [08:13<28:49:42,  9.62s/it]Epoch 1/30:   1%|          | 74/10864 [08:22<28:11:40,  9.41s/it]Epoch 1/30:   1%|          | 75/10864 [08:22<19:49:30,  6.62s/it]Epoch 1/30:   1%|          | 76/10864 [08:22<14:21:41,  4.79s/it]Epoch 1/30:   1%|          | 77/10864 [08:35<21:42:41,  7.25s/it]Epoch 1/30:   1%|          | 78/10864 [09:07<43:30:26, 14.52s/it]Epoch 1/30:   1%|          | 79/10864 [09:07<30:56:15, 10.33s/it]Epoch 1/30:   1%|          | 80/10864 [09:08<22:08:27,  7.39s/it]Epoch 1/30:   1%|          | 81/10864 [09:08<15:58:45,  5.33s/it]Epoch 1/30:   1%|          | 82/10864 [09:27<27:38:17,  9.23s/it]Epoch 1/30:   1%|          | 83/10864 [09:27<19:49:45,  6.62s/it]Epoch 1/30:   1%|          | 84/10864 [09:28<14:21:50,  4.80s/it]Epoch 1/30:   1%|          | 85/10864 [09:28<10:32:13,  3.52s/it]Epoch 1/30:   1%|          | 86/10864 [09:29<7:51:36,  2.63s/it] Epoch 1/30:   1%|          | 87/10864 [09:32<7:50:42,  2.62s/it]Epoch 1/30:   1%|          | 88/10864 [09:54<26:05:37,  8.72s/it]Epoch 1/30:   1%|          | 89/10864 [09:55<18:44:50,  6.26s/it]Epoch 1/30:   1%|          | 90/10864 [09:56<13:36:35,  4.55s/it]Epoch 1/30:   1%|          | 91/10864 [09:56<10:00:37,  3.35s/it]Epoch 1/30:   1%|          | 92/10864 [10:15<24:17:23,  8.12s/it]Epoch 1/30:   1%|          | 93/10864 [10:16<17:29:03,  5.84s/it]Epoch 1/30:   1%|          | 94/10864 [10:16<12:43:11,  4.25s/it]Epoch 1/30:   1%|          | 95/10864 [10:26<17:29:31,  5.85s/it]Epoch 1/30:   1%|          | 96/10864 [10:27<12:43:35,  4.25s/it]Epoch 1/30:   1%|          | 97/10864 [10:33<14:58:54,  5.01s/it]Epoch 1/30:   1%|          | 98/10864 [10:36<12:32:18,  4.19s/it]Epoch 1/30:   1%|          | 99/10864 [10:48<19:51:25,  6.64s/it]Epoch 1/30:   1%|          | 100/10864 [10:48<14:23:01,  4.81s/it]Epoch 1/30:   1%|          | 101/10864 [10:49<10:32:58,  3.53s/it]Epoch 1/30:   1%|          | 102/10864 [10:50<7:51:55,  2.63s/it] Epoch 1/30:   1%|          | 103/10864 [11:00<14:39:43,  4.91s/it]Epoch 1/30:   1%|          | 104/10864 [11:00<10:44:46,  3.60s/it]Epoch 1/30:   1%|          | 105/10864 [11:01<8:00:13,  2.68s/it] Epoch 1/30:   1%|          | 106/10864 [11:20<22:40:15,  7.59s/it]Epoch 1/30:   1%|          | 107/10864 [11:20<16:21:17,  5.47s/it]Epoch 1/30:   1%|          | 108/10864 [11:21<11:55:42,  3.99s/it]Epoch 1/30:   1%|          | 109/10864 [11:22<8:50:13,  2.96s/it] Epoch 1/30:   1%|          | 110/10864 [11:39<22:13:42,  7.44s/it]Epoch 1/30:   1%|          | 111/10864 [11:40<15:38:58,  5.24s/it]Epoch 1/30:   1%|          | 112/10864 [11:41<11:59:24,  4.01s/it]Epoch 1/30:   1%|          | 113/10864 [11:41<8:52:30,  2.97s/it] Epoch 1/30:   1%|          | 114/10864 [12:01<23:30:58,  7.88s/it]Epoch 1/30:   1%|          | 115/10864 [12:01<16:56:31,  5.67s/it]Epoch 1/30:   1%|          | 116/10864 [12:05<15:09:52,  5.08s/it]Epoch 1/30:   1%|          | 117/10864 [12:05<11:05:48,  3.72s/it]Epoch 1/30:   1%|          | 118/10864 [12:11<12:43:00,  4.26s/it]Epoch 1/30:   1%|          | 119/10864 [12:11<9:23:02,  3.14s/it] Epoch 1/30:   1%|          | 120/10864 [12:25<18:35:22,  6.23s/it]Epoch 1/30:   1%|          | 121/10864 [12:25<13:29:40,  4.52s/it]Epoch 1/30:   1%|          | 122/10864 [12:30<13:43:20,  4.60s/it]Epoch 1/30:   1%|          | 123/10864 [12:31<10:05:17,  3.38s/it]Epoch 1/30:   1%|          | 124/10864 [13:00<33:44:28, 11.31s/it]Epoch 1/30:   1%|          | 125/10864 [13:01<24:06:37,  8.08s/it]Epoch 1/30:   1%|          | 126/10864 [13:02<17:21:31,  5.82s/it]Epoch 1/30:   1%|          | 127/10864 [13:02<12:38:02,  4.24s/it]Epoch 1/30:   1%|          | 128/10864 [13:40<42:32:04, 14.26s/it]Epoch 1/30:   1%|          | 129/10864 [13:40<30:15:53, 10.15s/it]Epoch 1/30:   1%|          | 130/10864 [13:41<21:40:04,  7.27s/it]Epoch 1/30:   1%|          | 131/10864 [13:41<15:39:01,  5.25s/it]Epoch 1/30:   1%|          | 132/10864 [13:45<14:32:17,  4.88s/it]Epoch 1/30:   1%|          | 133/10864 [13:46<10:39:26,  3.58s/it]Epoch 1/30:   1%|          | 134/10864 [13:46<7:56:25,  2.66s/it] Epoch 1/30:   1%|          | 135/10864 [14:05<22:19:03,  7.49s/it]Epoch 1/30:   1%|▏         | 136/10864 [14:06<16:06:09,  5.40s/it]Epoch 1/30:   1%|▏         | 137/10864 [14:25<28:30:25,  9.57s/it]Epoch 1/30:   1%|▏         | 138/10864 [14:26<20:26:10,  6.86s/it]Epoch 1/30:   1%|▏         | 139/10864 [14:28<16:24:07,  5.51s/it]Epoch 1/30:   1%|▏         | 140/10864 [14:28<11:58:01,  4.02s/it]Epoch 1/30:   1%|▏         | 141/10864 [14:48<25:38:06,  8.61s/it]Epoch 1/30:   1%|▏         | 142/10864 [14:48<18:25:41,  6.19s/it]Epoch 1/30:   1%|▏         | 143/10864 [14:51<15:09:46,  5.09s/it]Epoch 1/30:   1%|▏         | 144/10864 [15:32<47:11:43, 15.85s/it]Epoch 1/30:   1%|▏         | 145/10864 [15:32<33:30:54, 11.26s/it]Epoch 1/30:   1%|▏         | 146/10864 [15:33<23:56:13,  8.04s/it]Epoch 1/30:   1%|▏         | 147/10864 [15:33<17:14:08,  5.79s/it]Epoch 1/30:   1%|▏         | 148/10864 [15:34<12:32:38,  4.21s/it]Epoch 1/30:   1%|▏         | 149/10864 [15:35<9:15:38,  3.11s/it] Epoch 1/30:   1%|▏         | 150/10864 [15:35<6:57:38,  2.34s/it]Epoch 1/30:   1%|▏         | 151/10864 [15:36<5:21:11,  1.80s/it]Epoch 1/30:   1%|▏         | 152/10864 [16:13<36:47:55, 12.37s/it]Epoch 1/30:   1%|▏         | 153/10864 [16:13<26:14:14,  8.82s/it]Epoch 1/30:   1%|▏         | 154/10864 [16:14<18:50:42,  6.33s/it]Epoch 1/30:   1%|▏         | 155/10864 [16:14<13:40:16,  4.60s/it]Epoch 1/30:   1%|▏         | 156/10864 [16:20<15:00:59,  5.05s/it]Epoch 1/30:   1%|▏         | 157/10864 [16:34<22:20:14,  7.51s/it]Epoch 1/30:   1%|▏         | 158/10864 [16:34<16:06:59,  5.42s/it]Epoch 1/30:   1%|▏         | 159/10864 [16:35<11:45:44,  3.96s/it]Epoch 1/30:   1%|▏         | 160/10864 [16:44<16:38:05,  5.59s/it]Epoch 1/30:   1%|▏         | 161/10864 [16:53<19:56:26,  6.71s/it]Epoch 1/30:   1%|▏         | 162/10864 [16:54<14:26:13,  4.86s/it]Epoch 1/30:   2%|▏         | 163/10864 [16:54<10:35:12,  3.56s/it]Epoch 1/30:   2%|▏         | 164/10864 [17:03<15:27:54,  5.20s/it]W0514 17:16:30.059000 344429 torch/distributed/elastic/agent/server/api.py:739] Received 2 death signal, shutting down workers
+W0514 17:16:30.060000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344511 closing signal SIGINT
+W0514 17:16:30.061000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344512 closing signal SIGINT
+W0514 17:16:30.061000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344513 closing signal SIGINT
+W0514 17:16:30.061000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344514 closing signal SIGINT
+W0514 17:16:30.061000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344515 closing signal SIGINT
+W0514 17:16:30.061000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344516 closing signal SIGINT
+W0514 17:16:30.061000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344517 closing signal SIGINT
+W0514 17:16:30.061000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344518 closing signal SIGINT
+W0514 17:16:35.396000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344511 closing signal SIGTERM
+W0514 17:16:35.397000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344512 closing signal SIGTERM
+W0514 17:16:35.397000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344513 closing signal SIGTERM
+W0514 17:16:35.397000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344514 closing signal SIGTERM
+W0514 17:16:35.398000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344515 closing signal SIGTERM
+W0514 17:16:35.398000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344516 closing signal SIGTERM
+W0514 17:16:35.399000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344517 closing signal SIGTERM
+W0514 17:16:35.399000 344429 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 344518 closing signal SIGTERM
+Traceback (most recent call last):
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/agent/server/api.py", line 731, in run
+    result = self._invoke_run(role)
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/agent/server/api.py", line 908, in _invoke_run
+    time.sleep(monitor_interval)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 86, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 344429 got signal: 2
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/senpai/target/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 990, in main
+    run(args)
+    ~~~^^^^^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 981, in run
+    elastic_launch(
+    ~~~~~~~~~~~~~~~
+        config=config,
+        ~~~~~~~~~~~~~~
+        entrypoint=cmd,
+        ~~~~~~~~~~~~~~~
+    )(*cmd_args)
+    ~^^^^^^^^^^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 170, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 308, in launch_agent
+    result = agent.run()
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/metrics/api.py", line 134, in wrapper
+    result = f(*args, **kwargs)
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/agent/server/api.py", line 740, in run
+    self._shutdown(e.sigval)
+    ~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py", line 416, in _shutdown
+    self._pcontext.close(death_sig)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 661, in close
+    self._close(death_sig=death_sig, timeout=timeout)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 1024, in _close
+    handler.proc.wait(time_to_wait)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.13.13-linux-x86_64-gnu/lib/python3.13/subprocess.py", line 1280, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.13.13-linux-x86_64-gnu/lib/python3.13/subprocess.py", line 2079, in _wait
+    time.sleep(delay)
+    ~~~~~~~~~~^^^^^^^
+  File "/workspace/senpai/target/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 86, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 344429 got signal: 2

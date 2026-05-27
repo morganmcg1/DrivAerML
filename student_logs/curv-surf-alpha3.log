@@ -1,0 +1,498 @@
+W0514 16:27:43.043000 334589 torch/distributed/run.py:851] 
+W0514 16:27:43.043000 334589 torch/distributed/run.py:851] *****************************************
+W0514 16:27:43.043000 334589 torch/distributed/run.py:851] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0514 16:27:43.043000 334589 torch/distributed/run.py:851] *****************************************
+Device: cuda:0, DDP world_size=8
+Volume-points curriculum: ep0->16384, ep3->32768, ep6->49152, ep9->65536
+Curvature-weighted surface sampling enabled: mode=curvature, alpha=3 (weight = 1 + alpha * score, score in [0,1] per case)
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+Model: SurfaceTransolver grouped surface+volume (17.41M params)
+Surface channel weights: cp=1.0 tau_x=1.0 tau_y=1.5 tau_z=2.0
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162749-9pcp6q79
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank0
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/9pcp6q79
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162750-dtg7ow9j
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank1
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/dtg7ow9j
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162751-bpbmd1bh
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank2
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/bpbmd1bh
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162752-4yrnw6tk
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank3
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/4yrnw6tk
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162753-x7p3yjls
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank4
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/x7p3yjls
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162754-hw0auxtj
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank5
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/hw0auxtj
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162755-g4sg0aqo
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank6
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/g4sg0aqo
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_162756-3kkov7cs
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/curv-surf-alpha3-rank7
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/3kkov7cs
+Epoch 1/30:   0%|          | 0/10864 [00:00<?, ?it/s]/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+[rank1]:[W514 16:27:59.430162096 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+[rank5]:[W514 16:27:59.917759066 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank7]:[W514 16:27:59.920423042 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank4]:[W514 16:27:59.923287007 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank3]:[W514 16:27:59.963894832 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/30:   0%|          | 1/10864 [00:02<7:22:01,  2.44s/it][rank2]:[W514 16:28:00.453487254 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank6]:[W514 16:28:00.453790828 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/30:   0%|          | 2/10864 [00:02<3:58:56,  1.32s/it][rank0]:[W514 16:28:00.975750809 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/30:   0%|          | 3/10864 [00:03<2:54:00,  1.04it/s]                                                               [rank4]:[E514 16:38:01.530404616 ProcessGroupNCCL.cpp:689] [Rank 4] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600044 milliseconds before timing out.
+[rank4]:[E514 16:38:01.530698464 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 4]  failure detected by watchdog at work sequence id: 43 PG status: last enqueued work: 43, last completed work: 42
+[rank4]:[E514 16:38:01.531168078 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 _distributed_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2172
+#1 _default_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2257
+#2 _sync_module_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2235
+#3 _sync_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2231
+#4 _pre_forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1591
+#5 forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1695
+#6 _call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1790
+#7 _wrapped_call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1779
+#8 train_loss from /workspace/senpai/target/train.py:494
+#9 main from /workspace/senpai/target/train.py:1203
+#10 <module> from /workspace/senpai/target/train.py:1556
+
+[rank4]:[E514 16:38:01.531251957 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 4] First PG on this rank to signal dumping.
+[rank3]:[E514 16:38:01.555900681 ProcessGroupNCCL.cpp:689] [Rank 3] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600069 milliseconds before timing out.
+[rank3]:[E514 16:38:01.556091227 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 3]  failure detected by watchdog at work sequence id: 43 PG status: last enqueued work: 43, last completed work: 42
+[rank3]:[E514 16:38:01.556370435 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 _distributed_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2172
+#1 _default_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2257
+#2 _sync_module_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2235
+#3 _sync_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2231
+#4 _pre_forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1591
+#5 forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1695
+#6 _call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1790
+#7 _wrapped_call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1779
+#8 train_loss from /workspace/senpai/target/train.py:494
+#9 main from /workspace/senpai/target/train.py:1203
+#10 <module> from /workspace/senpai/target/train.py:1556
+
+[rank3]:[E514 16:38:01.556445879 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 3] First PG on this rank to signal dumping.
+[rank5]:[E514 16:38:01.556626145 ProcessGroupNCCL.cpp:689] [Rank 5] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600068 milliseconds before timing out.
+[rank5]:[E514 16:38:01.556744349 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 5]  failure detected by watchdog at work sequence id: 43 PG status: last enqueued work: 43, last completed work: 42
+[rank5]:[E514 16:38:01.556930103 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 _distributed_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2172
+#1 _default_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2257
+#2 _sync_module_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2235
+#3 _sync_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2231
+#4 _pre_forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1591
+#5 forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1695
+#6 _call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1790
+#7 _wrapped_call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1779
+#8 train_loss from /workspace/senpai/target/train.py:494
+#9 main from /workspace/senpai/target/train.py:1203
+#10 <module> from /workspace/senpai/target/train.py:1556
+
+[rank5]:[E514 16:38:01.556992718 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 5] First PG on this rank to signal dumping.
+[rank7]:[E514 16:38:01.561401264 ProcessGroupNCCL.cpp:689] [Rank 7] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600073 milliseconds before timing out.
+[rank7]:[E514 16:38:01.561550362 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 7]  failure detected by watchdog at work sequence id: 43 PG status: last enqueued work: 43, last completed work: 42
+[rank7]:[E514 16:38:01.561746281 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 _distributed_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2172
+#1 _default_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2257
+#2 _sync_module_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2235
+#3 _sync_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2231
+#4 _pre_forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1591
+#5 forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1695
+#6 _call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1790
+#7 _wrapped_call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1779
+#8 train_loss from /workspace/senpai/target/train.py:494
+#9 main from /workspace/senpai/target/train.py:1203
+#10 <module> from /workspace/senpai/target/train.py:1556
+
+[rank7]:[E514 16:38:01.561818526 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 7] First PG on this rank to signal dumping.
+[rank2]:[E514 16:38:01.573742028 ProcessGroupNCCL.cpp:689] [Rank 2] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600085 milliseconds before timing out.
+[rank2]:[E514 16:38:01.574068422 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 2]  failure detected by watchdog at work sequence id: 43 PG status: last enqueued work: 43, last completed work: 42
+[rank2]:[E514 16:38:01.574529150 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 _distributed_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2172
+#1 _default_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2257
+#2 _sync_module_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2235
+#3 _sync_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2231
+#4 _pre_forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1591
+#5 forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1695
+#6 _call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1790
+#7 _wrapped_call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1779
+#8 train_loss from /workspace/senpai/target/train.py:494
+#9 main from /workspace/senpai/target/train.py:1203
+#10 <module> from /workspace/senpai/target/train.py:1556
+
+[rank2]:[E514 16:38:01.574631317 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 2] First PG on this rank to signal dumping.
+[rank1]:[E514 16:38:01.575874606 ProcessGroupNCCL.cpp:689] [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600087 milliseconds before timing out.
+[rank1]:[E514 16:38:01.576028001 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 1]  failure detected by watchdog at work sequence id: 43 PG status: last enqueued work: 43, last completed work: 42
+[rank1]:[E514 16:38:01.576255649 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 _distributed_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2172
+#1 _default_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2257
+#2 _sync_module_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2235
+#3 _sync_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2231
+#4 _pre_forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1591
+#5 forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1695
+#6 _call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1790
+#7 _wrapped_call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1779
+#8 train_loss from /workspace/senpai/target/train.py:494
+#9 main from /workspace/senpai/target/train.py:1203
+#10 <module> from /workspace/senpai/target/train.py:1556
+
+[rank1]:[E514 16:38:01.576323034 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 1] First PG on this rank to signal dumping.
+[rank6]:[E514 16:38:01.581868538 ProcessGroupNCCL.cpp:689] [Rank 6] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600094 milliseconds before timing out.
+[rank6]:[E514 16:38:01.582039667 ProcessGroupNCCL.cpp:2303] [PG ID 0 PG GUID 0(default_pg) Rank 6]  failure detected by watchdog at work sequence id: 43 PG status: last enqueued work: 43, last completed work: 42
+[rank6]:[E514 16:38:01.582238885 ProcessGroupNCCL.cpp:733] Stack trace of the failed collective: 
+#0 _distributed_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2172
+#1 _default_broadcast_coalesced from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2257
+#2 _sync_module_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2235
+#3 _sync_buffers from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:2231
+#4 _pre_forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1591
+#5 forward from /usr/local/lib/python3.10/dist-packages/torch/nn/parallel/distributed.py:1695
+#6 _call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1790
+#7 _wrapped_call_impl from /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py:1779
+#8 train_loss from /workspace/senpai/target/train.py:494
+#9 main from /workspace/senpai/target/train.py:1203
+#10 <module> from /workspace/senpai/target/train.py:1556
+
+[rank6]:[E514 16:38:01.582300499 ProcessGroupNCCL.cpp:2636] [PG ID 0 PG GUID 0(default_pg) Rank 6] First PG on this rank to signal dumping.
+[rank4]:[E514 16:38:01.325714411 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 4] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 43, last completed NCCL work: 42.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank4]:[E514 16:38:01.325832433 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 4] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+[rank5]:[E514 16:38:02.448943236 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 5] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 43, last completed NCCL work: 42.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank3]:[E514 16:38:02.448962664 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 3] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 43, last completed NCCL work: 42.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank5]:[E514 16:38:02.449041564 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 5] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+[rank3]:[E514 16:38:02.449043182 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 3] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+[rank7]:[E514 16:38:02.458704635 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 7] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 43, last completed NCCL work: 42.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank7]:[E514 16:38:02.458796478 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 7] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+[rank1]:[E514 16:38:02.462325106 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 1] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 43, last completed NCCL work: 42.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank1]:[E514 16:38:02.462388180 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 1] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+[rank6]:[E514 16:38:02.469433913 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 6] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 43, last completed NCCL work: 42.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank6]:[E514 16:38:02.469511515 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 6] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+[rank2]:[E514 16:38:02.469626837 ProcessGroupNCCL.cpp:1914] [PG ID 0 PG GUID 0(default_pg) Rank 2] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 43, last completed NCCL work: 42.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank2]:[E514 16:38:02.469722051 ProcessGroupNCCL.cpp:1628] [PG ID 0 PG GUID 0(default_pg) Rank 2] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1, only active collectives: 0
+Traceback (most recent call last):
+  File "/workspace/senpai/target/train.py", line 1556, in <module>
+  File "/workspace/senpai/target/train.py", line 1112, in main
+    optimizer.zero_grad(set_to_none=True)
+  File "/usr/local/lib/python3.10/dist-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+  File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/dataloader.py", line 741, in __next__
+    data = self._next_data()
+  File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/dataloader.py", line 1518, in _next_data
+    return self._process_data(data, worker_id)
+  File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/dataloader.py", line 1586, in _process_data
+    data.reraise()
+  File "/usr/local/lib/python3.10/dist-packages/torch/_utils.py", line 785, in reraise
+    raise exception
+FileNotFoundError: Caught FileNotFoundError in DataLoader worker process 3.
+Original Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/_utils/worker.py", line 358, in _worker_loop
+    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+  File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/_utils/fetch.py", line 54, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/_utils/fetch.py", line 54, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/workspace/senpai/target/train.py", line 168, in _patched_getitem
+    score = _load_case_curvature_score(
+  File "/workspace/senpai/target/train.py", line 109, in _load_case_curvature_score
+    resolved = _resolve_artifact_path(curv_path)
+  File "/workspace/senpai/target/data/loader.py", line 240, in _resolve_artifact_path
+    raise FileNotFoundError(f"Could not resolve DrivAerML artifact {path}; checked {checked}")
+FileNotFoundError: Could not resolve DrivAerML artifact /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511/run_453/curvature_HK_v2.npy; checked ['/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511/run_453/curvature_HK_v2.npy', '/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/run_453/curvature_HK_v2.npy']
+
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/workspace/senpai/target/train.py", line 1556, in <module>
+[rank0]:   File "/workspace/senpai/target/train.py", line 1112, in main
+[rank0]:     optimizer.zero_grad(set_to_none=True)
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/tqdm/std.py", line 1181, in __iter__
+[rank0]:     for obj in iterable:
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/dataloader.py", line 741, in __next__
+[rank0]:     data = self._next_data()
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/dataloader.py", line 1518, in _next_data
+[rank0]:     return self._process_data(data, worker_id)
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/dataloader.py", line 1586, in _process_data
+[rank0]:     data.reraise()
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/_utils.py", line 785, in reraise
+[rank0]:     raise exception
+[rank0]: FileNotFoundError: Caught FileNotFoundError in DataLoader worker process 3.
+[rank0]: Original Traceback (most recent call last):
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/_utils/worker.py", line 358, in _worker_loop
+[rank0]:     data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/_utils/fetch.py", line 54, in fetch
+[rank0]:     data = [self.dataset[idx] for idx in possibly_batched_index]
+[rank0]:   File "/usr/local/lib/python3.10/dist-packages/torch/utils/data/_utils/fetch.py", line 54, in <listcomp>
+[rank0]:     data = [self.dataset[idx] for idx in possibly_batched_index]
+[rank0]:   File "/workspace/senpai/target/train.py", line 168, in _patched_getitem
+[rank0]:     score = _load_case_curvature_score(
+[rank0]:   File "/workspace/senpai/target/train.py", line 109, in _load_case_curvature_score
+[rank0]:     resolved = _resolve_artifact_path(curv_path)
+[rank0]:   File "/workspace/senpai/target/data/loader.py", line 240, in _resolve_artifact_path
+[rank0]:     raise FileNotFoundError(f"Could not resolve DrivAerML artifact {path}; checked {checked}")
+[rank0]: FileNotFoundError: Could not resolve DrivAerML artifact /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511/run_453/curvature_HK_v2.npy; checked ['/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511/run_453/curvature_HK_v2.npy', '/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/run_453/curvature_HK_v2.npy']
+
+[rank4]:[E514 16:39:01.965123016 ProcessGroupNCCL.cpp:750] [Rank 4] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank4]:[E514 16:39:01.965160640 ProcessGroupNCCL.cpp:764] [Rank 4] To avoid data inconsistency, we are taking the entire process down.
+[rank4]:[E514 16:39:01.965792137 ProcessGroupNCCL.cpp:2119] [PG ID 0 PG GUID 0(default_pg) Rank 4] Process group watchdog thread terminated with exception: [Rank 4] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600044 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7111d49b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x71113956b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x711139571041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x71113957268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x7111d7c7fca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x7111da5e3ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x7111da6758d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+terminate called after throwing an instance of 'c10::DistBackendError'
+  what():  [PG ID 0 PG GUID 0(default_pg) Rank 4] Process group watchdog thread terminated with exception: [Rank 4] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600044 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7111d49b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x71113956b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x711139571041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x71113957268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x7111d7c7fca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x7111da5e3ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x7111da6758d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+Exception raised from run at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:2125 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7111d49b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x306f2c61 (0x7111395abc61 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: <unknown function> + 0xf6ca6 (0x7111d7c7fca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #3: <unknown function> + 0x94ac3 (0x7111da5e3ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #4: <unknown function> + 0x1268d0 (0x7111da6758d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+[rank3]:[E514 16:39:01.969084430 ProcessGroupNCCL.cpp:750] [Rank 3] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank3]:[E514 16:39:01.969120211 ProcessGroupNCCL.cpp:764] [Rank 3] To avoid data inconsistency, we are taking the entire process down.
+W0514 16:39:01.631000 334589 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 334658 closing signal SIGTERM
+W0514 16:39:01.632000 334589 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 334659 closing signal SIGTERM
+[rank5]:[E514 16:39:01.969454112 ProcessGroupNCCL.cpp:750] [Rank 5] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank5]:[E514 16:39:01.969475245 ProcessGroupNCCL.cpp:764] [Rank 5] To avoid data inconsistency, we are taking the entire process down.
+[rank3]:[E514 16:39:01.969692663 ProcessGroupNCCL.cpp:2119] [PG ID 0 PG GUID 0(default_pg) Rank 3] Process group watchdog thread terminated with exception: [Rank 3] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600069 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7581fd5b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x75816216b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x758162171041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x75816217268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x7582007e4ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x758203148ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x7582031da8d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+terminate called after throwing an instance of 'c10::DistBackendError'
+W0514 16:39:01.632000 334589 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 334660 closing signal SIGTERM
+  what():  [PG ID 0 PG GUID 0(default_pg) Rank 3] Process group watchdog thread terminated with exception: [Rank 3] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600069 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7581fd5b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x75816216b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x758162171041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x75816217268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x7582007e4ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x758203148ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x7582031da8d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+Exception raised from run at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:2125 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7581fd5b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x306f2c61 (0x7581621abc61 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: <unknown function> + 0xf6ca6 (0x7582007e4ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #3: <unknown function> + 0x94ac3 (0x758203148ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #4: <unknown function> + 0x1268d0 (0x7582031da8d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+[rank5]:[E514 16:39:01.970045360 ProcessGroupNCCL.cpp:2119] [PG ID 0 PG GUID 0(default_pg) Rank 5] Process group watchdog thread terminated with exception: [Rank 5] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600068 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7eb9bbf65eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x7eb94c76b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x7eb94c771041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x7eb94c77268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x7eb9ead11ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x7eb9ed675ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x7eb9ed7078d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+terminate called after throwing an instance of 'c10::DistBackendError'
+W0514 16:39:01.633000 334589 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 334661 closing signal SIGTERM
+  what():  [PG ID 0 PG GUID 0(default_pg) Rank 5] Process group watchdog thread terminated with exception: [Rank 5] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600068 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7eb9bbf65eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x7eb94c76b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x7eb94c771041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x7eb94c77268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x7eb9ead11ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x7eb9ed675ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x7eb9ed7078d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+Exception raised from run at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:2125 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x7eb9bbf65eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x306f2c61 (0x7eb94c7abc61 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: <unknown function> + 0xf6ca6 (0x7eb9ead11ca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #3: <unknown function> + 0x94ac3 (0x7eb9ed675ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #4: <unknown function> + 0x1268d0 (0x7eb9ed7078d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+[rank7]:[E514 16:39:01.970719049 ProcessGroupNCCL.cpp:750] [Rank 7] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank7]:[E514 16:39:01.970739269 ProcessGroupNCCL.cpp:764] [Rank 7] To avoid data inconsistency, we are taking the entire process down.
+W0514 16:39:01.633000 334589 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 334663 closing signal SIGTERM
+[rank7]:[E514 16:39:01.971299972 ProcessGroupNCCL.cpp:2119] [PG ID 0 PG GUID 0(default_pg) Rank 7] Process group watchdog thread terminated with exception: [Rank 7] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600073 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x71b6ff7b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x71b66436b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x71b664371041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x71b66437268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x71b702a6fca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x71b7053d3ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x71b7054658d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+terminate called after throwing an instance of 'c10::DistBackendError'
+W0514 16:39:01.634000 334589 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 334664 closing signal SIGTERM
+  what():  [PG ID 0 PG GUID 0(default_pg) Rank 7] Process group watchdog thread terminated with exception: [Rank 7] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=43, OpType=BROADCAST, NumelIn=85, NumelOut=85, Timeout(ms)=600000) ran for 600073 milliseconds before timing out.
+Exception raised from checkTimeout at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:692 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x71b6ff7b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x2c8 (0x71b66436b738 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x1791 (0x71b664371041 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0x16a (0x71b66437268a in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xf6ca6 (0x71b702a6fca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x71b7053d3ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x1268d0 (0x71b7054658d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+Exception raised from run at /build/pytorch/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:2125 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xb1 (0x71b6ff7b1eb1 in /usr/local/lib/python3.10/dist-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x306f2c61 (0x71b6643abc61 in /usr/local/lib/python3.10/dist-packages/torch/lib/libtorch_cuda.so)
+frame #2: <unknown function> + 0xf6ca6 (0x71b702a6fca6 in /usr/lib/x86_64-linux-gnu/libstdc++.so.6)
+frame #3: <unknown function> + 0x94ac3 (0x71b7053d3ac3 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+frame #4: <unknown function> + 0x1268d0 (0x71b7054658d0 in /usr/lib/x86_64-linux-gnu/libc.so.6)
+
+W0514 16:39:01.634000 334589 torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 334665 closing signal SIGTERM
+E0514 16:39:01.637000 334589 torch/distributed/elastic/multiprocessing/api.py:986] failed (exitcode: -6) local_rank: 4 (pid: 334662) of binary: /usr/bin/python3
+Traceback (most recent call last):
+  File "/usr/local/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/run.py", line 990, in main
+    run(args)
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/run.py", line 981, in run
+    elastic_launch(
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/launcher/api.py", line 170, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/usr/local/lib/python3.10/dist-packages/torch/distributed/launcher/api.py", line 317, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+==========================================================
+train.py FAILED
+----------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 0 (local_rank: 0)
+  exitcode  : -15 (pid: 334658)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 334658
+[2]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 1 (local_rank: 1)
+  exitcode  : -15 (pid: 334659)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 334659
+[3]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 2 (local_rank: 2)
+  exitcode  : -15 (pid: 334660)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 334660
+[4]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 3 (local_rank: 3)
+  exitcode  : -6 (pid: 334661)
+  error_file: <N/A>
+  traceback : Signal 6 (SIGABRT) received by PID 334661
+[5]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 5 (local_rank: 5)
+  exitcode  : -6 (pid: 334663)
+  error_file: <N/A>
+  traceback : Signal 6 (SIGABRT) received by PID 334663
+[6]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 6 (local_rank: 6)
+  exitcode  : -15 (pid: 334664)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 334664
+[7]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 7 (local_rank: 7)
+  exitcode  : -6 (pid: 334665)
+  error_file: <N/A>
+  traceback : Signal 6 (SIGABRT) received by PID 334665
+----------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-05-14_16:39:01
+  host      : senpai-drivaerml-ddp8-nezuko-b48cbfcd5-f9r2f
+  rank      : 4 (local_rank: 4)
+  exitcode  : -6 (pid: 334662)
+  error_file: <N/A>
+  traceback : Signal 6 (SIGABRT) received by PID 334662
+==========================================================

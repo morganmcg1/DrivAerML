@@ -1,0 +1,23 @@
+Cases in manifest: 484
+Already computed: 97; to compute: 387 with workers=32
+  [20/387] wall=23.0s avg_cpu_per_case=21.05s rate=0.87/s eta=422s
+  [40/387] wall=41.1s avg_cpu_per_case=21.59s rate=0.97/s eta=356s
+  [60/387] wall=45.0s avg_cpu_per_case=21.37s rate=1.33/s eta=245s
+  [80/387] wall=63.2s avg_cpu_per_case=21.14s rate=1.27/s eta=242s
+  [100/387] wall=80.7s avg_cpu_per_case=21.05s rate=1.24/s eta=232s
+  [120/387] wall=86.1s avg_cpu_per_case=20.96s rate=1.39/s eta=192s
+  [140/387] wall=103.4s avg_cpu_per_case=20.86s rate=1.35/s eta=182s
+  [160/387] wall=112.3s avg_cpu_per_case=20.87s rate=1.42/s eta=159s
+  [180/387] wall=126.6s avg_cpu_per_case=20.78s rate=1.42/s eta=146s
+  [200/387] wall=141.8s avg_cpu_per_case=20.72s rate=1.41/s eta=133s
+  [220/387] wall=149.2s avg_cpu_per_case=20.67s rate=1.47/s eta=113s
+  [240/387] wall=165.2s avg_cpu_per_case=20.60s rate=1.45/s eta=101s
+  [260/387] wall=179.7s avg_cpu_per_case=20.59s rate=1.45/s eta=88s
+  [280/387] wall=187.9s avg_cpu_per_case=20.57s rate=1.49/s eta=72s
+  [300/387] wall=203.1s avg_cpu_per_case=20.55s rate=1.48/s eta=59s
+  [320/387] wall=215.3s avg_cpu_per_case=20.53s rate=1.49/s eta=45s
+  [340/387] wall=226.9s avg_cpu_per_case=20.50s rate=1.50/s eta=31s
+  [360/387] wall=242.7s avg_cpu_per_case=20.49s rate=1.48/s eta=18s
+  [380/387] wall=251.6s avg_cpu_per_case=20.49s rate=1.51/s eta=5s
+  [387/387] wall=258.9s avg_cpu_per_case=20.50s rate=1.49/s eta=0s
+Done in 259.0s; errors=0

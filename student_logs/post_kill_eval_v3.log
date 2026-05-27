@@ -1,0 +1,125 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260514_041504-75wz5ph7
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/gradnorm-ema-proxy-slw1-v3-post-kill-eval
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/75wz5ph7
+DrivAerML: train=347657 views/400 cases, val=11946 views/34 cases, test=18154 views/50 cases
+Loaded checkpoint epoch=3 source=ema
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+wandb: updating run metadata
+wandb: uploading history steps 0-0, summary, console lines 2-81
+wandb: 
+wandb: Run history:
+wandb:      full_val/val_surface/abupt_axis_mean_rel_l2 ▁
+wandb:  full_val/val_surface/abupt_axis_mean_rel_l2_pct ▁
+wandb:                       full_val/val_surface/cases ▁
+wandb:                        full_val/val_surface/loss ▁
+wandb:               full_val/val_surface/surface_cases ▁
+wandb:                full_val/val_surface/surface_loss ▁
+wandb:        full_val/val_surface/surface_pressure_mae ▁
+wandb:     full_val/val_surface/surface_pressure_rel_l2 ▁
+wandb: full_val/val_surface/surface_pressure_rel_l2_pct ▁
+wandb:                full_val/val_surface/volume_cases ▁
+wandb:                                              +66 ...
+wandb: 
+wandb: Run summary:
+wandb:      full_val/val_surface/abupt_axis_mean_rel_l2 0.06783
+wandb:  full_val/val_surface/abupt_axis_mean_rel_l2_pct 6.78317
+wandb:                       full_val/val_surface/cases 34
+wandb:                        full_val/val_surface/loss 0.00577
+wandb:               full_val/val_surface/surface_cases 34
+wandb:                full_val/val_surface/surface_loss 0.0068
+wandb:        full_val/val_surface/surface_pressure_mae 0.01219
+wandb:     full_val/val_surface/surface_pressure_rel_l2 0.04484
+wandb: full_val/val_surface/surface_pressure_rel_l2_pct 4.48388
+wandb:                full_val/val_surface/volume_cases 34
+wandb:                                              +66 ...
+wandb: 
+wandb: 🚀 View run nezuko/gradnorm-ema-proxy-slw1-v3-post-kill-eval at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/75wz5ph7
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260514_041504-75wz5ph7/logs
+
+=== FULL VAL METRICS (val_surface) ===
+  full_val/val_surface/abupt_axis_mean_rel_l2: 0.067832
+  full_val/val_surface/abupt_axis_mean_rel_l2_pct: 6.783171
+  full_val/val_surface/cases: 34.000000
+  full_val/val_surface/loss: 0.005774
+  full_val/val_surface/surface_cases: 34.000000
+  full_val/val_surface/surface_loss: 0.006803
+  full_val/val_surface/surface_pressure_mae: 0.012188
+  full_val/val_surface/surface_pressure_rel_l2: 0.044839
+  full_val/val_surface/surface_pressure_rel_l2_pct: 4.483878
+  full_val/val_surface/volume_cases: 34.000000
+  full_val/val_surface/volume_loss: 0.003297
+  full_val/val_surface/volume_pressure_mae: 8.723346
+  full_val/val_surface/volume_pressure_rel_l2: 0.044820
+  full_val/val_surface/volume_pressure_rel_l2_pct: 4.482047
+  full_val/val_surface/wall_shear_mae: 0.064119
+  full_val/val_surface/wall_shear_rel_l2: 0.075440
+  full_val/val_surface/wall_shear_rel_l2_pct: 7.543976
+  full_val/val_surface/wall_shear_vector_mae: 0.132859
+  full_val/val_surface/wall_shear_x_mae: 0.084313
+  full_val/val_surface/wall_shear_x_rel_l2: 0.066141
+  full_val/val_surface/wall_shear_x_rel_l2_pct: 6.614101
+  full_val/val_surface/wall_shear_y_mae: 0.054232
+  full_val/val_surface/wall_shear_y_rel_l2: 0.082998
+  full_val/val_surface/wall_shear_y_rel_l2_pct: 8.299793
+  full_val/val_surface/wall_shear_z_mae: 0.053811
+  full_val/val_surface/wall_shear_z_rel_l2: 0.100360
+  full_val/val_surface/wall_shear_z_rel_l2_pct: 10.036037
+  full_val_primary/abupt_axis_mean_rel_l2: 0.067832
+  full_val_primary/abupt_axis_mean_rel_l2_pct: 6.783171
+  full_val_primary/surface_pressure_mae: 0.012188
+  full_val_primary/surface_pressure_rel_l2_pct: 4.483878
+  full_val_primary/volume_pressure_mae: 8.723346
+  full_val_primary/volume_pressure_rel_l2_pct: 4.482047
+  full_val_primary/wall_shear_mae: 0.064119
+  full_val_primary/wall_shear_rel_l2_pct: 7.543976
+  full_val_primary/wall_shear_x_rel_l2_pct: 6.614101
+  full_val_primary/wall_shear_y_rel_l2_pct: 8.299793
+  full_val_primary/wall_shear_z_rel_l2_pct: 10.036037
+
+=== TEST METRICS (test_surface) ===
+  test/test_surface/abupt_axis_mean_rel_l2: 0.065083
+  test/test_surface/abupt_axis_mean_rel_l2_pct: 6.508323
+  test/test_surface/cases: 50.000000
+  test/test_surface/loss: 0.005278
+  test/test_surface/surface_cases: 50.000000
+  test/test_surface/surface_loss: 0.006141
+  test/test_surface/surface_pressure_mae: 0.011948
+  test/test_surface/surface_pressure_rel_l2: 0.041344
+  test/test_surface/surface_pressure_rel_l2_pct: 4.134392
+  test/test_surface/volume_cases: 50.000000
+  test/test_surface/volume_loss: 0.003191
+  test/test_surface/volume_pressure_mae: 8.607558
+  test/test_surface/volume_pressure_rel_l2: 0.043760
+  test/test_surface/volume_pressure_rel_l2_pct: 4.375972
+  test/test_surface/wall_shear_mae: 0.061951
+  test/test_surface/wall_shear_rel_l2: 0.073544
+  test/test_surface/wall_shear_rel_l2_pct: 7.354414
+  test/test_surface/wall_shear_vector_mae: 0.128338
+  test/test_surface/wall_shear_x_mae: 0.080777
+  test/test_surface/wall_shear_x_rel_l2: 0.065298
+  test/test_surface/wall_shear_x_rel_l2_pct: 6.529841
+  test/test_surface/wall_shear_y_mae: 0.052609
+  test/test_surface/wall_shear_y_rel_l2: 0.080758
+  test/test_surface/wall_shear_y_rel_l2_pct: 8.075842
+  test/test_surface/wall_shear_z_mae: 0.052469
+  test/test_surface/wall_shear_z_rel_l2: 0.094256
+  test/test_surface/wall_shear_z_rel_l2_pct: 9.425567
+  test_primary/abupt_axis_mean_rel_l2: 0.065083
+  test_primary/abupt_axis_mean_rel_l2_pct: 6.508323
+  test_primary/surface_pressure_mae: 0.011948
+  test_primary/surface_pressure_rel_l2_pct: 4.134392
+  test_primary/volume_pressure_mae: 8.607558
+  test_primary/volume_pressure_rel_l2_pct: 4.375972
+  test_primary/wall_shear_mae: 0.061951
+  test_primary/wall_shear_rel_l2_pct: 7.354414
+  test_primary/wall_shear_x_rel_l2_pct: 6.529841
+  test_primary/wall_shear_y_rel_l2_pct: 8.075842
+  test_primary/wall_shear_z_rel_l2_pct: 9.425567
