@@ -10752,3 +10752,29 @@ All four are orthogonal axes (target transform / target rescaling / regularizati
 3. **H125 EP9 val correctly led H120 throughout** (peak −0.081pp at EP6, consolidated −0.063-0.068pp at EP7-EP9), confirming depth-7 > depth-6 on val — but the val gains do not transfer to test. H112's steep negative val→test slope (−0.215pp) is a depth-5-specific generalization property, not a universal feature of this architecture.
 4. **OOM recovery banked** — EP9 EMA-best extracted from crashed run via `eval_test_only.py`. Memory headroom notes for future depth-7+ launches: `--eval-volume-points 49152` or `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`.
 5. **Next experiment (H132):** depth-5 × DropPath_max=0.15 — the missing reg-axis cell. Tests whether DropPath_max=0.15 helps at canonical capacity independently of capacity compound.
+
+---
+
+## 2026-05-27 01:05Z — PR #1346: H157 SGDR COSINE WARM RESTARTS T_0=4 (nezuko)
+
+- **Branch**: nezuko/h157-cosine-warm-restarts-sgdr
+- **W&B run**: `tanjiro/h157-sgdr-t0-4` (group: `nezuko-h157-sgdr`)
+- **Hypothesis**: Cosine warm restarts (SGDR, T_0=4 epochs) escape the basin-floor flatness observed in H112's late-train. Three restart cycles over 13 epochs (EP1-4, EP5-8, EP9-13). Scheduler-axis mechanism test.
+
+| Metric | H157 val | H112 val | H157 test | H112 test | Δ slope (H157 vs H112) |
+|---|---:|---:|---:|---:|---:|
+| val_abupt | 6.3213% | 6.1358% | — | 5.839% | MISS +0.186pp gate |
+| WSS agg | — | 6.9670% | — | 6.752% | **−0.036pp STEEPER** |
+| WSS_z | — | 9.3750% | — | 8.720% | **−0.075pp STEEPER** |
+| test_WSS | — | — | 6.9250% | 6.752% | REGRESSION +0.173pp |
+
+Slope steepening on all 5 reported WSS channels (+0.036 to +0.075pp).
+
+**Decision: CLOSED C NULL.** val_abupt MISS +0.186pp; test_WSS REGRESSION +0.173pp.
+
+**Key findings:**
+1. **H157 joins slope-PRESERVATION cohort as 4th independent member (scheduler-axis)**. Four mechanism axes (y-loss-weight H145, data-aug H148, optimizer H149, scheduler H157) all show convergent ~−0.04 to −0.08pp WSS aggregate slope steepening.
+2. **"lr_min freeze" hypothesis DEFINITIVELY FALSIFIED**: H112's val improves through EP13 under near-zero cosine LR. Slope flattening = BASIN-FLOOR REACHED, not LR preventing progress. SGDR restarts pushed H157 off a good minimum rather than escaping a bad one.
+3. **Per-cycle minima improve monotonically** (6.521 → 6.361 → 6.321) — SGDR mechanism-positive at cycle level. Operationally constrained by budget: T_0=4 of 13 epochs is too restart-dense. Val regression from restarts dominates slope benefit 3×.
+4. **Wave 38 closure reframed permanently**: "Any perturbation off H112 IN A CAPACITY-INCREASING OR Z-AXIS-PERTURBING DIRECTION causes slope-flattening; orthogonal-axis perturbations (y-loss-weight, data-aug, optimizer, scheduler) PRESERVE slope."
+5. **Nezuko reassigned to H167 tau_y=4.0 ESCALATE (PR #1355)**: next step on y-axis loss-weight ladder (H145 tau_y=3.0 was STEEPER, H167 tests 4.0).
