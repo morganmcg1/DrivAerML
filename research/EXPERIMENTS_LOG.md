@@ -1,3 +1,48 @@
+## 2026-05-27 ~04:25 — PR #1348: H165 TAU_Z=1.5 DE-ESCALATE (fern, **CLOSED C NULL slope-FLATTER bilaterally — LOCKS 4-point z-axis closure**)
+
+- **Branch**: `fern/h165-tau-z-de-escalation-1p5` (CLOSED, not merged)
+- **W&B run**: `0i3qbx4r` (DDP8 rank0, full 13 epochs completed)
+- **Hypothesis**: tau_z DE-escalation 2.0→1.5 tests the "inverted direction" from H112+H143+H144 3-point cohort + H147 GradNorm's auto-discovered 1.631 optimum.
+- **Parameter overhead**: 0 (single-flag delta from H143)
+- **Step landing**: 70,664 (EP13 full convergence)
+
+### Terminal metrics + val→test slope decomposition (best EMA EP13)
+
+| Channel | H165 val% | H112 val% | val Δ | H165 test% | H112 test% | test Δ | H165 slope | H112 slope | Δ slope |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| abupt | 6.1865 | 6.1358 | +0.0507 | 6.0318 | 5.839 | +0.193 | −0.155 | −0.297 | +0.142 FLATTER |
+| **WSS** | 7.026 | 6.967 | +0.059 | 6.980 | 6.752 | +0.228 | **−0.046** | **−0.215** | **+0.169 FLATTER** |
+| WSS_x | 6.169 | 6.092 | +0.077 | 6.200 | 5.999 | +0.201 | **+0.031 (REVERSAL)** | −0.093 | +0.124 FLATTER |
+| WSS_y | 7.682 | 7.608 | +0.073 | 7.558 | 7.360 | +0.198 | −0.124 | −0.248 | +0.124 FLATTER |
+| **WSS_z** | 9.448 | 9.375 | +0.073 | 9.055 | 8.720 | +0.335 | **−0.393** | **−0.655** | **+0.262 FLATTER (target)** |
+
+All merge gates MISS. test_WSS_z 9.055% = cohort #4 of 4 (WORST absolute, anti-aligned with mechanism intent).
+
+### 4-point tau_z cohort closure — LOCKED
+
+| Hyp | tau_z | val_WSS | test_WSS | test_WSS_z | val→test WSS slope |
+|---|---:|---:|---:|---:|---:|
+| H143 | 4.0 | 7.036 | 6.955 | 8.895 | −0.082 |
+| **H112 SOTA** | **2.0** | **6.967** | **6.752** | **8.720** | **−0.215** |
+| H165 (this) | 1.5 | 7.026 | 6.980 | 9.055 | −0.046 |
+| H144 | 6.0 | 7.092 | 7.079 | 8.984 | −0.013 |
+
+H112 is test-optimum on BOTH WSS aggregate AND target channel. ALL 3 perturbed arms show FLATTER slope + WORSE absolute test_WSS than H112. **z-axis tau_z LOCKED at 2.0 ± 0.0.**
+
+### Three program-permanent findings beyond EP12 prediction
+
+1. **EP12 prior FALSIFIED**: H165's late-cosine 1.71× faster val descent (EP11→EP12) was NOT prognostic of slope-STEEPER. Was val-side overfit to tau_z=1.5 basin. **Late-cosine descent rate NOT prognostic of val→test slope on z-axis perturbations.**
+
+2. **WSS_z #4 of 4 (cohort WORST)**: Lowering tau_z made target channel test accuracy WORSE, not better. Tau_z bowl on test_WSS_z is structurally anti-aligned with weight-signal direction.
+
+3. **WSS_x val→test REVERSAL universal across tau_z perturbations**: H143 +0.022, H144 +0.048, H165 +0.028 all positive. H112 alone has negative WSS_x slope (−0.093). MAY be cohort-screening heuristic. Validation pending on slope-preservation cohort.
+
+### Reassignment
+
+Fern reassigned to PR #1356 H183 (mirror-aug + tau_y=3.0 compound — first slope-preservation × slope-preservation factorial test on y-axis).
+
+---
+
 ## 2026-05-26 ~21:05 — PR #1340: H147 GRADNORM DYNAMIC TASK-WEIGHT BALANCING (thorfinn, **CLOSED C NULL + slope FLATTENING cohort #3 — PROGRAM-INVERTING: tau_z gradient-optimum at 1.67, 16.6% BELOW H112's 2.0**)
 
 - **Branch**: `thorfinn/h147-gradnorm-full` (CLOSED, not merged)

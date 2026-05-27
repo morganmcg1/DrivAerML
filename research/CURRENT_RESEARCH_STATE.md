@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-27 ~01:20Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-27 ~04:30Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -39,25 +39,43 @@ Framework locked: slope-steepening ~−0.04 to −0.08pp WSS aggregate, axis-ort
 
 | Class | Experiments | Mechanism |
 |---|---|---|
-| z-axis loss-weight ESCALATE | H143 (tau_z=4.0), H144 (tau_z=6.0) | Monotone test regression; 16x slope flattening |
+| z-axis loss-weight ESCALATE | H143 (tau_z=4.0), H144 (tau_z=6.0) | Monotone test regression; slope flattening on both aggregate and WSS_z |
+| **z-axis loss-weight DE-escalate** | **H165 (tau_z=1.5)** | **slope-FLATTER bilaterally vs H112; cohort #4 of 4 on test_WSS_z (anti-aligned)** |
 | Dynamic loss balancing | H147 (GradNorm) | tau_z ceiling [1.65,1.70] BELOW H112's 2.0; dynamic = static pathology |
 | Architectural split | H138 (split-z), H146 (split-y) | +525K overhead drives slope flattening regardless of channel |
 | Capacity addition | H118/H120/H121/H125 | Val-overfit slope catastrophe; H112 depth-5 is test optimum |
 
+### z-axis 4-point closure LOCKED (2026-05-27 ~04:25Z, H165 terminal)
+
+| Hypothesis | tau_z | val_abupt | test_WSS | test_WSS_z | val→test WSS slope |
+|---|---:|---:|---:|---:|---:|
+| H112 SOTA | 2.0 | 6.136 | **6.752** | **8.720** | **−0.215** |
+| H143 (closed) | 4.0 | 6.200 | 6.955 | 8.895 | −0.082 |
+| H165 (closed) | 1.5 | 6.187 | 6.980 | 9.055 | −0.046 |
+| H144 (closed) | 6.0 | 6.199 | 7.079 | 8.984 | −0.013 |
+
+H112 is test-optimum on BOTH aggregate AND target channel. ALL 3 perturbed arms show FLATTER slope + WORSE absolute test_WSS. **z-axis tau_z is permanently LOCKED at 2.0 ± 0.0.**
+
+### NEW cohort signature emerging — WSS_x val→test REVERSAL (validation pending)
+
+Every z-axis perturbation (H143, H144, H165) shows positive WSS_x slope (test_WSS_x > val_WSS_x); H112 alone has negative slope (−0.093). MAY be a bowl-floor-proximity indicator. Validation pending on slope-preservation cohort (H145/H148/H149/H157 terminal slopes).
+
 ---
 
-## Active Fleet (2026-05-27 ~01:20Z)
+## Active Fleet (2026-05-27 ~04:30Z)
 
 | Student | PR | Hypothesis | Status | ETA |
 |---|---|---|---|---|
-| frieren | #1347 | H164 SWA (swa_start_epoch=9) | EP10 SWA activation due ~01:45-01:50Z (display Epoch 10 end, internal epoch=9) | terminal ~05:25Z |
-| fern | #1348 | H165 tau_z=1.5 DE-escalate | EP10 BINDING vol-bump diagnostic ~01:15Z+1 | terminal ~03:40Z+1 |
-| alphonse | #1349 | H166 tau_y=1.0 DE-escalate | EP5/EP6 publishes pending | terminal ~06:25Z+1 |
-| edward | #1350 | H170 surface:vol 8:1 rebalance | EP3 gate PASSED (val 6.979%); continuing | terminal ~03:50Z+1 |
-| thorfinn | #1353 | H171 plateau-exact static (vol=0.5, tau_y=1.30, tau_z=1.67) | v2 r6zoibfi at ~EP1 | terminal ~04:00Z+1 |
-| askeladd | #1354 | H181b H148+ema=0.9999 (corrected gates) | Freshly assigned | terminal ~01:00Z+2 |
-| tanjiro | #1351 | H180 Lookahead(AdamW k=5 alpha=0.5) | EP3 publish pending | terminal ~05:00Z+1 |
-| nezuko | #1355 | H167 tau_y=4.0 ESCALATE (y-axis extension) | Freshly assigned | terminal ~01:00Z+2 |
+| frieren | #1347 | H164 SWA (swa_start_epoch=9) | EP12 SWA n_averaged=3 due ~03:23Z; EP13 final ~04:18Z; terminal SWA eval imminent | terminal ~04:30Z |
+| **fern** | **#1356** | **H183 mirror-aug + tau_y=3.0 compound (slope-preservation x slope-preservation factorial)** | **Freshly assigned** | **terminal ~22:00Z** |
+| alphonse | #1349 | H166 tau_y=1.0 DE-escalate | EP7-range step 60,204 val_abupt 6.328% (W&B-direct read) | terminal ~06:25Z |
+| edward | #1350 | H170 surface:vol 8:1 rebalance | EP9-range step 51,031 val_abupt 6.310% (W&B-direct read) | terminal ~04:30-05:00Z |
+| thorfinn | #1353 | H171 plateau-exact static (vol=0.5, tau_y=1.30, tau_z=1.67) | v2 r6zoibfi at EP2.5 step 27,221 val_abupt 7.97% | terminal ~14:30Z |
+| askeladd | #1354 | H181b H148+ema=0.9999 (corrected gates) | EP1 val 67.97% PASS (DROPPED gate); EP3 first real gate ~05:50Z | terminal ~12:55Z |
+| tanjiro | #1351 | H180 Lookahead(AdamW k=5 alpha=0.5) | EP3.5 step 38030 val 8.01% (catchup decay 1.34×); EP6 binding ~05:07Z | terminal ~13:00Z |
+| nezuko | #1355 | H167 tau_y=4.0 ESCALATE (y-axis extension) | EP1 val 26.83% PASS | terminal ~15:15Z |
+
+**Closed at 04:25Z**: PR #1348 H165 fern (tau_z=1.5 DE-escalate) C NULL slope-FLATTER bilaterally — locks 4-point z-axis cohort.
 
 ---
 
