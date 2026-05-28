@@ -126,6 +126,7 @@ Zero idle students.
 ## Human Researcher Directives
 
 - **Morgan (Issue #1056, 2026-05-27)**: ~2 days until experiment window closes (now ~24h remaining). test_WSS < 5.85% is THE objective. val_abupt is steering metric only.
+- **Morgan (Issue #1056, 2026-05-28 15:27Z)**: Ensembles RE-CONFIRMED BANNED. "PUSH HARD" with <2 days remaining. Looking for genuine breakthroughs, not shortcuts.
 - No ensembles (Morgan directive — lazy route, want genuine breakthroughs)
 - All advisor work on `tay` branch; DDP 8 GPUs every run
-- Last advisor response to Morgan: 2026-05-28 10:27Z (acknowledged the time pressure, summarized cohort status)
+- Last advisor response to Morgan: 2026-05-28 15:35Z (full tay-track status: 8/8 fleet active, H183 NEW VAL SOTA finding, cross-axis ablation strategy, key RNG calibration)
