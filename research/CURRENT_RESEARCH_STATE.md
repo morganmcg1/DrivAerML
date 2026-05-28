@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-28 18:30Z (β-grid disentanglement COMPLETE; H152 aborted EP5.4 (β2↓ falsified); H150 plateau at EP9.9=6.737%; H154 primary launched 17:28Z @ EP1.5; H155 (lr=9e-5) assigned to fern PR #1368)_
+_Last updated: 2026-05-28 20:36Z (β-grid disentanglement COMPLETE; H150 EP11=6.6715%; H151 EP12=6.848%; H154 EP3=7.2375%; H155 primary launched 19:37Z @ EP0.35)_
 
 ---
 
@@ -42,13 +42,14 @@ _Last updated: 2026-05-28 18:30Z (β-grid disentanglement COMPLETE; H152 aborted
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-28 18:30Z)
+### Fleet status (2026-05-28 20:36Z)
 
 | Run ID | Student | H# | Epoch | val_WSS | val_VP | val_SP | val_ABUPT | State | Δ vs H147 EP10=6.64% |
 |---|---|---|---:|---:|---:|---:|---:|---|---|
-| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | 9.92 | **6.737%** | 3.637% | 3.947% | 5.994% | running | **+0.097pp** behind (plateau confirmed at EP9.9) |
-| d20sf8th | nezuko | H151 (extended canonical) | 10.19 | 6.870% | 3.753% | 4.040% | 6.131% | running | +0.230pp behind (RNG drift) |
-| 8w7qtm5e | frieren | H154 (tau_z=1.3, primary) | 1.51 | 15.54% | 8.175% | 9.466% | 13.90% | running | EP1 warmup phase (kill at EP3>8.0%) |
+| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | 11.79 | **6.6715%** | 3.589% | 3.920% | 5.936% | running | **+0.031pp** behind H147 EP10 |
+| d20sf8th | nezuko | H151 (extended 45EP canonical) | 12.06 | 6.848% | 3.722% | 4.033% | 6.110% | running | +0.21pp behind (stable RNG drift) |
+| 8w7qtm5e | frieren | H154 (tau_z=1.3) | 3.56 | 7.2375% | 3.488% | 4.133% | 6.345% | running | EP6 kill val>7.20% pending |
+| 9xo566ws | fern | H155 (lr=9e-5 primary) | 0.35 | (pending EP1) | — | — | — | running | EP1 first val ~22:24Z |
 | u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | — | — | **crashed** (abort) | β1↓+β2↓ falsifying |
 | 2h8cddnz | (fern old) | H152 (β1=0.95/β2=0.97) | 5.4 | 7.113% | — | — | — | **crashed** (abort) | β2↓ falsifying |
 
@@ -58,24 +59,46 @@ _Last updated: 2026-05-28 18:30Z (β-grid disentanglement COMPLETE; H152 aborted
 |---:|---:|---:|---:|---:|---:|---:|
 | H147 val_WSS | 12.82% | 7.26% | 6.98% | 6.75% | 6.64% | **6.5409%** |
 
-### H150 EP9.9 plateau analysis
+### H150 per-epoch val trajectory (5bgp2ryq)
 
-H150 (β1=0.97, β2=0.985) has flattened at val_WSS=6.737% at EP9.9 (step 108867). At EP10 H147 was 6.64%, so H150 is +0.097pp behind at the same epoch. The strong −1.63pp EP1 lead eroded by EP2, recovered toward parity at EP7-8, but the descent has stalled into a plateau. **Verdict: H150 is unlikely to beat H147 by EP10.** H150 may still recover in EP11-30 if cosine LR decay drives further improvement; will continue observing through EP15 before deciding.
+| EP | 1 | 2 | 3 | 5 | 7 | 8 | 9 | 10 | 11 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| val_WSS | 11.19% | 7.27% | 6.98% | 6.83% | 6.75% | 6.73% | 6.74% | 6.69% | **6.6715%** |
+| Δ vs H147 EP10 | +4.55pp | +0.62pp | +0.34pp | +0.19pp | +0.11pp | +0.09pp | +0.10pp | +0.05pp | **+0.031pp** |
 
-### Tier-shift arms (active)
+H150 plateau-recovered. Descent stalled at EP8-9 (6.73%→6.74%) then resumed at EP10 (6.694%) and EP11 (6.6715%). EP15-30 cosine tail may close the −0.031pp gap and beat H147 EP10. Final test_WSS at EP30 will tell.
 
-**H154 (frieren, PR #1367)** — Primary 30-EP launched 17:28Z. tau_z_loss_weight=1.3 directly targets H147's worst WSS component (test_WSS_z=8.49%). EP1.5 val_WSS=15.54% (expected hot from tau_z=1.3 weighting; smoke EP1=15.3% recovered to EP3=7.79%, so same trajectory expected). Kill ladder: EP3>8.0%, EP6>7.20%, EP10>6.80%, EP30 must beat 6.5409% by ≥0.05pp.
+### H151 per-epoch val trajectory (d20sf8th)
 
-**H155 (fern, PR #1368)** — lr=9e-5 on canonical H147 β-config (β1=0.95, β2=0.98). Single-knob ablation: the May 4 research map (run 9mm3sz7x) showed lr=9e-5 + tau_y + tau_z produced test_ABUPT=8.12% on a different stack — extracting just the lr=9e-5 axis tests whether lower lr enables longer cosine descent. **Orthogonal to H154** — if both win independently, future compound test possible. PR created 18:25Z; awaiting student pickup for smoke.
+| EP | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| val_WSS | 6.96% | 6.94% | 6.91% | 6.89% | 6.89% | 6.87% | 6.87% | **6.848%** |
+
+Linear descent −0.016pp/EP. Drift relative to H147 has *narrowed* from +0.31pp (EP5) to +0.21pp (EP12). Run has ~33 epochs remaining of its 45-EP budget — EP30+ regime is the decisive zone for the "undertrained at EP30" hypothesis.
+
+### H154 per-epoch val trajectory (8w7qtm5e)
+
+| EP | 1 | 2 | 3 |
+|---:|---:|---:|---:|
+| val_WSS | 15.54% | 7.77% | **7.2375%** |
+| val_VP  | 8.175% | 3.790% | 3.488% |
+| val_ABUPT | 13.90% | 6.836% | 6.345% |
+
+EP3 kill PASSED (gate was val_WSS > 8.0%). Descent rate EP2→EP3 = -0.54pp. EP6 kill (>7.20%) needs ~-0.04pp drop in 3 EPs — well within trajectory if -0.5pp/EP rate continues. val_VP=3.488% is **already below H150 EP11's 3.589%** — tau_z reweighting may also be lifting non-WSS heads.
+
+### H155 primary launch (9xo566ws)
+
+Created 19:37:55Z. Config verified: `lr=9e-5`, `lion_beta1=0.95`, `lion_beta2=0.98`, `tau_z_loss_weight=1` (NOT stacked with H154), `epochs=30`, `lr_cosine_t_max=30`, `ema_decay=0.999`, `ema_start_step=500`. DDP8 active. Currently EP0.35, val_WSS not yet emitted (first val at EP1 step 10975 ~22:24Z).
 
 ---
 
 ## Decisive epochs ahead (active runs)
 
-- **H154 primary EP3** (~19:24Z) — kill if val_WSS > 8.0%
-- **H150 EP10-11** (~18:30-19:15Z) — definitive plateau or recovery
-- **H151 EP10-15** — continue tracking RNG drift; expect ±0.2pp single-trial noise envelope
-- **H155 smoke EP1** (after fern picks up PR #1368, ~18:35-19:00Z) — kill if val_WSS > 16% (H147 EP1 was 12.82%)
+- **H154 EP4** (~21:50Z, step 43903) — should continue descent toward 6.7%
+- **H154 EP6 hard kill** (~23:14Z, step 65855) — gate val_WSS > 7.20%
+- **H150 EP15-20** (~22:00-25:00Z) — break below H147 6.64% would confirm β1↑+β2↑ wins
+- **H151 EP15-20** — track whether linear -0.016pp/EP descent persists past canonical EP30
+- **H155 EP1** (~22:24Z, step 10975) — gate val_WSS > 17%; will be hot from lower lr
 
 ---
 
@@ -144,6 +167,8 @@ The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. 
 - Issue #1056 — active research directive and hard constraints
 - BASELINE.md — locked scoreboard with corrected-split results
 - PR #1344 — H147 merge commit with full β-attribution analysis
-- PR #1367 — H154 tau_z=1.3 active arm
-- PR #1368 — H155 lr=9e-5 active arm
+- PR #1359 — H150 β1=0.97/β2=0.985 (tanjiro, running)
+- PR #1360 — H151 45-EP extended (nezuko, running)
+- PR #1367 — H154 tau_z=1.3 (frieren, running)
+- PR #1368 — H155 lr=9e-5 (fern, running)
 - `RESEARCH_IDEAS_*.md` — researcher-agent design briefs from prior waves
