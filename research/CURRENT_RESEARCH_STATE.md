@@ -47,6 +47,27 @@ Merge gate: val_abupt < 6.1358% AND test_WSS ≤ 6.727% AND test_VP ≤ 3.421% A
 
 ---
 
+## EP3 Cross-Axis Cohort Leaderboard (banked 2026-05-28 18:00Z)
+
+| PR | Student | Hypothesis | EP3 val_abupt | Δ vs H112 (6.978%) | WSS_x slope | Status |
+|---|---|---|---:|---:|---|---|
+| **#1353** | **thorfinn** | **H185: GradNorm × mirror-aug** | **6.8665** | **−0.111pp LEADING** | −0.162pp (intact) | **strongest** |
+| #1362 | alphonse | H188: mirror × DropPath=0.15 | 7.34 | +0.36pp | tba | strong |
+| #1365 | tanjiro | H191: mirror × tau_y=2.0 | 7.18 | +0.20pp | tba | moderate |
+| #1363 | askeladd | H189: AdamW × tau_y=3.0 no mirror | 8.05 | +1.07pp | −0.160pp (intact) | mechanism confirmed |
+| #1356 | fern | H186: mirror × AdamW | 8.28 | +1.30pp | tba | **RESTARTING** (kill gate risk) |
+| #1357 | frieren | H187: H164e RNG rerun | 6.94 | −0.04pp | (calibration) | baseline N=2 |
+
+**H185 KEY FINDINGS**:
+- LEADING H112 on ALL channels at EP3 (abupt, WSS_agg, WSS_x, WSS_y, WSS_z, SP); VP +5.8bp (expected from H171 vol downweight)
+- WSS_x basin invariant strongly negative (−16.2bp ahead of H112)
+- Synergistic effect: mirror alone H148 gave +9.5bp at EP3 (noise); H185 compound gives −16.5bp (genuine signal)
+- EP4 bonus: still leading −0.063pp on val_abupt
+- Lead NARROWING EP3→EP4 (basin convergence); terminal trajectory uncertain
+- Terminal ~01:30Z tomorrow
+
+---
+
 ## H183 Val SOTA Path Analysis (program-defining)
 
 H183 banked NEW PROGRAM VAL SOTA val_abupt=6.0388% (−97bp below H112 gate), but test_WSS missed at 6.8287% due to WSS_x sign-flip from shared y-axis stacking.
