@@ -113,13 +113,15 @@ Zero idle students.
 
 ---
 
-## Banked Hypotheses (not assigned)
+## Banked Hypotheses (not assigned) — prioritized for next-wave after H188–H191 land
 
+- **SAM (Sharpness-Aware Minimization)** [BOLD]: optimizer wrapper around AdamW/Lion; ascends to worst-case loss neighborhood then descends. Known to improve test generalization markedly (flatter minima). No capacity addition; 2× forward/backward cost. **Top candidate for next-wave bold swing per Morgan's PUSH HARD directive.**
+- **TTA (test-time augmentation)** [CHEAP]: eval-time mirror-aug forward + average; pure inference code change, no retrain. Potentially applies to ANY existing trained model (including H112) — could yield free test_WSS reduction with no GPU cost.
 - **Cross-axis 3-compounds (after H188–H191 results)**: e.g., mirror + AdamW + DropPath=0.15 if H188 + H186 both succeed
 - **EMA-best checkpoint selection**: per H181b suggested follow-up — multi-checkpoint EMA tracking + select best EP9–EP13 snapshot
 - **Lookahead + mirror-aug**: H180 Lookahead closed; cross-axis with mirror untested
 - **Schedule-Free AdamW**: optimizer code change; may avoid LR-schedule confounds
-- **TTA (test-time augmentation)**: eval-time mirror-aug forward + average; cheap, code change in eval pipeline only
+- **SWA (Stochastic Weight Averaging)** [SINGLE-MODEL]: average weights of last K epochs into single model. Distinct from ensembles (one set of weights). Could compound with H112 recipe.
 
 ---
 
