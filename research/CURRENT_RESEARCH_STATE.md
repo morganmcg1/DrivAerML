@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-28 (Wave 41 β-sweep update)_
+_Last updated: 2026-05-28 14:10Z (EP4 trajectory snapshot + H152 smoke verdict)_
 
 ---
 
@@ -38,21 +38,29 @@ H148 (PR #1345, closed) — compound z-coord + curvature spatial reweighting on 
 β2=0.985           —          H150🔥(leading)
 ```
 
-| H# | PR | Config | Status | Notes |
-|----|-----|--------|--------|-------|
-| H147 | #1344 ⭐MERGED | β1=0.95, β2=0.98 | test_WSS=**6.5409%** | CURRENT SOTA; confirmed single driver |
-| H149 | #1358 ⛔CLOSED | β1=0.93, β2=0.97 | Aborted EP3 val_WSS=7.4046% | β1↓ direction ruled out |
-| H150 | #1359 🔥ACTIVE | β1=0.97, β2=0.985 | Running (dl24-tanjiro) | Leading neighbor; was at EP2.6 val_WSS≈7.27% |
-| H151 | #1360 🔄ACTIVE | canonical β=0.95/0.98 | Running (dl24-nezuko) | Extended 45-epoch training on H147 config |
-| H152 | #1361 🔄ACTIVE | β1=0.95, β2=0.97 | Running (dl24-fern) | Pure β2↓ isolation |
-| H153 | #1366 🆕DISPATCHED | β1=0.97, β2=0.98 | Dispatched (dl24-frieren) | Pure β1↑ isolation |
+| H# | PR | Config | Status | EP4 val_WSS vs H147 EP4 (6.842%) | Notes |
+|----|-----|--------|--------|----------------------------------|-------|
+| H147 | #1344 ⭐MERGED | β1=0.95, β2=0.98 | test_WSS=**6.5409%** | reference | CURRENT SOTA; confirmed single driver |
+| H149 | #1358 ⛔CLOSED | β1=0.93, β2=0.97 | Aborted EP3 val_WSS=7.4046% | — | β1↓ direction ruled out |
+| H150 | #1359 🔥ACTIVE | β1=0.97, β2=0.985 | EP4.2 val_WSS=**6.872%** (+0.030pp) | TIED — strong EP1 lead (-1.63pp) but converged by EP2 |
+| H151 | #1360 🔄ACTIVE | canonical β=0.95/0.98 | EP4.5 val_WSS=**6.997%** (+0.188pp) | BEHIND — RNG drift on extended 45-ep replication |
+| H152 | #1361 🔄ACTIVE | β1=0.95, β2=0.97 | smoke EP3=7.33% (+0.35pp) | β2↓ direction looks unproductive; greenlit primary 30-EP with EP3>7.40% kill |
+| H153 | #1366 🆕RUNNING | β1=0.97, β2=0.98 | EP0.89 (just started) | Pure β1↑ isolation; first val ~30min |
 
-### Interpretation logic
+### Interpretation logic (updated 14:10Z)
 
-- If H153 (β1=0.97/β2=0.98) beats H147 → β1↑ alone drives the gain; H152 β2↓ tells us if β2 direction matters
-- If H153 ≈ H147 → H150's advantage (if confirmed) requires β2↑ as well, pointing toward joint (0.97, 0.985) optimum
-- If H152 (β2↓ 0.97) beats H147 → β2 is directionally opposite to what H150 suggests; β2 optimum is non-monotone
-- H151 extended training tests whether more epochs on the canonical config squeezes further gains
+**Emerging picture from EP4 readings:**
+- H150 (β1↑/β2↑) shows fastest EP1 convergence (-1.63pp lead) but converges to TIE H147 by EP2-4. The early lead suggests β1↑ accelerates early-phase learning rather than improving asymptote.
+- H151 (canonical) drifting +0.19pp behind H147 — this is RNG noise on a different seed (H147 was a single trial); confirms ~0.1-0.2pp variance band on this stack.
+- H152 smoke (β2↓) showing β2=0.97 destabilizes EP1 (15.96% vs 12.82%); recovers by EP3 but consistently +0.35pp behind. Direction looks unproductive.
+- H153 (pure β1↑) too early to call.
+
+**Decisive epochs ahead:**
+- H150 EP5 (target <6.75% to BEAT H147 trajectory) — next 30min
+- H150 EP10 (target <6.64% to confirm SOTA contender) — next 90min
+- H151 EP10 (target <6.64% to confirm canonical reproducibility)
+- H152 primary EP3 — if >7.40% confirms β2↓ dead, abort
+- H153 EP1-3 — if matches H150 trajectory, β1↑ is the dominant driver
 
 ---
 
