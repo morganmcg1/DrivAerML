@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-28 22:28Z (**H150 EP15=6.6400% — exactly matches H147 EP10**; **H154 ABORTED EP7 descent reversal**; H155 EP4=7.223% gap closing to H147; H151 EP15 stable +0.20pp drift)_
+_Last updated: 2026-05-28 22:58Z (**PR #1367 H154 CLOSED** — frieren posted terminal SENPAI-RESULT aborted_descent_reversal_ep7; **PR #1369 H156 ASSIGNED to frieren** — compound β1=0.97/β2=0.985 + lr=9e-5 on H147 stack; H150 EP16 ~22:45Z pending; H155 EP5 kill gate ~22:55Z pending)_
 
 ---
 
@@ -48,7 +48,8 @@ _Last updated: 2026-05-28 22:28Z (**H150 EP15=6.6400% — exactly matches H147 E
 |---|---|---|---:|---:|---:|---:|---:|---|---|
 | 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | 15.49 | **6.6400%** | **3.555%** | **3.905%** | **5.903%** | running | 🏆 **0.000pp WSS (exact match); ALL 4 metrics ≤ H147 EP10** |
 | d20sf8th | nezuko | H151 (extended 45EP canonical) | 15.78 | 6.8306% | 3.703% | 4.030% | 6.092% | running | +0.191pp drift (stable RNG baseline) |
-| 8w7qtm5e | frieren | H154 (tau_z=1.3) | 7.64 | 6.9906% | 3.379% | 3.997% | 6.123% | **abort-pending** | ⛔ **EP7 descent reversal across all heads — falsified, stop instructed** |
+| 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.9906% | 3.379% | 3.997% | 6.123% | **CLOSED (PR #1367 22:57Z)** | ⛔ **EP7 falsified; terminal SENPAI-RESULT aborted_descent_reversal_ep7; volume_p lever preserved as learning** |
+| (TBD) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | — | — | — | — | — | **PR #1369 draft (22:58Z)** | 🎯 **Compound H150-β + H155-lr; expected EP30 6.4-6.5% test_WSS** |
 | 9xo566ws | fern | H155 (lr=9e-5 primary) | 4.42 | 7.2230% | 3.488% | 4.072% | 6.293% | running | gap closing: +0.583pp (EP4); rate of closure stable |
 | u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | — | — | crashed (abort) | β1↓+β2↓ falsifying |
 | 2h8cddnz | (fern old) | H152 (β1=0.95/β2=0.97) | 5.4 | 7.113% | — | — | — | crashed (abort) | β2↓ falsifying |
@@ -122,13 +123,17 @@ Created 19:37:55Z. Config verified: `lr=9e-5`, `lion_beta1=0.95`, `lion_beta2=0.
 
 ## Decisive epochs ahead (active runs)
 
+- **H156 smoke pass** (~23:30Z 2026-05-28) — frieren DDP8 smoke confirms 8 GPUs, no NaN; gate to launch 30-EP primary
 - **H155 EP5 kill** (~22:55Z, step 54879) — gate >7.20%; projection 7.08% (+0.12pp margin)
 - **H150 EP16** (~22:45Z, step 175,600) — plateau-vs-descent diagnostic
-- **H156 assignment** (~22:30-22:45Z) — frieren idle once H154 stops; compound H150-β (β1=0.97/β2=0.985) + H155-lr (lr=9e-5) is the highest-EV next hypothesis
+- **H156 EP1 kill check** (~01:30Z 2026-05-29) — gate >13.5%; expected 8.5-10.5%
 - **H150 EP18** (~01:30Z) — **plateau decision gate** (>6.62% → harvest from EP15 EMA best-val; ≤6.60% → ride to EP30)
+- **H156 EP3 kill check** (~03:30Z) — gate >7.50%
 - **H155 EP10 hard kill** (~05:00Z) — gate >6.80%; lr=9e-5 viability
+- **H156 EP10 soft kill** (~09:30Z) — gate >6.65%; must show compound advantage by H147 EP10 floor
 - **H150 EP30 terminal harvest** (~10:30Z 2026-05-29) — single-model SOTA candidate; test_WSS vs H147 6.5409%
 - **H151 EP25-30** — RNG-baseline confirmation; useful only as control
+- **H156 EP30 terminal harvest** (~21:00Z 2026-05-29) — last in-wave run; must beat H147 by ≥0.05pp to declare win
 
 ---
 
@@ -202,6 +207,7 @@ The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. 
 - PR #1344 — H147 merge commit with full β-attribution analysis
 - PR #1359 — H150 β1=0.97/β2=0.985 (tanjiro, running)
 - PR #1360 — H151 45-EP extended (nezuko, running)
-- PR #1367 — H154 tau_z=1.3 (frieren, ABORTED EP7)
+- PR #1367 — H154 tau_z=1.3 (frieren, CLOSED 22:57Z aborted_descent_reversal_ep7)
 - PR #1368 — H155 lr=9e-5 (fern, running)
+- PR #1369 — H156 β1=0.97/β2=0.985 + lr=9e-5 compound (frieren, draft 22:58Z) — LAST in-wave run
 - `RESEARCH_IDEAS_*.md` — researcher-agent design briefs from prior waves
