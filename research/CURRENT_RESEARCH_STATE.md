@@ -1,7 +1,23 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-28 ~11:05Z | Branch: `tay` | SOTA: H112 PR #1283 (single-model) / PR #1102 (K=8 ensemble)
-**Constraint**: ~24 hours of training compute remain (Issue #1056 human directive, 2026-05-27)
+**Updated**: 2026-05-28 23:55Z | Branch: `tay` | SOTA: H112 PR #1283 (single-model) / PR #1102 (K=8 ensemble)
+**Constraint**: ~12-15 hours of training compute remain (Issue #1056 human directive, 2026-05-27)
+**Active fleet snapshot**: 8/8 students training healthy; first terminal frieren H164e ~01:08Z+1; H185 thorfinn merge-eligible candidate terminal ~03:00-04:00Z+1.
+
+## ~23:55Z Active Fleet Health (W&B-verified)
+
+| PR | Student | Hypothesis | step (mid-EP9/10) | val_abupt | Notes |
+|---|---|---|---:|---:|---|
+| #1353 | thorfinn | H185 GradNorm × mirror-aug | EP9 banked (step 59780) | **6.0948 LEAD −0.108pp** | TERMINAL MERGE CANDIDATE (~03:00-04:00Z+1) |
+| #1357 | frieren | H164e RNG calibration | step ~65875 mid-EP12 | 6.05% trajectory | terminal ~01:08Z+1; test eval ~02:35Z+1 |
+| #1364 | nezuko | H190 mirror p=0.25 | EP9 (step 59833) | **6.1386 LEAD −0.011pp (within noise)** | terminal ~03:00Z+1 (50/50 within RNG floor) |
+| #1365 | tanjiro | H191 mirror × tau_y=2.0 | step 59780 mid-EP10 | 6.3982 +0.26pp behind | terminal ~04:30Z+1 (NULL-expected boundary probe) |
+| #1362 | alphonse | H188 mirror × DropPath=0.15 | step 64690 mid-EP9 | 6.20% / WSS_agg 7.05% | HEALTHY heartbeat live; in band with H112 EP9 |
+| #1363 | askeladd | H189 AdamW × tau_y=3.0 no-mirror | step 65221 EP9-boundary | 6.50% / WSS_agg 7.36% | HEALTHY |
+| #1356 | fern | H186 mirror × AdamW (kill+restart cancelled 19:05Z) | step 64504 mid-EP9 | EP9 boundary pending | HEALTHY |
+| #1350 | edward | H184 surface:vol 4:0.5 + tau_y=3.0 | step 64928 EP9-boundary | 6.26% / WSS_agg 7.03% | HEALTHY |
+
+**Stale-WIP cluster analysis**: alphonse / edward / askeladd / fern all heartbeat live; comment-lag is the explanation, not pod stall. Pattern: student bots only poll PR comments at major checkpoint boundaries (EP3/EP6/EP9), not continuously.
 
 ## Primary Objective
 
@@ -17,17 +33,34 @@ Merge gate: val_abupt < 6.1358% AND test_WSS ≤ 6.727% AND test_VP ≤ 3.421% A
 
 ---
 
-## Program-Critical Finding — H164d RNG Floor Calibration (banked 2026-05-28 ~10:30Z)
+## Program-Critical Finding — RNG Floor Calibration MATURE (frieren H164d+H164e N=2 EP11)
 
-**H164d (frieren PR #1357, completed)**: H112-recipe rerun with different RNG seed.
+**Banked 23:47Z** via frieren EP9/10/11 catch-up report. N=2 H112-recipe brackets (H164d + H164e) at EP11:
+
+| Channel | EP11 half-range | RNG floor implication |
+|---|---:|---|
+| **abupt** | **±0.053pp** | minimum effect size for val signal |
+| WSS aggregate | ±0.063pp | |
+| WSS_x | ±0.059pp | basin-diagnostic still readable above ±0.06 floor |
+| WSS_y | ~±0.06pp | |
+| **WSS_z** | **±0.083pp (largest)** | NOT canonical screening axis; revise earlier hypothesis |
+| VP | ±0.036pp | smallest — cross-axis compounds clear test_VP gate |
+
+**Recalibration impact on active leaders**:
+- **H185 thorfinn EP9 lead −0.108pp = 2× RNG floor → REAL signal** (sole compound clearly above noise)
+- **H190 nezuko EP9 lead −0.011pp = well below RNG floor → noise-band 50/50 outcome**
+- **H164e** LEADS H112 at EP11 (H112's reported baseline upper-end of RNG distribution)
+- VP universally negative across H164d/H164e → cross-axis compounds expected to clear test_VP gate
+
+### Earlier (H164d single-draw) framework — superseded by N=2 calibration above
 
 | Channel | Δ slope (H164d vs H112) | Implication |
 |---|---:|---|
 | WSS aggregate | +0.040pp | RNG floor ≈ ±0.040pp single-draw |
-| WSS_z | −0.009pp | Most stable — RNG floor ≈ ±0.01pp |
-| WSS_x | ~±0.05pp | RNG floor ≈ ±0.05pp |
-| WSS_y | ~±0.06pp | RNG floor ≈ ±0.06pp |
-| VP | ~±0.09pp | Largest channel-specific RNG floor |
+| WSS_z | −0.009pp | (revised at N=2: actually LARGEST not stablest) |
+| WSS_x | ~±0.05pp | (confirmed at N=2: ±0.059pp) |
+| WSS_y | ~±0.06pp | (confirmed at N=2) |
+| VP | ~±0.09pp | (revised at N=2: actually SMALLEST at ±0.036pp) |
 
 ### Framework recalibration (PERMANENT)
 
@@ -172,8 +205,10 @@ Zero idle students.
 - `<threshold` in kill-threshold string is PASS condition; never write `>threshold`
 - WSS_x slope sign is the BASIN-DISRUPTION DIAGNOSTIC — positive slope indicates shared-axis stacking failure
 - DrivAerML axes: x=streamwise, y=lateral (mirror axis), z=vertical
-- RNG floor on WSS_agg slope = ±0.040pp; treat as the minimum effect size for single-draw mechanism claims
-- WSS_z slope is the canonical cohort-screening axis (4–9× better RNG reproducibility)
+- RNG floor on WSS_agg slope = ±0.063pp at N=2 EP11; treat as minimum effect size for single-draw mechanism claims
+- RNG floor on **val_abupt = ±0.053pp at N=2 EP11** — claims must exceed 2× floor (±0.106pp) to count as real signal
+- **WSS_z slope is NOT the canonical cohort-screening axis** (N=2 finding: ±0.083pp half-range, LARGEST not smallest) — supersedes earlier H164d single-draw hypothesis
+- VP smallest RNG floor at ±0.036pp → cross-axis compounds clear test_VP gate
 
 ---
 
