@@ -160,3 +160,25 @@ In-wave val leader (historical, CLOSED): **6.4402%** (PR #874 dl24-nezuko, EP15/
 | #968 | `a0yoxy85` | dl24-fern | EP15 (val best) / EP30 (terminal) — **CLOSED/FALSIFIED** | **test_abupt=7.6157%, test_vol_p=12.1140% — DOES NOT BEAT WAVE SOTA** | **6L STRING (5-oct) + GradNorm α=0.5 + stochastic vol subsampling (random 65k subset each step, no caching) + Y-sym p=0.5**. Hypothesis: random vol-point sampling each step forces the model to generalise over the full vol distribution rather than memorising fixed-index subsets. Val best EP15: ABUPT=6.2806%, val_vol_p=3.999% (run best). Terminal EP30: val_abupt=6.4622%, val_vol_p=4.166%. Test (from best-val EP15 checkpoint): test_abupt=7.6157%, test_vol_p=12.1140%, test_surf_p=3.9440%, test_wall=7.0470%. Val→test vol_p gap: **+8.115pp** — WIDEST ever observed across all wave runs. Stochastic subsampling compressed val vol_p to 4.0% (fleet-best at EP15) but WIDENED the test gap beyond all prior approaches. Hypothesis FALSIFIED: val vol_p improvement is entirely overfitting to the specific subset of val vol points presented; test evaluates ALL vol points, exposing the memorisation. **PR #968 CLOSED 2026-05-12.** |
 
 _Last updated: 2026-05-24 10:57Z (session). **MERGED dl24 SOTA: PR #1284 run `yym5oa8x` test_WSS=6.6506% — first wave-33 merge into `drivaerml-long-20260504` (H39 wider surface_out MLP factor=2.0). Beats prior reference #972 (closed) WSS 6.727% by −0.0764pp.** Active WIP (drivaerml-long, 13 open): **#1071** (surface point density 131k), **#1070** (SDF vol α=2.0 + dedicated vol_p aux head, frieren), **#1069** (combined SDF + curvature stratified sampling, frieren), **#1068** (dedicated WSS surface decoder head 2-arm sweep), **#1067** (RFF octave ladder EP30 confirmation), **#1066** (nezuko tau Y/Z loss weight sweep), **#1065** (stark SDF-stratified extended 45ep corrected dataset), **#1063** (fern SDF near-surface α sweep EP5 PASS 6.350%), **#1061** (tanjiro stochastic per-batch vol points), **#1060** (askeladd vol-loss-weight sweep 1.5/2.0/3.0), **#1058** (frieren GradNorm on corrected dataset), **#1055** (tanjiro SDF α sweep 1.5/3.0/4.0; EP11=6.388% PASS ≤7.2% ✓; monitoring EP15 gate ≤6.80%; MERGE CONFLICT — FINAL WARNING), **#1050** (dropout regularization p=0.1). RECENTLY CLOSED: **#1054** (nezuko DANN domain adaptation — EP15 FAIL val_abupt=6.9264% vs gate ≤6.80%; CLOSED 2026-05-12), **#968** (fern stochastic vol subsampling — test_vol_p gap +8.115pp WIDENED, FALSIFIED, CLOSED 2026-05-12). Nezuko (dl24-nezuko) IDLE — needs new assignment._
+
+---
+
+## 2026-05-28 — PR #1344: WSS H147 — lion-β-only ablation (clean H39 + β=0.95/0.98 only) — **NEW WSS SOTA**
+
+- **W&B run:** `k6q4c3on`
+- **test_WSS:** **6.5409%** (−0.110pp vs H39 SOTA 6.6506%) ⭐ NEW WSS SOTA
+- **test_ABUPT:** 5.6648% ✓ (clears 5.844% floor)
+- **test_VP:** 3.6033% ✓ (clears 3.643% floor)
+- **test_SP:** 3.6498% (misses 3.577% floor by +0.073pp — same as H39)
+- **Config:** Clean H39 stack (hidden_dim=512, layers=6, heads=4, slices=128, surface_out_width_factor=2.0, PE=string_multisigma) + `--lion-beta1 0.95 --lion-beta2 0.98` ONLY. No weight-decay drift, no loss modifications.
+- **Key finding:** Lion β1=0.95/β2=0.98 (vs canonical 0.90/0.99) is the **confirmed single driver** of WSS improvement from the H138 complex. EP1 val exactly matched H138 (12.83%), confirming mechanism replication. β-drift is now the canonical optimizer config.
+- **Reproduce:** `cd "target/" && python train.py --hidden-dim 512 --layers 6 --heads 4 --slices 128 --surface-out-width-factor 2.0 --pe-type string_multisigma --lion-beta1 0.95 --lion-beta2 0.98 --ema-decay 0.999 --ema-start-step 500 --epochs 30`
+
+### Current single-model best on `drivaerml-long-20260504` (updated 2026-05-28)
+
+**MERGED dl24 SOTA (2026-05-28):** PR #1344 (`k6q4c3on`) — H147 Lion β1=0.95/β2=0.98 ablation — **NEW WSS SOTA**
+test_primary/wall_shear_rel_l2_pct = **6.5409%** ⭐ (beats H39 6.6506% by −0.110pp)
+test_primary/volume_pressure_rel_l2_pct = **3.6033%** ✓ (clears 3.643% floor)
+test_primary/surface_pressure_rel_l2_pct = **3.6498%** (misses 3.577% floor by +0.073pp) ⚠️
+test_primary/abupt_axis_mean_rel_l2_pct = **5.6648%** ✓ (clears 5.844% floor)
+Canonical optimizer: Lion lr=1e-4, β1=0.95, β2=0.98
