@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-28 15:35Z (EP6+ trajectory readings: H150 lost EP1 lead; H151 RNG-drifting; H154 smoke EP1 hot)_
+_Last updated: 2026-05-28 16:54Z (EP7+ readings: H150 RECOVERED to match H147 EP5; H152 EP3 kill PASSED; H154 smoke RECOVERED 15.3%→7.79%)_
 
 ---
 
@@ -42,22 +42,24 @@ H148 (PR #1345, closed) — compound z-coord + curvature spatial reweighting on 
 |----|-----|--------|--------|-------|
 | H147 | #1344 ⭐MERGED | β1=0.95, β2=0.98 | test_WSS=**6.5409%** | CURRENT SOTA; β-grid optimum |
 | H149 | #1358 ⛔CLOSED | β1=0.93, β2=0.97 | Aborted EP3 val_WSS=7.4046% | β1↓+β2↓ direction bad |
-| H150 | #1359 🔥ACTIVE | β1=0.97, β2=0.985 | EP6.5 val_WSS=**6.792%** (+0.042pp vs H147 EP5) | LEAD LOST — H150 was -1.63pp at EP1 but is now slightly BEHIND H147 by EP6.5; EP10 decides |
-| H151 | #1360 🔄ACTIVE | canonical β=0.95/0.98 | EP6.9 val_WSS=**6.935%** (+0.185pp) | Drift persists — RNG noise on extended 45-ep replication |
-| H152 | #1361 🔄RUNNING | β1=0.95, β2=0.97 | EP2.2 val_WSS=7.964% (smoke pattern) | β2↓ direction; strict EP3>7.40% kill at ~+30min |
+| H150 | #1359 🔄ACTIVE | β1=0.97, β2=0.985 | EP7-8 val_WSS=**6.749%** (matches H147 EP5) | RECOVERED — delayed convergence (~2 EP slower than H147), slope healthy; EP10 (~18:30Z) decides |
+| H151 | #1360 🔄ACTIVE | canonical β=0.95/0.98 | EP8 val_WSS=**6.890%** (+0.140pp vs H147 EP5) | Drift persists — RNG noise on extended 45-ep replication |
+| H152 | #1361 🔄RUNNING | β1=0.95, β2=0.97 | EP3.5 val_WSS=**7.379%** ✅PASSED 7.40% kill | But +0.40pp behind H147 EP3=6.98% — β2↓ falsifying |
 | H153 | #1366 ⛔CLOSED | β1=0.97, β2=0.98 | Aborted EP1 val_WSS=**13.86%** (+1.04pp) | **Pure β1↑ ALONE BAD** — destabilizes EP1 |
+| H154 smoke | #1367 🔄RUNNING | H147 stack + tau_z=1.3 (3-EP smoke) | EP2.7 val_WSS=**7.79%** ✅<8.5% gate | Recovered from EP1.4=15.3%; **GREEN-LIGHT primary 30-EP launch at ~17:10Z** |
 
-### β-grid disentanglement: DONE (2026-05-28 14:50Z) + EP6 update (15:35Z)
+### β-grid disentanglement + EP7-8 trajectory update (2026-05-28 16:54Z)
 
-**Final picture from 4 β-grid arms + extended canonical:**
+**Updated picture from 4 β-grid arms + extended canonical:**
 - **β1↑ alone destabilizes EP1** (H153: 13.86% > kill threshold). H150's EP1 lead came from JOINT (β1↑, β2↑) — neither axis alone helps.
-- **β2↓ direction bad** (H149 aborted EP3 at 7.40%; H152 smoke +0.35pp behind). Confirmed across two β1 values.
+- **β2↓ direction bad** (H149 aborted EP3 at 7.40%; H152 EP3=7.379% **barely passes kill** at +0.40pp behind H147 EP3). β2↓ confirmed falsifying.
 - **β1↓ direction bad** (H149: β1=0.93 + β2=0.97 aborted).
-- **H147 (0.95, 0.98) is the β-grid local optimum** — neighbors are flat-to-worse, AND now H150 is slightly behind by EP6.5.
-- **H150 (0.97, 0.985) EP6 update**: val_WSS=6.792% vs H147 EP5=6.750% (+0.042pp). The strong -1.63pp EP1 lead **eroded by EP2** and has now flipped to a small **deficit by EP6**. The (β1↑, β2↑) direction is a faster early converger but not a deeper minimum.
-- **H151 (canonical extended)** EP6.9 val_WSS=6.935% (+0.185pp) — drift persists, likely RNG noise from H147 single-trial reference.
+- **H147 (0.95, 0.98) is the β-grid local optimum** — but H150 is now back to **matched** at EP7-8 (val_WSS=6.749% = H147 EP5=6.750%).
+- **H150 (0.97, 0.985) EP7-8 update**: val_WSS=**6.749%** — back to parity. The strong -1.63pp EP1 lead eroded by EP2, fell to +0.042pp behind by EP6.5, but the slope kept descending. (β1↑, β2↑) is a **delayed converger**, not a deeper-minimum failure. EP10 reading at ~18:30Z is decisive.
+- **H151 (canonical extended)** EP8 val_WSS=6.890% (+0.140pp behind H147 EP5) — drift persists, RNG noise hypothesis still consistent.
+- **H154 smoke (NEW): tau_z=1.3 on H147 stack** — smoke EP2.7=7.79% confirms recovery from hot EP1; primary launch green-lit.
 
-**Implication:** β-space is conclusively exhausted. No β-grid point clearly beats H147; H150 final test will likely tie or slightly trail. Tier-shift (H154 tau_z weighting) is the right next bet.
+**Implication:** β-space remains exhausted as a primary lever, but **H150 may now tie or marginally beat H147 by EP10**. Tier-shift (H154 tau_z) is launching now. Two parallel paths to break 6.54%: H150 delayed convergence by EP10-30, OR H154 primary by EP30.
 
 ### What's next: tier-shift beyond β-tuning
 
@@ -67,21 +69,22 @@ H148 (PR #1345, closed) — compound z-coord + curvature spatial reweighting on 
 3. Then capacity/density/loss reformulation per CURRENT_RESEARCH_STATE next-directions
 
 ### Decisive epochs ahead (active runs)
-- H150 EP10 (~17:30Z) — target <6.64% to confirm β1↑+β2↑ SOTA contender (now needs to *beat* H147 EP10 by ≥0.05pp to be a winner; lead lost)
-- H151 EP10 (~17:30Z) — RNG noise check; target <6.64%
-- H152 EP3 (~16:05Z) — STRICT kill if val_WSS > 7.40%
-- H154 smoke EP3 (~17:25Z) — EP1.4 reading 15.30% is +2.5pp behind H147 EP1; need EP2-3 recovery shape to decide primary launch
+- H150 EP10 (~18:30Z) — target ≤6.64% to match H147; below = winning trajectory. EP7-8 reading already at H147 EP5 parity (6.749%)
+- H151 EP10 (~18:30Z) — RNG noise check; +0.14pp drift at EP8, likely confirms ±0.2pp single-trial variance
+- H152 EP6 (~18:00Z) — kill if val_WSS > 6.90%; β2↓ direction tracking +0.40pp behind H147
+- H154 smoke EP3 (~17:05Z) — already at 7.79% at EP2.7, well under 8.5% gate. Primary 30-EP launch expected at ~17:10Z
+- H154 primary EP3 (~19:30Z) — kill if val_WSS > 8.0% (tau_z=1.3 weighting overhead)
 
 ---
 
-## Active fleet (2026-05-28 14:50Z)
+## Active fleet (2026-05-28 16:54Z)
 
 | Student | PR | Hypothesis | Status |
 |---------|-----|-----------|--------|
-| dl24-fern | #1361 | H152: β1=0.95/β2=0.97 (pure β2↓) | WIP — EP2.2 val_WSS=7.96% (smoke-pattern); EP3 kill check ~16:05Z |
-| dl24-frieren | #1367 | H154: tau_z_loss_weight=1.3 on H147 | WIP — smoke EP1.4 val_WSS=15.3% (+2.5pp vs H147 EP1); need EP3 trajectory |
-| dl24-nezuko | #1360 | H151: Extended training 45ep canonical | WIP — EP6.9 val_WSS=6.935% (+0.185pp) — RNG drift persists |
-| dl24-tanjiro | #1359 | H150: β1=0.97/β2=0.985 (joint) | WIP — EP6.5 val_WSS=6.792% — LEAD LOST; now slightly behind H147 |
+| dl24-fern | #1361 | H152: β1=0.95/β2=0.97 (pure β2↓) | WIP — EP3.5 val_WSS=**7.379%** ✅passed 7.40% kill; +0.40pp behind H147 (falsifying β2↓) |
+| dl24-frieren | #1367 | H154: tau_z_loss_weight=1.3 on H147 | WIP — smoke EP2.7=**7.79%** ✅recovered <8.5% gate; PRIMARY 30-EP launch green-lit at ~17:10Z |
+| dl24-nezuko | #1360 | H151: Extended training 45ep canonical | WIP — EP8 val_WSS=**6.890%** (+0.140pp drift) — RNG noise consistent |
+| dl24-tanjiro | #1359 | H150: β1=0.97/β2=0.985 (joint) | WIP — EP7-8 val_WSS=**6.749%** RECOVERED to match H147 EP5; EP10 (~18:30Z) decides |
 
 ---
 
