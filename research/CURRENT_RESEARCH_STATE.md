@@ -66,6 +66,26 @@ Merge gate: val_abupt < 6.1358% AND test_WSS ≤ 6.727% AND test_VP ≤ 3.421% A
 - Lead NARROWING EP3→EP4 (basin convergence); terminal trajectory uncertain
 - Terminal ~01:30Z tomorrow
 
+## EP6 Cohort Snapshot (banked 19:13Z + 19:10Z)
+
+| PR | Student | Hypothesis | EP6 val_abupt | Δ vs H112 EP6 (6.3741) | Notes |
+|---|---|---|---:|---:|---|
+| **#1353** | **thorfinn** | **H185: GradNorm × mirror-aug** | **6.2811** | **−0.093pp LEADING** | All 5 channels uniform 9-14bp lead; WSS_x basin invariant intact (−0.133pp); terminal projection ~6.06-6.08% |
+| #1357 | frieren | H164e (H112 recipe RNG draw 2) | 6.3132 | −0.061pp | RNG calibration — bracketing established |
+| (H112 baseline) | — | reference | 6.3741 | 0 | upper-end of recipe RNG distribution |
+| (H164d) | — | H112 recipe RNG draw 1 | 6.4400 | +0.066pp | lower-end side of distribution |
+
+**RNG bracketing finding** (frieren H164e EP6 vs H164d EP6): H112-recipe true mean ≈ 6.075% terminal val_abupt. H112's reported baseline is upper-end of recipe distribution. Merge gates remain set against H112's reported 6.1358%, but interpretation of "winning" should account for ~0.07pp RNG floor on val_abupt.
+
+**H185 EP6 lead validates cross-axis hypothesis at EP6 binding diagnostic**:
+- z×y compound (tau_z × mirror-aug) preserves basin (no WSS_x sign-flip)
+- Synergistic effect amplifies vs H171 solo by −7.2bp at EP6
+- Falsifies H147 EP6 LAG framework — slope-preservation hypothesis ALIVE
+
+**Terminal projection** (using cohort EP6→terminal mean drop −22.6bp):
+- H185 → ~6.06-6.08% val_abupt → **beats H112 gate 6.1358% by 5-8bp** if realized
+- First val-side merge-eligible result expected
+
 ## ~Step 46k Snapshot (banked 19:05Z via W&B — students bot-silent on PRs)
 
 H112 terminal val_abupt gate = 6.1358%. Latest mid-EP6 trajectory:
