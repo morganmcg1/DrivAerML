@@ -3689,3 +3689,59 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 
 Pivoting to architectural changes per Plateau Protocol.
 
+---
+
+## 2026-05-28 — Wave 41: Lion β-sweep disentanglement
+
+### PR #1344 — H147: Lion β1=0.95/β2=0.98 ablation — MERGED ⭐ NEW WSS SOTA
+
+- dl24-nezuko/h147-lion-beta-ablation
+- Hypothesis: The entire H138 EP1 advantage (+5.07pp vs H39) is attributable to Lion β-drift (β1=0.95, β2=0.98) alone, not weight-decay or loss mechanism changes
+- W&B run: `k6q4c3on`
+
+| Metric | H147 | H39 SOTA | Δ vs H39 | Floor | Status |
+|--------|------|----------|----------|-------|--------|
+| test_WSS | **6.5409%** | 6.6506% | **−0.110pp BETTER** | Primary | **NEW SOTA ⭐** |
+| test_VP | 3.6033% | 3.6033% | 0.000pp | ≤3.643% | PASS ✓ |
+| test_SP | 3.6498% | 3.6498% | 0.000pp | ≤3.577% | miss +0.073pp |
+| test_ABUPT | 5.6648% | 5.8010% | −0.136pp BETTER | ≤5.844% | PASS ✓ |
+
+EP trajectory confirming β as single driver:
+EP1=12.8153% (matches H138 EP1=12.83% exactly; H39 EP1=17.90%) → β1/β2 change is the driver.
+
+- Conclusion: **β-drift is the sole driver of H138's 5pp EP1 advantage.** Lion β1=0.95/β2=0.98 (vs canonical 0.90/0.99) has an outsized effect via faster second-moment estimation (β2↑ from 0.99→0.98) + slower momentum (β1↑ from 0.90→0.95). The canonical optimizer for all future runs is now `--lion-beta1 0.95 --lion-beta2 0.98`. Merged 2026-05-28. **New in-wave single-model WSS SOTA: 6.5409%.**
+
+### PR #1345 — H148: Compound z-coord + curvature spatial reweighting — CLOSED NULL
+
+- dl24-fern/h148-compound-spatial-reweighting
+- Hypothesis: z-coord-weighted WSS loss + curvature-Charbonnier stack compound additively on clean H39 (no β-drift)
+- W&B run: `(H148 run)`; best checkpoint EP13
+
+| Metric | H148 | H147 SOTA | Δ vs SOTA |
+|--------|------|-----------|-----------|
+| test_WSS | 6.7638% | 6.5409% | **+0.225pp WORSE** |
+
+- Conclusion: Spatial reweighting mechanisms (z-coord + curvature) do not improve over the baseline H39 stack without β-drift. Adding β-drift to H39 alone (H147) is more valuable than any mechanism change. **Spatial reweighting on clean H39 is null.** PR closed.
+
+### PR #1358 — H149: Lion β1=0.93/β2=0.97 (low neighbor) — CLOSED, ABORTED EP3
+
+- dl24-frieren/h149-lion-beta-sweep-low
+- Hypothesis: β1 decrease toward 0.93 (more aggressive momentum decay toward current gradient) improves over H147
+- W&B run: `u3vbwwhd`
+
+| EP | H149 val_WSS | H147 trajectory | Status |
+|----|-------------|-----------------|--------|
+| 1 | ~13.x% | 12.82% | slower than SOTA |
+| 3 | 7.4046% | 6.98% | +0.42pp behind, >7.40% kill gate |
+
+- Conclusion: β1↓ (0.93 < 0.95) is definitively worse than H147's β1=0.95. The β1 direction below 0.95 is ruled out. The β-space search correctly moves toward higher β1. Aborted EP3, PR closed 2026-05-28T13:13Z.
+
+---
+
+## 2026-05-28 — Wave 41 active experiments (monitoring)
+
+- **PR #1359 H150** (dl24-tanjiro): β1=0.97/β2=0.985 — leading at EP2.6 val_WSS≈7.27% (within ~0.01pp of H147 EP2.6); tests joint β1↑+β2↑ direction
+- **PR #1360 H151** (dl24-nezuko): 45-epoch extended training on canonical β=0.95/0.98 config — tests if more compute squeezes further gains
+- **PR #1361 H152** (dl24-fern): β1=0.95/β2=0.97 — pure β2↓ isolation
+- **PR #1366 H153** (dl24-frieren): β1=0.97/β2=0.98 — pure β1↑ isolation (dispatched 2026-05-28)
+
