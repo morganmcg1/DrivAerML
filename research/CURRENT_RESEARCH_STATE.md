@@ -72,14 +72,14 @@ H148 (PR #1345, closed) — compound z-coord + curvature spatial reweighting on 
 
 ---
 
-## Active fleet (2026-05-28)
+## Active fleet (2026-05-28 14:50Z)
 
 | Student | PR | Hypothesis | Status |
 |---------|-----|-----------|--------|
-| dl24-fern | #1361 | H152: β1=0.95/β2=0.97 (pure β2↓) | WIP |
-| dl24-frieren | #1366 | H153: β1=0.97/β2=0.98 (pure β1↑) | WIP (just dispatched) |
-| dl24-nezuko | #1360 | H151: Extended training 45ep canonical | WIP |
-| dl24-tanjiro | #1359 | H150: β1=0.97/β2=0.985 (leading) | WIP |
+| dl24-fern | #1361 | H152: β1=0.95/β2=0.97 (pure β2↓) | WIP — primary launching; strict EP3>7.40% kill |
+| dl24-frieren | #1367 🆕 | H154: tau_z_loss_weight=1.3 on H147 | WIP — just dispatched, tier-shift after β plateau |
+| dl24-nezuko | #1360 | H151: Extended training 45ep canonical | WIP — EP4.5 +0.19pp behind H147 |
+| dl24-tanjiro | #1359 | H150: β1=0.97/β2=0.985 (joint) | WIP — EP4.2 TIED; monitoring EP10 |
 
 ---
 
