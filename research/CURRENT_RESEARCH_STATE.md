@@ -86,6 +86,10 @@ Merge gate: val_abupt < 6.1358% AND test_WSS ≤ 6.727% AND test_VP ≤ 3.421% A
 - H185 → ~6.06-6.08% val_abupt → **beats H112 gate 6.1358% by 5-8bp** if realized
 - First val-side merge-eligible result expected
 
+**Updates banked 19:50Z**:
+- **H190 nezuko EP5 LEADING H112 by −0.054pp** (val_abupt 6.4162 at step 43466). Mirror p=0.25 SUPPRESSES H148's over-regularization (VP +0.638pp tighter than p=0.5). EP5→terminal projection: ~6.082% val_abupt → beats H112 gate by ~5bp. **Second cross-axis compound to clear H112 mid-training**.
+- **H191 tanjiro EP6 BEHIND H112 by +0.296pp** (val_abupt 6.6702). Not winner trajectory but WSS_x slope intact (−0.0128/1k_steps). **Mechanism finding**: tau_y=2.0+mirror = safe (basin intact); tau_y=3.0+mirror (H183) = unsafe (sign-flip). Threshold lies between 2.0 and 3.0.
+
 ## ~Step 46k Snapshot (banked 19:05Z via W&B — students bot-silent on PRs)
 
 H112 terminal val_abupt gate = 6.1358%. Latest mid-EP6 trajectory:
