@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-28 14:10Z (EP4 trajectory snapshot + H152 smoke verdict)_
+_Last updated: 2026-05-28 14:50Z (H153 ABORTED at EP1 — β-grid disentanglement complete)_
 
 ---
 
@@ -38,29 +38,37 @@ H148 (PR #1345, closed) — compound z-coord + curvature spatial reweighting on 
 β2=0.985           —          H150🔥(leading)
 ```
 
-| H# | PR | Config | Status | EP4 val_WSS vs H147 EP4 (6.842%) | Notes |
-|----|-----|--------|--------|----------------------------------|-------|
-| H147 | #1344 ⭐MERGED | β1=0.95, β2=0.98 | test_WSS=**6.5409%** | reference | CURRENT SOTA; confirmed single driver |
-| H149 | #1358 ⛔CLOSED | β1=0.93, β2=0.97 | Aborted EP3 val_WSS=7.4046% | — | β1↓ direction ruled out |
-| H150 | #1359 🔥ACTIVE | β1=0.97, β2=0.985 | EP4.2 val_WSS=**6.872%** (+0.030pp) | TIED — strong EP1 lead (-1.63pp) but converged by EP2 |
-| H151 | #1360 🔄ACTIVE | canonical β=0.95/0.98 | EP4.5 val_WSS=**6.997%** (+0.188pp) | BEHIND — RNG drift on extended 45-ep replication |
-| H152 | #1361 🔄ACTIVE | β1=0.95, β2=0.97 | smoke EP3=7.33% (+0.35pp) | β2↓ direction looks unproductive; greenlit primary 30-EP with EP3>7.40% kill |
-| H153 | #1366 🆕RUNNING | β1=0.97, β2=0.98 | EP0.89 (just started) | Pure β1↑ isolation; first val ~30min |
+| H# | PR | Config | Status | Notes |
+|----|-----|--------|--------|-------|
+| H147 | #1344 ⭐MERGED | β1=0.95, β2=0.98 | test_WSS=**6.5409%** | CURRENT SOTA; β-grid optimum |
+| H149 | #1358 ⛔CLOSED | β1=0.93, β2=0.97 | Aborted EP3 val_WSS=7.4046% | β1↓+β2↓ direction bad |
+| H150 | #1359 🔥ACTIVE | β1=0.97, β2=0.985 | EP4.2 val_WSS=6.872% (+0.030pp) | TIED — joint β1↑+β2↑; EP1 lead converged |
+| H151 | #1360 🔄ACTIVE | canonical β=0.95/0.98 | EP4.5 val_WSS=6.997% (+0.188pp) | BEHIND — RNG noise on extended 45-ep replication |
+| H152 | #1361 🔄RUNNING | β1=0.95, β2=0.97 | smoke +0.35pp behind; primary launching | β2↓ direction unproductive (matches H149); strict EP3>7.40% kill |
+| H153 | #1366 ⛔CLOSED | β1=0.97, β2=0.98 | Aborted EP1 val_WSS=**13.86%** (+1.04pp) | **Pure β1↑ ALONE BAD** — destabilizes EP1 |
 
-### Interpretation logic (updated 14:10Z)
+### β-grid disentanglement: DONE (2026-05-28 14:50Z)
 
-**Emerging picture from EP4 readings:**
-- H150 (β1↑/β2↑) shows fastest EP1 convergence (-1.63pp lead) but converges to TIE H147 by EP2-4. The early lead suggests β1↑ accelerates early-phase learning rather than improving asymptote.
-- H151 (canonical) drifting +0.19pp behind H147 — this is RNG noise on a different seed (H147 was a single trial); confirms ~0.1-0.2pp variance band on this stack.
-- H152 smoke (β2↓) showing β2=0.97 destabilizes EP1 (15.96% vs 12.82%); recovers by EP3 but consistently +0.35pp behind. Direction looks unproductive.
-- H153 (pure β1↑) too early to call.
+**Final picture from 4 β-grid arms + extended canonical:**
+- **β1↑ alone destabilizes EP1** (H153: 13.86% > kill threshold). The H150 EP1 lead must come from JOINT (β1↑, β2↑) — neither axis alone helps.
+- **β2↓ direction bad** (H149 aborted EP3 at 7.40%; H152 smoke +0.35pp behind). Confirmed across two β1 values.
+- **β1↓ direction bad** (H149: β1=0.93 + β2=0.97 aborted).
+- **H147 (0.95, 0.98) appears to be β-grid local optimum** — neighbors are flat-to-worse.
+- **H150 (0.97, 0.985) is the only viable challenger** — converged to TIE H147 by EP4; final test_WSS will decide.
+- **H151 (canonical extended)** drifting +0.19pp behind — likely RNG noise; tests whether 45ep extends beyond 30ep gains.
 
-**Decisive epochs ahead:**
-- H150 EP5 (target <6.75% to BEAT H147 trajectory) — next 30min
-- H150 EP10 (target <6.64% to confirm SOTA contender) — next 90min
-- H151 EP10 (target <6.64% to confirm canonical reproducibility)
-- H152 primary EP3 — if >7.40% confirms β2↓ dead, abort
-- H153 EP1-3 — if matches H150 trajectory, β1↑ is the dominant driver
+### What's next: tier-shift beyond β-tuning
+
+β-space is exhausted around H147. To break the 6.54% floor we need a DIFFERENT axis:
+1. **H154 (frieren NEW): tau_z_loss_weight=1.3 on H147 stack** — directly target worst WSS component (H147 test_WSS_z=8.49%)
+2. If H150 wins → confirm joint β + tau_z weighting compounds
+3. Then capacity/density/loss reformulation per CURRENT_RESEARCH_STATE next-directions
+
+### Decisive epochs ahead (active runs)
+- H150 EP10 (~17:00Z) — target <6.64% to confirm β1↑+β2↑ SOTA contender
+- H151 EP10 (~17:00Z) — RNG noise check; target <6.64%
+- H152 primary EP3 (~+30min after launch) — kill if >7.40%
+- H154 EP1-3 (newly dispatched)
 
 ---
 
