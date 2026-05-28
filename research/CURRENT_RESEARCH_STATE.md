@@ -51,11 +51,11 @@ Merge gate: val_abupt < 6.1358% AND test_WSS ≤ 6.727% AND test_VP ≤ 3.421% A
 
 | PR | Student | Hypothesis | EP3 val_abupt | Δ vs H112 (6.978%) | WSS_x slope | Status |
 |---|---|---|---:|---:|---|---|
-| **#1353** | **thorfinn** | **H185: GradNorm × mirror-aug** | **6.8665** | **−0.111pp LEADING** | −0.162pp (intact) | **strongest** |
+| **#1353** | **thorfinn** | **H185: GradNorm × mirror-aug** | **6.8665** | **−0.111pp LEADING** | −0.162pp (intact) | **strongest at EP3** |
 | #1362 | alphonse | H188: mirror × DropPath=0.15 | 7.34 | +0.36pp | tba | strong |
 | #1365 | tanjiro | H191: mirror × tau_y=2.0 | 7.18 | +0.20pp | tba | moderate |
 | #1363 | askeladd | H189: AdamW × tau_y=3.0 no mirror | 8.05 | +1.07pp | −0.160pp (intact) | mechanism confirmed |
-| #1356 | fern | H186: mirror × AdamW | 8.28 | +1.30pp | tba | **RESTARTING** (kill gate risk) |
+| #1356 | fern | H186: mirror × AdamW | 8.28 | +1.30pp | tba | restart cancelled at 19:05Z (let run finish) |
 | #1357 | frieren | H187: H164e RNG rerun | 6.94 | −0.04pp | (calibration) | baseline N=2 |
 
 **H185 KEY FINDINGS**:
@@ -65,6 +65,23 @@ Merge gate: val_abupt < 6.1358% AND test_WSS ≤ 6.727% AND test_VP ≤ 3.421% A
 - EP4 bonus: still leading −0.063pp on val_abupt
 - Lead NARROWING EP3→EP4 (basin convergence); terminal trajectory uncertain
 - Terminal ~01:30Z tomorrow
+
+## ~Step 46k Snapshot (banked 19:05Z via W&B — students bot-silent on PRs)
+
+H112 terminal val_abupt gate = 6.1358%. Latest mid-EP6 trajectory:
+
+| PR | Student | Hypothesis | step | val_abupt | Δ vs gate |
+|---|---|---|---:|---:|---:|
+| #1362 | alphonse | H188: mirror × DropPath=0.15 | 46245 | **6.525%** | +0.39pp |
+| #1350 | edward | H184: surface:vol 4:0.5 + tau_y=3.0 | 46001 | 6.579% | +0.44pp |
+| #1364 | nezuko | H190: mirror at p=0.25 | 42452 | 6.582% | +0.45pp |
+| #1365 | tanjiro | H191: mirror × tau_y=2.0 | 45943 | 6.742% | +0.61pp |
+| #1363 | askeladd | H189: AdamW × tau_y=3.0 no mirror | 46824 | 7.090% | +0.95pp |
+| #1356 | fern | H186: mirror × AdamW | 45981 | 7.299% | +1.16pp (worst) |
+
+Three students (alphonse, edward, nezuko) clustering tightly at 6.5-6.6% val_abupt with ~20k steps remaining (~25-30% of training). Each plausibly drops 0.4-0.5pp by terminal → breakthrough beyond H112 SOTA. thorfinn H185 was at 6.535 at EP4 (step 38030), likely similar or better trajectory at step 46k.
+
+**Multiple winners possible**. First terminal expected ~22:30Z (frieren H187), main cohort ~01:00-02:30Z tomorrow.
 
 ---
 
