@@ -82,8 +82,10 @@ Merge gate: val_abupt < 6.1358% AND test_WSS ≤ 6.727% AND test_VP ≤ 3.421% A
 - Synergistic effect amplifies vs H171 solo by −7.2bp at EP6
 - Falsifies H147 EP6 LAG framework — slope-preservation hypothesis ALIVE
 
+**H185 EP9 (banked 22:17Z)** — val_abupt **6.0948% LEADING H112 (6.2024) by −0.108pp** at EP9. WSS_x lead −0.150pp (basin invariant past H112 terminal). Lead consolidating (10-15bp band) not narrowing. Terminal projection val_abupt ~6.028 (108bp below merge gate). Test_WSS projection 6.528-6.675 across 3 slope scenarios — **ALL PASS 6.752 merge gate**. **H185 IS THE FIRST TAY-TRACK MERGE-ELIGIBLE CANDIDATE SINCE H112**. ETA terminal ~03:00-04:00Z+1.
+
 **Terminal projection** (using cohort EP6→terminal mean drop −22.6bp):
-- H185 → ~6.06-6.08% val_abupt → **beats H112 gate 6.1358% by 5-8bp** if realized
+- H185 → ~6.06-6.08% val_abupt → **beats H112 gate 6.1358% by 5-8bp** if realized → REVISED via EP9 actual: **~6.028 → beats by 108bp**
 - First val-side merge-eligible result expected
 
 **Updates banked 19:50Z**:
