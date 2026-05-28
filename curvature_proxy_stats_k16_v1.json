@@ -1,0 +1,16 @@
+{
+  "mean": [
+    0.02856144342125595,
+    0.01238992213118092,
+    0.032225027457385653
+  ],
+  "std": [
+    0.08759301544863994,
+    0.06059323902318705,
+    0.10618328877785052
+  ],
+  "count": 3434177441,
+  "num_cases": 400,
+  "filename_npy": "surface_curvature_proxy_k16_v1.npy",
+  "case_root": "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
+}
