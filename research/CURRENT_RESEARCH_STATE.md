@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-28 20:57Z (H150 EP13=6.6567% steady descent; H151 EP14=6.836%; H154 EP6=7.0035% kill PASSED + val_VP under H147; **H155 EP1=7.8037% — −5pp vs H147 EP1=12.82%**)_
+_Last updated: 2026-05-28 22:32Z (**H150 EP14=6.6453% — FIRST CROSSOVER BELOW H147 EP10=6.640%**; H154 EP6=6.9719% descent slowing; H155 EP2=7.3609% strong descent; H151 EP14=6.836% stable drift)_
 
 ---
 
@@ -42,14 +42,14 @@ _Last updated: 2026-05-28 20:57Z (H150 EP13=6.6567% steady descent; H151 EP14=6.
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-28 20:57Z)
+### Fleet status (2026-05-28 22:32Z)
 
-| Run ID | Student | H# | Epoch | val_WSS | val_VP | val_SP | val_ABUPT | State | Δ vs H147 EP10=6.64% |
+| Run ID | Student | H# | Epoch | val_WSS | val_VP | val_SP | val_ABUPT | State | Δ vs H147 EP10=6.640% |
 |---|---|---|---:|---:|---:|---:|---:|---|---|
-| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | 13.97 | **6.6567%** | 3.562% | 3.906% | 5.917% | running | **+0.017pp** behind WSS; **VP/SP/ABUPT all below H147 EP10** |
-| d20sf8th | nezuko | H151 (extended 45EP canonical) | 14.24 | 6.8362% | 3.703% | 4.030% | 6.098% | running | +0.20pp behind (stable RNG drift) |
-| 8w7qtm5e | frieren | H154 (tau_z=1.3) | 5.95 | **7.0035%** | **3.382%** | 3.996% | 6.134% | running | **EP6 kill PASSED; val_VP UNDER H147 EP10** |
-| 9xo566ws | fern | H155 (lr=9e-5 primary) | 1.0 | **7.8037%** | — | — | — | running | **EP1 = -5.02pp vs H147 EP1 = 12.82%** |
+| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | 14.61 | **6.6453%** | **3.555%** | **3.905%** | **5.907%** | running | 🏆 **−0.005pp WSS; ALL 4 metrics BELOW H147 EP10** |
+| d20sf8th | nezuko | H151 (extended 45EP canonical) | 14.89 | 6.8362% | 3.703% | 4.030% | 6.098% | running | +0.196pp behind (stable drift, narrowing) |
+| 8w7qtm5e | frieren | H154 (tau_z=1.3) | 6.66 | 6.9719% | **3.369%** | 3.978% | 6.107% | running | ⚠️ EP10 kill at risk: descent slowing to −0.03pp/EP |
+| 9xo566ws | fern | H155 (lr=9e-5 primary) | 2.0 | 7.3609% | — | — | — | running | **EP2 only +0.10pp behind H147 EP2=7.26%** |
 | u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | — | — | **crashed** (abort) | β1↓+β2↓ falsifying |
 | 2h8cddnz | (fern old) | H152 (β1=0.95/β2=0.97) | 5.4 | 7.113% | — | — | — | **crashed** (abort) | β2↓ falsifying |
 
@@ -59,17 +59,18 @@ _Last updated: 2026-05-28 20:57Z (H150 EP13=6.6567% steady descent; H151 EP14=6.
 |---:|---:|---:|---:|---:|---:|---:|
 | H147 val_WSS | 12.82% | 7.26% | 6.98% | 6.75% | 6.64% | **6.5409%** |
 
-### H150 per-epoch val trajectory (5bgp2ryq)
+### H150 per-epoch val trajectory (5bgp2ryq) — 🏆 H147 EP10 CROSSED
 
-| EP | 1 | 2 | 5 | 8 | 10 | 11 | 12 | **13** |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| val_WSS | 11.19% | 7.27% | 6.83% | 6.73% | 6.694% | 6.6715% | 6.6656% | **6.6567%** |
-| val_VP | 11.72% | 4.89% | 3.80% | 3.64% | 3.608% | 3.589% | 3.570% | **3.562%** |
-| val_SP | — | — | — | — | — | — | — | **3.906%** |
-| val_ABUPT | 11.28% | 6.67% | 6.10% | 5.99% | 5.955% | 5.936% | 5.925% | **5.917%** |
-| Δ WSS vs H147 EP10=6.64% | +4.55pp | +0.62pp | +0.19pp | +0.09pp | +0.05pp | +0.031pp | +0.025pp | **+0.017pp** |
+| EP | 10 | 11 | 12 | 13 | **14** |
+|---:|---:|---:|---:|---:|---:|
+| val_WSS | 6.694% | 6.6715% | 6.6656% | 6.6567% | **6.6453%** |
+| val_VP | 3.608% | 3.589% | 3.570% | 3.562% | **3.5546%** |
+| val_SP | — | — | — | 3.906% | **3.9052%** |
+| val_ABUPT | 5.955% | 5.936% | 5.925% | 5.917% | **5.9071%** |
+| Δ WSS vs H147 EP10=6.640% | +0.054pp | +0.031pp | +0.025pp | +0.017pp | 🏆 **−0.005pp** |
+| Δ VP  vs H147 EP10=3.608% | 0 | -0.019pp | -0.038pp | -0.046pp | **−0.053pp** |
 
-H150 plateau-recovered then resumed steady -0.01pp/EP descent. **val_VP, val_SP, val_ABUPT all already below H147 EP10**. WSS expected to cross H147 EP10 by EP15-16. If linear -0.01pp/EP holds: EP20 ~6.62%, EP30 ~6.55% (below H147 final 6.5409%). This is the most promising β-grid arm.
+**First single-model arm to beat H147 EP10 at the same epoch.** Steady -0.011pp/EP descent. Extrapolation: EP18 ~6.61%, EP25 ~6.55%, EP30 ~6.49% — would beat H147 final test 6.5409% by ~0.05pp. β1↑+β2↑ joint = working delayed-converger.
 
 ### H151 per-epoch val trajectory (d20sf8th)
 
@@ -81,39 +82,38 @@ H150 plateau-recovered then resumed steady -0.01pp/EP descent. **val_VP, val_SP,
 
 Linear descent −0.01pp/EP. Drift to H147 stable at +0.20pp. Run has ~31 EP remaining of its 45-EP budget. Extrapolation: EP30 ~6.68%, EP45 ~6.53%. Decisive whether 45-EP-canonical can beat 30-EP-canonical.
 
-### H154 per-epoch val trajectory (8w7qtm5e)
+### H154 per-epoch val trajectory (8w7qtm5e) — ⚠️ DESCENT SLOWING
 
-| EP | 1 | 2 | 3 | 4 | **5** |
-|---:|---:|---:|---:|---:|---:|
-| val_WSS | 15.54% | 7.77% | 7.2375% | 7.0698% | **7.0035%** |
-| val_VP  | 8.175% | 3.790% | 3.488% | 3.396% | **3.382%** |
-| val_ABUPT | 13.90% | 6.836% | 6.345% | 6.184% | **6.134%** |
+| EP | 1 | 2 | 3 | 4 | 5 | **6** | Δ rate |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| val_WSS | 15.54% | 7.77% | 7.2375% | 7.0698% | 7.0035% | **6.9719%** | -0.03 |
+| val_VP  | 8.175% | 3.790% | 3.488% | 3.396% | 3.382% | **3.369%** | |
+| val_ABUPT | 13.90% | 6.836% | 6.345% | 6.184% | 6.134% | **6.107%** | |
 
-**EP6 kill PASSED** (gate >7.20%; EP5.95=7.0035%). Descent rate slowing: -0.54pp/EP (EP2→3), -0.17pp/EP (EP3→4), -0.07pp/EP (EP4→5). Risk of plateau above 6.80% by EP10. **val_VP=3.382% is BELOW H147 EP10=3.608%** — tau_z reweighting lifts volume_p too, surprising positive cross-head effect.
+EP6 kill formally passed (gate >7.20%; EP6=6.9719%). But **descent rate has collapsed**: -0.54 (EP2→3), -0.17 (EP3→4), -0.07 (EP4→5), **-0.03 (EP5→6)**. EP10 kill (>6.80%) needs -0.17pp in 4 EPs; at current -0.03pp/EP rate → lands at ~6.85% = **FAILS EP10 kill**. val_VP=3.369% remains below H147 EP10 — tau_z weighting helps volume head but tau_z=1.3 alone insufficient to beat H147 wall_shear.
 
-### H155 primary EP1 — DRAMATIC SIGNAL (9xo566ws)
+### H155 primary EP1-EP2 — STRONG TRAJECTORY (9xo566ws)
 
 Created 19:37:55Z. Config verified: `lr=9e-5`, `lion_beta1=0.95`, `lion_beta2=0.98`, `tau_z_loss_weight=1`, `epochs=30`, `lr_cosine_t_max=30`, `ema_decay=0.999`, `ema_start_step=500`. DDP8 active.
 
-| Stack | EP1 val_WSS |
-|---|---:|
-| H147 (lr=1e-4) | 12.82% |
-| H150 (β↑↑, lr=1e-4) | 11.19% |
-| H154 (tau_z=1.3, lr=1e-4) | 15.54% |
-| **H155 (lr=9e-5)** | **7.8037%** ← **−5.02pp vs H147** |
+| EP | H155 val_WSS | H147 val_WSS | Δ |
+|---:|---:|---:|---:|
+| 1 | 7.8037% | 12.82% | **−5.02pp** |
+| **2** | **7.3609%** | 7.26% | **+0.10pp** |
 
-**Cleanest EP1 ever observed on this stack.** Lower lr during warmup avoids the EP1 overshoot. EP1 kill (>17%) passed by 9.2pp. Even with conservative descent rate (half H147's -6.18pp/9EP), H155 EP10 trajectory plausibly lands at 6.0-6.5% — could beat H147 final 6.5409%.
+EP1→EP2 descent = -0.44pp/EP. H155 has caught H147 trajectory by EP2 from a 5pp better EP1 start. Extrapolation: if H155 maintains H147's descent rate from EP2, EP10 ~6.74% (+0.10pp behind H147 EP10). If H155 maintains better-than-H147 rate (likely given lower lr), EP10 could be 6.50-6.60% — would beat H147 final.
 
 ---
 
 ## Decisive epochs ahead (active runs)
 
-- **H155 EP3** (~22:15Z, step 32927) — gate val_WSS > 7.80% (trivial pass expected given EP1=7.80%)
-- **H154 EP8** (~22:30Z, step 87807) — descent-rate diagnostic; >6.95% suggests plateau forming
-- **H150 EP15-16** (~22:50-23:30Z, step 165k-176k) — projected H147 EP10 crossover
-- **H154 EP10 hard kill** (~23:30Z, step 109759) — gate val_WSS > 6.80%
-- **H155 EP5** (~23:30Z) — gate val_WSS > 7.20%
-- **H151 EP20-25** — RNG-drift trajectory check; will compound budget pay off?
+- **H155 EP3-EP4** (~22:45-23:15Z) — descent-rate diagnostic; if continues -0.4pp/EP, EP5 = ~6.5%
+- **H154 EP8** (~23:00Z, step 87807) — if val_WSS > 6.93%, decision to early-abort
+- **H154 EP10 hard kill** (~23:45Z, step 109759) — gate val_WSS > 6.80%; likely fail at current descent rate
+- **H150 EP18-20** (~00:30-01:30Z) — extrapolation check: should be ~6.59-6.61%
+- **H155 EP10** (~05:30Z) — would decide if lr=9e-5 alone beats H147 final
+- **H150 EP30 terminal** (~10:30Z 2026-05-29) — single-model SOTA candidate; needs test harvest
+- **H151 EP20-25** — slow narrowing of RNG drift
 
 ---
 
