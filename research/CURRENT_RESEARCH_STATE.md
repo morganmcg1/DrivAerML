@@ -1,10 +1,10 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-28 16:54Z (EP7+ readings: H150 RECOVERED to match H147 EP5; H152 EP3 kill PASSED; H154 smoke RECOVERED 15.3%→7.79%)_
+_Last updated: 2026-05-28 18:30Z (β-grid disentanglement COMPLETE; H152 aborted EP5.4 (β2↓ falsified); H150 plateau at EP9.9=6.737%; H154 primary launched 17:28Z @ EP1.5; H155 (lr=9e-5) assigned to fern PR #1368)_
 
 ---
 
-## Current research focus: Wave 41 — Lion β-sweep disentanglement for WSS optimisation
+## Current research focus: Wave 41 — closing β-grid + tier-shift to tau_z and lr-axis
 
 **Primary target:** Beat test_WSS < 5.85% (Transolver-3 SOTA) without degrading test_VP ≤ 3.643% or test_SP ≤ 3.577%.  
 **Current single-model SOTA:** PR #1344 (H147) — test_WSS = **6.5409%** — gap to target = −0.69pp.  
@@ -21,90 +21,86 @@ _Last updated: 2026-05-28 16:54Z (EP7+ readings: H150 RECOVERED to match H147 EP
 
 ---
 
-## Wave 41: β-sweep summary (2026-05-28)
+## Wave 41: β-grid disentanglement — COMPLETE (2026-05-28 18:30Z)
 
-### What we know
-
-H147 (PR #1344, merged 2026-05-28) proved that **Lion β1=0.95/β2=0.98** (vs canonical 0.90/0.99) is the single confirmed driver of the WSS improvement from the H138 complex. EP1 val exactly matched H138 (12.83%), confirming mechanism replication. All other candidate drivers (wd-drift H146, curvature-Charb H145) are confirmed null.
-
-H148 (PR #1345, closed) — compound z-coord + curvature spatial reweighting on clean H39 stack — produced test_WSS=6.7638% (null, +0.225pp behind SOTA). Spatial reweighting mechanisms are not worth pursuing in isolation on this stack.
-
-### Current β-grid
+### Final β-grid verdict
 
 ```
         β1=0.93    β1=0.95    β1=0.97
-β2=0.97  H149⛔    H152⌛     —
-β2=0.98            H147⭐     H153⌛(new)
-β2=0.985           —          H150🔥(leading)
+β2=0.97  H149⛔    H152⛔     —
+β2=0.98            H147⭐     H153⛔
+β2=0.985           —          H150⏳
 ```
 
-| H# | PR | Config | Status | Notes |
-|----|-----|--------|--------|-------|
-| H147 | #1344 ⭐MERGED | β1=0.95, β2=0.98 | test_WSS=**6.5409%** | CURRENT SOTA; β-grid optimum |
-| H149 | #1358 ⛔CLOSED | β1=0.93, β2=0.97 | Aborted EP3 val_WSS=7.4046% | β1↓+β2↓ direction bad |
-| H150 | #1359 🔄ACTIVE | β1=0.97, β2=0.985 | EP7-8 val_WSS=**6.749%** (matches H147 EP5) | RECOVERED — delayed convergence (~2 EP slower than H147), slope healthy; EP10 (~18:30Z) decides |
-| H151 | #1360 🔄ACTIVE | canonical β=0.95/0.98 | EP8 val_WSS=**6.890%** (+0.140pp vs H147 EP5) | Drift persists — RNG noise on extended 45-ep replication |
-| H152 | #1361 🔄RUNNING | β1=0.95, β2=0.97 | EP3.5 val_WSS=**7.379%** ✅PASSED 7.40% kill | But +0.40pp behind H147 EP3=6.98% — β2↓ falsifying |
-| H153 | #1366 ⛔CLOSED | β1=0.97, β2=0.98 | Aborted EP1 val_WSS=**13.86%** (+1.04pp) | **Pure β1↑ ALONE BAD** — destabilizes EP1 |
-| H154 smoke | #1367 🔄RUNNING | H147 stack + tau_z=1.3 (3-EP smoke) | EP2.7 val_WSS=**7.79%** ✅<8.5% gate | Recovered from EP1.4=15.3%; **GREEN-LIGHT primary 30-EP launch at ~17:10Z** |
+| Direction | Outcome | Evidence |
+|-----------|---------|----------|
+| β1↓ + β2↓ | ⛔ falsifying | H149 aborted EP3 val_WSS=7.083% |
+| β2↓ pure | ⛔ falsifying | H152 aborted EP5.4 val_WSS=7.113% (β1=0.95, β2=0.97) |
+| β1↑ pure | ⛔ destabilizes EP1 | H153 aborted EP1 val_WSS=13.86% (β1=0.97, β2=0.98) |
+| β1↑ + β2↑ joint | ⏳ delayed converger | H150 (β1=0.97, β2=0.985) — see below |
+| **β-grid optimum** | **⭐ H147 (0.95, 0.98)** | SOTA at 6.5409% test_WSS |
 
-### β-grid disentanglement + EP7-8 trajectory update (2026-05-28 16:54Z)
+**β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-**Updated picture from 4 β-grid arms + extended canonical:**
-- **β1↑ alone destabilizes EP1** (H153: 13.86% > kill threshold). H150's EP1 lead came from JOINT (β1↑, β2↑) — neither axis alone helps.
-- **β2↓ direction bad** (H149 aborted EP3 at 7.40%; H152 EP3=7.379% **barely passes kill** at +0.40pp behind H147 EP3). β2↓ confirmed falsifying.
-- **β1↓ direction bad** (H149: β1=0.93 + β2=0.97 aborted).
-- **H147 (0.95, 0.98) is the β-grid local optimum** — but H150 is now back to **matched** at EP7-8 (val_WSS=6.749% = H147 EP5=6.750%).
-- **H150 (0.97, 0.985) EP7-8 update**: val_WSS=**6.749%** — back to parity. The strong -1.63pp EP1 lead eroded by EP2, fell to +0.042pp behind by EP6.5, but the slope kept descending. (β1↑, β2↑) is a **delayed converger**, not a deeper-minimum failure. EP10 reading at ~18:30Z is decisive.
-- **H151 (canonical extended)** EP8 val_WSS=6.890% (+0.140pp behind H147 EP5) — drift persists, RNG noise hypothesis still consistent.
-- **H154 smoke (NEW): tau_z=1.3 on H147 stack** — smoke EP2.7=7.79% confirms recovery from hot EP1; primary launch green-lit.
+### Fleet status (2026-05-28 18:30Z)
 
-**Implication:** β-space remains exhausted as a primary lever, but **H150 may now tie or marginally beat H147 by EP10**. Tier-shift (H154 tau_z) is launching now. Two parallel paths to break 6.54%: H150 delayed convergence by EP10-30, OR H154 primary by EP30.
+| Run ID | Student | H# | Epoch | val_WSS | val_VP | val_SP | val_ABUPT | State | Δ vs H147 EP10=6.64% |
+|---|---|---|---:|---:|---:|---:|---:|---|---|
+| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | 9.92 | **6.737%** | 3.637% | 3.947% | 5.994% | running | **+0.097pp** behind (plateau confirmed at EP9.9) |
+| d20sf8th | nezuko | H151 (extended canonical) | 10.19 | 6.870% | 3.753% | 4.040% | 6.131% | running | +0.230pp behind (RNG drift) |
+| 8w7qtm5e | frieren | H154 (tau_z=1.3, primary) | 1.51 | 15.54% | 8.175% | 9.466% | 13.90% | running | EP1 warmup phase (kill at EP3>8.0%) |
+| u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | — | — | **crashed** (abort) | β1↓+β2↓ falsifying |
+| 2h8cddnz | (fern old) | H152 (β1=0.95/β2=0.97) | 5.4 | 7.113% | — | — | — | **crashed** (abort) | β2↓ falsifying |
 
-### What's next: tier-shift beyond β-tuning
+### H147 SOTA trajectory reference
 
-β-space is exhausted around H147. To break the 6.54% floor we need a DIFFERENT axis:
-1. **H154 (frieren NEW): tau_z_loss_weight=1.3 on H147 stack** — directly target worst WSS component (H147 test_WSS_z=8.49%)
-2. If H150 wins → confirm joint β + tau_z weighting compounds
-3. Then capacity/density/loss reformulation per CURRENT_RESEARCH_STATE next-directions
+| EP | 1 | 2 | 3 | 5 | 10 | final test |
+|---:|---:|---:|---:|---:|---:|---:|
+| H147 val_WSS | 12.82% | 7.26% | 6.98% | 6.75% | 6.64% | **6.5409%** |
 
-### Decisive epochs ahead (active runs)
-- H150 EP10 (~18:30Z) — target ≤6.64% to match H147; below = winning trajectory. EP7-8 reading already at H147 EP5 parity (6.749%)
-- H151 EP10 (~18:30Z) — RNG noise check; +0.14pp drift at EP8, likely confirms ±0.2pp single-trial variance
-- H152 EP6 (~18:00Z) — kill if val_WSS > 6.90%; β2↓ direction tracking +0.40pp behind H147
-- H154 smoke EP3 (~17:05Z) — already at 7.79% at EP2.7, well under 8.5% gate. Primary 30-EP launch expected at ~17:10Z
-- H154 primary EP3 (~19:30Z) — kill if val_WSS > 8.0% (tau_z=1.3 weighting overhead)
+### H150 EP9.9 plateau analysis
+
+H150 (β1=0.97, β2=0.985) has flattened at val_WSS=6.737% at EP9.9 (step 108867). At EP10 H147 was 6.64%, so H150 is +0.097pp behind at the same epoch. The strong −1.63pp EP1 lead eroded by EP2, recovered toward parity at EP7-8, but the descent has stalled into a plateau. **Verdict: H150 is unlikely to beat H147 by EP10.** H150 may still recover in EP11-30 if cosine LR decay drives further improvement; will continue observing through EP15 before deciding.
+
+### Tier-shift arms (active)
+
+**H154 (frieren, PR #1367)** — Primary 30-EP launched 17:28Z. tau_z_loss_weight=1.3 directly targets H147's worst WSS component (test_WSS_z=8.49%). EP1.5 val_WSS=15.54% (expected hot from tau_z=1.3 weighting; smoke EP1=15.3% recovered to EP3=7.79%, so same trajectory expected). Kill ladder: EP3>8.0%, EP6>7.20%, EP10>6.80%, EP30 must beat 6.5409% by ≥0.05pp.
+
+**H155 (fern, PR #1368)** — lr=9e-5 on canonical H147 β-config (β1=0.95, β2=0.98). Single-knob ablation: the May 4 research map (run 9mm3sz7x) showed lr=9e-5 + tau_y + tau_z produced test_ABUPT=8.12% on a different stack — extracting just the lr=9e-5 axis tests whether lower lr enables longer cosine descent. **Orthogonal to H154** — if both win independently, future compound test possible. PR created 18:25Z; awaiting student pickup for smoke.
 
 ---
 
-## Active fleet (2026-05-28 16:54Z)
+## Decisive epochs ahead (active runs)
 
-| Student | PR | Hypothesis | Status |
-|---------|-----|-----------|--------|
-| dl24-fern | #1361 | H152: β1=0.95/β2=0.97 (pure β2↓) | WIP — EP3.5 val_WSS=**7.379%** ✅passed 7.40% kill; +0.40pp behind H147 (falsifying β2↓) |
-| dl24-frieren | #1367 | H154: tau_z_loss_weight=1.3 on H147 | WIP — smoke EP2.7=**7.79%** ✅recovered <8.5% gate; PRIMARY 30-EP launch green-lit at ~17:10Z |
-| dl24-nezuko | #1360 | H151: Extended training 45ep canonical | WIP — EP8 val_WSS=**6.890%** (+0.140pp drift) — RNG noise consistent |
-| dl24-tanjiro | #1359 | H150: β1=0.97/β2=0.985 (joint) | WIP — EP7-8 val_WSS=**6.749%** RECOVERED to match H147 EP5; EP10 (~18:30Z) decides |
+- **H154 primary EP3** (~19:24Z) — kill if val_WSS > 8.0%
+- **H150 EP10-11** (~18:30-19:15Z) — definitive plateau or recovery
+- **H151 EP10-15** — continue tracking RNG drift; expect ±0.2pp single-trial noise envelope
+- **H155 smoke EP1** (after fern picks up PR #1368, ~18:35-19:00Z) — kill if val_WSS > 16% (H147 EP1 was 12.82%)
 
 ---
 
 ## Potential next research directions (post β-sweep)
 
-### If β-sweep confirms optimum at (0.97, 0.985) [H150 wins]
-1. **Fine-grained β1 scan around 0.97**: try β1=0.96, 0.98 with fixed β2=0.985
-2. **Fine-grained β2 scan around 0.985**: try β2=0.990, 0.975 with fixed β1=0.97
-3. **Capacity increase on canonical config**: hidden_dim 512→768 or layers 6→8
+### If H150 plateau holds (likely)
+1. **Capacity tier**: hidden_dim 512→768 or layers 6→8 on H147 stack (orthogonal axis)
+2. **Surface point density**: 65k→130k surface points on H147 stack
+3. **Per-axis WSS Charbonnier**: τ_x/τ_y/τ_z loss reformulation
+4. **Architectural tier**: cross-attention surface-volume coupling
 
-### If β-sweep plateaus near 6.50% (no clear winner beyond H147)
-1. **Architecture tier**: Transolver variant with attention pooling over surface-volume cross-attention
-2. **Loss reformulation**: Per-axis WSS Charbonnier on τ_x/τ_y/τ_z on the canonical β config (H23-style)
-3. **Surface point density**: 65k→130k surface points on canonical β config
-4. **Learning rate sensitivity**: lr=1e-4 vs 5e-5 on β-calibrated canonical config
+### If H154 (tau_z=1.3) wins
+1. **tau_z grid**: 1.2, 1.4, 1.5 on H147 stack
+2. **Compound**: H154 tau_z + H155 lr (if both win)
+3. **tau_y_loss_weight** code add: parallel τ_y axis lever (would need train.py extension)
 
-### Bold tier (if plateau persists)
-1. **Flash attention 2 + RoPE PE** replacing STRING PE — geometric positional encoding
-2. **Multi-resolution feature hierarchy**: hierarchical point cloud processing with FPS sampling
-3. **Physics-guided pretraining**: pretrain decoder on synthetic RANS solutions, fine-tune on DrivAerML
+### If H155 (lr=9e-5) wins
+1. **lr grid**: 7e-5, 8e-5, 1.1e-4 on H147 stack
+2. **lr × cosine T_max**: longer T_max with lower lr
+3. **Compound**: lr=9e-5 + tau_z=1.3 if both win independently
+
+### Bold tier (if all current arms plateau)
+1. **Flash attention 2 + RoPE PE** replacing STRING PE
+2. **Multi-resolution FPS hierarchical processing**
+3. **Physics-guided pretraining** on synthetic RANS solutions
 
 ---
 
@@ -137,9 +133,9 @@ torchrun --nproc_per_node=8 target/train.py \
 |------|-------------|--------------|
 | Pre-wave | H39 wider surface_out MLP (factor=2.0) | 6.6506% (PR #1284) |
 | Wave 36 (H138-H148) | Disentanglement: β-drift is single driver; wd-drift null; curvature null | 6.5409% (H147) |
-| Wave 41 (H149-H153) | β-space exploration; H150 leading in early epochs | TBD |
+| Wave 41 (H149-H155) | β-grid exhausted; tier-shift to tau_z (H154) + lr-axis (H155) | TBD |
 
-The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. β-sweep may close 0.1-0.2pp; the remainder likely requires a tier-shift experiment (architecture or fundamentally different loss approach).
+The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. β-sweep closed 0pp (H147 stays optimum). Remaining headroom must come from tier-shift: tau_z weighting (H154), lr-axis (H155), capacity/density, or architecture/loss reformulation.
 
 ---
 
@@ -148,4 +144,6 @@ The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. 
 - Issue #1056 — active research directive and hard constraints
 - BASELINE.md — locked scoreboard with corrected-split results
 - PR #1344 — H147 merge commit with full β-attribution analysis
+- PR #1367 — H154 tau_z=1.3 active arm
+- PR #1368 — H155 lr=9e-5 active arm
 - `RESEARCH_IDEAS_*.md` — researcher-agent design briefs from prior waves
