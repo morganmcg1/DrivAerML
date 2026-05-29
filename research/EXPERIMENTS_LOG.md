@@ -11106,5 +11106,31 @@ Standard `train.py` saves only single best EMA snapshot (overwritten on each val
 | #1383 | tanjiro | H210: cross-recipe SWA over 5 EP13 best artifacts | consensus basin |
 | #1384 | nezuko | H211: TTA mirror-aug on H190 EP13 | own val recovery |
 
-Plus thorfinn H192 (TTA H112) and edward H200 (TTA H189) still running from 02:00Z batch.
+Plus thorfinn H192 (TTA H112) still running from 02:00Z batch.
+
+---
+
+## 2026-05-29 03:30Z — PR #1374: H200 TTA control on non-mirror-trained H189 (edward, **CLOSED — NEGATIVE CONTROL, Finding N banked**)
+
+- edward/h200-tta-mirror-control-h189
+- **Hypothesis**: TTA mirror-aug on H189 (non-mirror-trained) quantifies the CONTROL FLOOR for mechanism attribution of H192/H206/H209/H211.
+- **W&B run**: `jsdf4oww` (group `h200-edward-tta-control`)
+
+### Results
+
+| Split | Mode | WSS | VP | SP | WSS_x | WSS_y | WSS_z |
+|---|---|---:|---:|---:|---:|---:|---:|
+| test | original | 7.120 | 3.664 | 3.949 | 6.366 | 7.661 | 9.187 |
+| test | mirrored | 11.652 | 8.751 | 8.891 | 10.090 | 13.357 | 15.045 |
+| test | TTA | **8.393** | 5.486 | 5.649 | 7.405 | 9.281 | 10.844 |
+| val | original | 7.311 | 3.770 | 4.307 | 6.436 | 7.881 | 9.844 |
+| val | TTA | 8.477 | 5.397 | 5.791 | 7.407 | 9.325 | 11.396 |
+
+TTA delta vs original on test: WSS +1.274pp, VP +1.823pp, SP +1.700pp, WSS_x +1.038pp, WSS_y +1.621pp, WSS_z +1.657pp. All positive — TTA HURTS every channel.
+
+Pipeline parity confirmed: original-mode test_WSS = 7.119606 vs published 7.119599 (< 1ppm).
+
+**Finding N (program-permanent)**: TTA mirror-aug on a non-mirror-trained model is STRICTLY WORSE. The mirrored pass degrades ~4.5pp on test_WSS (+5.7pp on WSS_y). Uniform averaging drags the result toward the bad pass. This sets the CONTROL FLOOR: any mirror-trained model showing TTA delta < +1.274pp on test_WSS is showing evidence of learned mirror invariance. Any model showing delta < 0pp → net TTA gain attributable entirely to training aug.
+
+**Follow-up assigned**: H212 edward — mirror invariance profile across 5 cohort EP13 checkpoints (PR #1386).
 
