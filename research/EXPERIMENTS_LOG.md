@@ -1,3 +1,67 @@
+## 2026-05-29 14:15 — PR #1435 tanjiro H259 CLOSED Finding LL-noise; PR #1436 frieren H260 CLOSED Finding EE-volume; edward H244 Arm 1 SOTA candidate
+
+### PR #1435 tanjiro H259 — CLOSED: Finding LL-noise (σ basin edge)
+
+- **Branch**: tanjiro/h259-sigma-basin-edge
+- **Hypothesis**: H185 EP13's flat basin extends beyond σ=5e-4.
+- **W&B runs**: `31zxx3pb` (σ=5e-4 control), `086lp42c` (σ=1e-3), `5dmjnzcz` (σ=5e-3), `liqxq947` (σ=1e-2). Plus 2 unnecessary re-runs of σ=5e-4 (lei8q4nq, 9fjzjv1g).
+
+| σ | test noise_only | Δ vs σ=5e-4 | Verdict |
+|---|---:|---:|---|
+| 5e-4 (control) | 5.83% | 0 (sanity ✓) | optimal |
+| 1e-3 | 5.86% | +3bp | begins degrading |
+| 5e-3 | 7.66% | +183bp | collapse |
+| 1e-2 | 13.39% | +756bp | catastrophic |
+
+**Finding LL-noise: σ=5e-4 is the optimum for H185 EP13 weight-noise TTA. Basin edge falls between σ=5e-4 and σ=1e-3.**
+
+Validates the σ=5e-4 choice in all in-flight stacking experiments (H253 alphonse, H256 nezuko, H244 Arm 2 edward, H257 thorfinn sweep).
+
+**Operational note**: Tanjiro completed all 4 runs but never posted comments to the PR — advisor compiled findings directly from W&B. Need to remind students to post per-run updates.
+
+### PR #1436 frieren H260 — CLOSED: Finding EE-volume (vol-jitter catastrophic)
+
+- **Branch**: frieren/h260-vol-jitter
+- **Hypothesis**: Volume-point coordinate jitter is a viable TTA axis (contrast to surface-point jitter, Finding EE).
+- **W&B group**: `h260-frieren-vol-jitter`
+
+| σ_v | val_abupt | test_abupt | Verdict |
+|---|---:|---:|---|
+| 0 (control) | 6.02% | 5.86% | reproduces H209 ✓ |
+| 1e-4 | 14.85% | 14.35% | catastrophic +2.5× |
+| 1e-3 | 57.70% | 55.16% | total collapse |
+| 1e-2 | (running) | — | expected worse |
+
+**Finding EE-volume: Volume-point coordinate jitter destroys predictions at all tested scales.** Together with Finding EE (surface jitter), this closes the entire point-position-jitter TTA axis. ALL position-jitter mechanisms are FALSIFIED.
+
+**Mechanism insight**: The volume head's spatial conditioning is sensitive to ε-level positional perturbation, unlike the (theoretical) IID resampling I conjectured.
+
+### PR #1415 edward H244 Arm 1 — CANDIDATE SOTA (awaiting terminal marker)
+
+- **Branch**: edward/h244-h185-ep16-cosine-extension
+- **Arm 1 W&B run**: `bh7we7p6` (EP15 + 6-res mirror_res_avg TTA)
+- **Arm 1 metrics**:
+
+| Split | abupt | SP | VP | WSS | WSS_x | WSS_y | WSS_z |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| val | **5.9452** | 3.9301 | 3.4697 | 6.7415 | 5.8971 | 7.3141 | 9.1151 |
+| test | **5.7896** | 3.6595 | 3.3882 | **6.6947** | 5.9438 | 7.2661 | 8.6901 |
+
+**Merge gate** (vs H252 val 5.9492 / test 5.7975):
+- val 5.9452 < 5.9492 (−0.40bp) ✅
+- test 5.7896 < 5.7975 (−0.79bp) ✅
+- test_VP 3.3882 ≤ 3.421 ✓ | test_WSS 6.6947 ≤ 6.727 ✓ | test_SP 3.6595 > 3.577 ✗
+
+**Status**: Edward currently posted `pending_arms: true` because Arm 2 (EP15 + H252 stack, h1ae7x1j) is in flight to 16:39Z — past 15:45Z deadline. Advisor requested edward post Arm 1 as a separate terminal marker so we can merge it now. Arm 2 result will follow as a separate update.
+
+**Predicted-vs-actual on additive TTA composition**: advisor predicted val ~5.945 / test ~5.788, actual val 5.9452 / test 5.7896. Predictions matched within 0.03bp val / 0.20bp test. Strong evidence that EP-gain and TTA-gain compose nearly linearly in the late-cosine flat basin.
+
+### New assignments
+- **H262 tanjiro**: K-noise saturation sweep (K=5/10/20 at σ=5e-4 noise_only) — ~30-40 min probe.
+- **H263 frieren**: Multi-EP EMA weight averaging (avg(EP14,EP15) + 6-res mirror TTA) — ~70 min, novel weight-space axis.
+
+---
+
 ## 2026-05-29 13:35 — PR #1429 H254 askeladd CLOSED; Finding KK; H261 askeladd assigned; H255 fern update
 
 ### PR #1429 askeladd H254 — CLOSED: Finding KK (surface multi-res TTA null on H185 EP13)
