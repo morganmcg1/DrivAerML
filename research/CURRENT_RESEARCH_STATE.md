@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 08:20Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4e: 9 active (3 just assigned)
+**Updated**: 2026-05-29 08:35Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4e: 9 active
 
 ---
 
@@ -84,6 +84,8 @@
 | **#1417** | **thorfinn** | **H246: Multi-res TTA on H148 EP13 — best test_abupt checkpoint** | eval-only ~20min |
 | **#1418** | **nezuko** | **H247: Per-channel α multi-res TTA on H185 EP13** | per-channel α on H236 mechanism |
 | **#1419** | **alphonse** | **H248: Mirror × multi-res × point-jitter TTA on H185 EP13** | third orthogonal TTA axis |
+| ~~#1416~~ | ~~fern~~ | ~~H245: Multi-res on H183~~ | CLOSED — Finding EE(N=2): +14bp checkpoint-agnostic |
+| **#1421** | **fern** | **H249: Tight-range multi-res TTA on H185 {57k,65k,73k}** | resolution spacing sensitivity |
 
 **Budget remaining**: ~7.0h. edward H244 training sprint uses ~5.7h.
 
@@ -160,6 +162,7 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | **BB** | this cycle | **Permutation TTA null — H185 slice-attention empirically permutation-invariant. Null signal, dilutes mirror weight (edward H233 #1406).** |
 | **CC** | this cycle | **H148 density robustness: H148 loses only −0.6bp under 20% subsampling vs H185 losing ~100bp. H148 backbone is materially more point-density robust. Backbone selection criterion for future density-perturbing TTA.** |
 | **DD** | this cycle | **α-sweep on equal-bias TTA pairs (same-model orig+mirror) is U-shaped at α=0.5 — theoretically guaranteed. Skip α-sweeps on same-architecture TTA pairs. (alphonse H238 #1409)** |
+| **EE (prelim N=2)** | this cycle | **Multi-res TTA bonus is CHECKPOINT-INVARIANT at ~14bp. H185 (8bp mirror) +14bp; H183 (50bp mirror) +14bp. Mirror and multi-res mechanisms are independent — bonus does NOT scale with mirror sensitivity. N=3 pending (thorfinn H246).** |
 
 ---
 

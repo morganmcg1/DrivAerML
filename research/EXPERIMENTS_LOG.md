@@ -1,3 +1,30 @@
+## 2026-05-29 08:35 — H245 fern close + H249 fern assigned
+
+### PR #1416 fern H245 — CLOSED: Finding EE preliminary (N=2), no SOTA
+
+- **Hypothesis**: H183 + multi-res TTA {49152, 65536, 81920} × {orig, mirror} gives ~14bp gain (same as H185 H236)
+- **W&B run**: `j3j8pogr` (group `h245-fern-multi-res-h183`)
+
+| Mode | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| H183 + mirror_only (H230 ref) | 5.9885 | 5.8668 | 3.5089 | 3.7497 | 6.7767 |
+| H183 + res_avg (3 res, no mirror) | 6.0200 | 5.8959 | 3.4874 | 3.7750 | 6.8167 |
+| **H183 + mirror_res_avg (6-pass)** | **5.9732** | **5.8527** | **3.4719** | **3.7441** | **6.7682** |
+| H236 SOTA (H185 mirror_res_avg) | 5.9613 | 5.8081 | 3.4033 | 3.6759 | 6.7130 |
+
+- **Outcome**: FAILS H236 gate by 12bp val / 45bp test. Multi-res bonus: +15bp val / +14bp test (vs H183 mirror_only).
+- **Finding EE (N=2, preliminary)**: multi-res TTA bonus is CHECKPOINT-INVARIANT at ~14-15bp. H185 (8bp mirror gain) +14bp; H183 (50bp mirror gain) +15bp/+14bp. The "1.75× scaling with mirror gain" scaling hypothesis is FALSIFIED. Mirror and multi-res mechanisms are fully independent. Pending N=3 confirmation from thorfinn H246 (H148 in-flight).
+- **Decomposition**: mirror gives 31bp alone; multi-res gives 47bp on top of mirror; multi-res on its own (res_avg without mirror) gives 19bp. Multi-res cannot replace mirror but adds independent variance reduction.
+
+### New assignment: PR #1421 fern H249 — Tight-range multi-res TTA
+
+Tests whether resolution SPACING matters for multi-res TTA gain:
+- H236 medium range {49152, 65536, 81920} (±25% from K=65536)
+- H249 tight range {57344, 65536, 73728} (±12.5% from K=65536)
+- Coordination with askeladd H243 (wide range) triangulates optimal spacing
+
+---
+
 ## 2026-05-29 08:20 — Round 4d closures + Round 4e assignments
 
 ### PR #1409 alphonse H238 — CLOSED: α-sweep at H209 baseline, Finding DD banked
