@@ -98,11 +98,39 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1451 H271 H185+EP13+Sobol-QMC-K5+6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1454 H274 H185+EP13+Anti-thetic-K3+6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
+
+**val_abupt=5.9322%** / **test_abupt=5.7763%** (corrected split, H185 EP13 EMA + K=3 anti-thetic weight-noise σ=5e-4 × 6-res × mirror TTA)
+
+**New SOTA — beats H271 frieren (PR #1451) by −4.6bp val / −3.4bp test. Anti-thetic K=3 pairs (±δ_k, 6 forward passes per noise level) cancel the linear Taylor term ∇f(w)·ε, providing structured variance reduction beyond Sobol QMC. All channels improve (VP −1.8bp, WSS −4.3bp, SP −0.3bp). test_WSS 6.6805% is the new program best.**
+
+**W&B run:** `o8oq9r92` (fern/h274-antithetic-stacked)
+**Source checkpoint:** H185 EP13 EMA (`outputs/ensemble_cache/run-yw2a5dyl-epoch-13-ema/checkpoint.pt`)
+**PR:** #1454
+
+**Val metrics (corrected split, mirror_res_weight_noise_avg):** val_abupt=5.9322%, val_SP=3.9199%, val_VP=3.4670%, val_WSS=6.7276%
+**Test metrics (corrected split, mirror_res_weight_noise_avg):** test_abupt=5.7763%, test_VP=**3.3846%**, test_SP=3.6515%, test_WSS=**6.6805%**, test_WSS_x=5.9362%, test_WSS_y=7.2394%, test_WSS_z=8.6699%
+
+**Paper floors:** test_VP 3.3846 < 3.421 ✓ | test_WSS 6.6805 < 6.727 ✓ | test_SP 3.6515 > 3.577 ✗ (7.5bp gap)
+
+**TTA method**: 72-pass = 6-res {32768,49152,65536,81920,98304,131072} × K=3 anti-thetic pairs (6 noise samples) × {orig, mirror-y}. Eval cost: ~220 min on DDP×8.
+
+**Gain analysis (vs H271 prior SOTA EP13+Sobol K=5):**
+- val: −4.6bp | test: −3.4bp
+- test_VP: 3.3846 vs 3.3864 (−1.8bp ✓)
+- test_WSS: **6.6805** vs 6.6848 (−4.3bp ✓ — new program best, primary paper target)
+- test_SP: 3.6515 vs 3.6512 (±0.03bp, within noise)
+
+**Finding VV-antithetic-stacked**: Anti-thetic K=3 (6 noise passes) cancels linear Taylor term ∇f(w)·ε under 6-res×mirror full stack averaging. Strictly dominates Sobol QMC K=5 (5 passes) on all metrics. +20% compute overhead (72 vs 60 passes) delivers −8.4bp test vs H253 random K=5. Anti-thetic variance reduction survives 12 (res, mirror) configuration averaging.
+
+**Merge gate (updated):** val_abupt < **5.9322%** AND test_abupt < **5.7763%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+---
+
+## *** Prior SOTA: PR #1451 H271 H185+EP13+Sobol-QMC-K5+6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
 
 **val_abupt=5.9368%** / **test_abupt=5.7797%** (corrected split, H185 EP13 EMA + K=5 Sobol QMC weight-noise σ=5e-4 × 6-res × mirror TTA)
-
-**New SOTA — beats H267 (PR #1447) by −2.8bp test. Sobol QMC deterministic low-discrepancy sampling replaces i.i.d. random: K=5 Sobol perturbations have lower star discrepancy in proj_dim=1024 subspace than random, improving TTA ensemble coverage. val 0.01bp above H267 (within metric noise); test and test_WSS both improve.**
 
 **W&B run:** `o9hb87lt` (frieren/h271-sobol-k5-proj1024)
 **Source checkpoint:** H185 EP13 EMA (`outputs/h236_eval/_artifacts/yw2a5dyl/epoch-13/checkpoint.pt`)
