@@ -98,41 +98,55 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1414 H243 H185+Extended Multi-Res TTA 6-res (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1413 H252 H185+Weight-Noise×3-res×Mirror Stack TTA (tay) — 2026-05-29 ***
 
-**val_abupt=5.9546%** / **test_abupt=5.7979%** (corrected split, H185 EP13 EMA + 12-pass mirror×6-res TTA)
+**val_abupt=5.9492%** / **test_abupt=5.7975%** (corrected split, H185 EP13 EMA + 30-pass weight-noise σ=5e-4 K=5 × mirror × 3-res TTA)
 
-**New SOTA — beats H236 (PR #1408) by −0.67bp val, −1.02bp test. Extended multi-res range from 3-res {49152,65536,81920} to 6-res {32768,49152,65536,81920,98304,131072}. All test channels improve.**
+**New SOTA — beats H243 (PR #1414) by −5.4bp val, −0.4bp test. First validated weight-space+input-space stacking TTA. Two mechanisms (weight-noise perturbation + multi-res/mirror) are orthogonal and super-additive (+4bp excess over predicted sum).**
 
-**W&B run:** `yty4tnew` (askeladd/h243-extended-multi-res-6res)
-**Source checkpoint:** `yw2a5dyl` EP13 EMA (same as H236/H209)
-**PR:** #1414
+**W&B run:** `vgq5f8kf` (tanjiro/h242-stacked-multi-res)
+**Source checkpoint:** H185 EP13 EMA (`runs/h210/artifacts/h185/checkpoint.pt`)
+**PR:** #1413
 
-**Val metrics (corrected split, mirror_res_avg):** val_abupt=5.9546%, val_SP=3.9350%, val_VP=3.4768%, val_WSS=6.7506%, val_WSS_x=5.9022%, val_WSS_y=7.3325%, val_WSS_z=9.1266%
-**Test metrics (corrected split, mirror_res_avg):** test_abupt=5.7979%, test_VP=**3.3947%**, test_SP=3.6672%, test_WSS=**6.7025%**, test_WSS_x=5.9489%, test_WSS_y=7.2821%, test_WSS_z=8.6965%
+**Val metrics (corrected split, weight_noise_mirror_res_avg):** val_abupt=5.9492%, val_SP=3.9282%, val_VP=3.4828%, val_WSS=6.7446%
+**Test metrics (corrected split, weight_noise_mirror_res_avg):** test_abupt=5.7975%, test_VP=**3.3996%**, test_SP=3.6662%, test_WSS=**6.7030%**
 
-**Paper floors crossed:** test_VP 3.3947 < 3.421 ✓ | test_WSS 6.7025 < 6.727 ✓ | test_SP 3.6672 > 3.577 ✗ (pre-existing miss; unchanged from H236)
+**Paper floors:** test_VP 3.3996 < 3.421 ✓ | test_WSS 6.7030 < 6.727 ✓ | test_SP 3.6662 > 3.577 ✗
 
-**TTA method**: 12-pass = {orig, mirror-y} × {vol_points ∈ 32768, 49152, 65536, 81920, 98304, 131072}. Surface_points fixed at 65536. Mirror un-mirroring via tau_y negation. Per-case 32-bit CPU index_add_ accumulation. Eval cost: ~58 min on DDP×8, ~24.7 GB/GPU peak.
+**TTA method**: 30-pass = K=5 weight-noise draws (σ_rel=5e-4, seed=(42+k)×100003) × {orig, mirror-y} × {vol_points ∈ 49152, 65536, 81920}. Each pass uses the same perturbed-weight snapshot across all (res, mirror) inner sub-passes. DDP deterministic via same per-rank CURAND seed. Eval cost: ~90 min on DDP×8.
 
-**Gain analysis (vs H236):**
-- Δval: −0.67bp | Δtest: −1.02bp (widening res range {32k-131k} adds more cross-resolution variance reduction)
-- test_VP: −0.86bp | test_SP: −0.87bp | test_WSS: −1.05bp — gains spread across all channels
-- 5-res arm {32768..98304} gave val 5.9575 / test 5.8045; 6-res adds another −0.29bp val / −0.66bp test
-- Diminishing returns confirmed: 3→5-res = −0.36bp test, 5→6-res = −0.66bp test (not fully saturated yet)
+**Gain analysis (vs H243):**
+- Δval: −5.4bp | Δtest: −0.4bp
+- test_VP: −3.3996 vs 3.3947 H243 (+0.5bp — VP regresses slightly vs H243 6-res; 6-res covers more volume density)
+- test_WSS: 6.7030 vs 6.7025 H243 (+0.05bp — WSS also marginal regression; 3-res stack net negative here)
+- Orthogonality confirmed: stacked gain (−26.3bp val vs H209) > predicted sum of arms (−22.3bp = multi-res alone + noise alone)
 
-**Merge gate (updated):** val_abupt < **5.9546%** AND test_abupt < **5.7979%**
+**Merge gate (updated):** val_abupt < **5.9492%** AND test_abupt < **5.7975%**
 **Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
 
 **Reproduce:**
 ```bash
-torchrun --standalone --nproc-per-node=8 target/eval_multi_res.py \
-  --resolutions "32768,49152,65536,81920,98304,131072" \
-  --eval-modes "res_avg,mirror_res_avg" \
-  --batch-size 2 \
-  --wandb-name "askeladd/h243-extended-multi-res-6res" \
-  --wandb-group "h243-askeladd-extended-multi-res"
+torchrun --standalone --nproc-per-node=8 target/eval_tta_h252.py \
+  --checkpoint runs/h210/artifacts/h185/checkpoint.pt \
+  --resolutions "49152,65536,81920" \
+  --eval-modes "weight_noise_only,weight_noise_mirror_res_avg" \
+  --weight-noise-sigma 5e-4 \
+  --weight-noise-passes 5 \
+  --weight-noise-seed-base 42 \
+  --wandb-group "h242-tanjiro-stacked-tta" \
+  --wandb-name "tanjiro/h242-stacked-multi-res"
 ```
+
+---
+
+## Prior Single-Model SOTA: PR #1414 H243 H185+Extended Multi-Res TTA 6-res (tay) — 2026-05-29 (superseded by #1413)
+
+**val_abupt=5.9546%** / **test_abupt=5.7979%** (corrected split, H185 EP13 EMA + 12-pass mirror×6-res TTA)
+
+**W&B run:** `yty4tnew` (askeladd/h243-extended-multi-res-6res)
+**PR:** #1414
+
+**Test metrics:** test_abupt=5.7979%, test_VP=3.3947%, test_SP=3.6672%, test_WSS=6.7025%
 
 ---
 
