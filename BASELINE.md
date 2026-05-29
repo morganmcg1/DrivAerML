@@ -98,11 +98,39 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1413 H252 H185+Weight-Noise×3-res×Mirror Stack TTA (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1415 H244 H185+EP15+6-res Mirror TTA (tay) — 2026-05-29 ***
+
+**val_abupt=5.9452%** / **test_abupt=5.7896%** (corrected split, H185 EP15 EMA + 12-pass 6-res mirror TTA)
+
+**New SOTA — beats H252 (PR #1413) by −0.40bp val / −0.79bp test. Every channel improved: test_VP −1.14bp, test_WSS −0.83bp, test_SP −0.67bp. EP15 EMA (−9.3bp single-res over EP13) compounds additively with 6-res TTA.**
+
+**W&B run:** `bh7we7p6` (edward/h244-ep15-6res-mirror-res-avg)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1415
+
+**Val metrics (corrected split, mirror_res_avg):** val_abupt=5.9452%, val_SP=3.9301%, val_VP=3.4697%, val_WSS=6.7415%
+**Test metrics (corrected split, mirror_res_avg):** test_abupt=5.7896%, test_VP=**3.3882%**, test_SP=3.6595%, test_WSS=**6.6947%**
+
+**Paper floors:** test_VP 3.3882 < 3.421 ✓ | test_WSS 6.6947 < 6.727 ✓ | test_SP 3.6595 > 3.577 ✗
+
+**TTA method**: 12-pass = 6-res {32768,49152,65536,81920,98304,131072} × {orig, mirror-y}. Eval cost: ~60 min on DDP×8.
+
+**Gain analysis (vs H252 prior SOTA):**
+- val: −0.40bp | test: −0.79bp
+- test_VP: 3.3882 vs 3.3996 (−1.14bp ✓)
+- test_WSS: 6.6947 vs 6.7030 (−0.83bp ✓)
+- test_SP: 3.6595 vs 3.6662 (−0.67bp ✓)
+
+**EP15 mechanism**: EP15 single-res val_orig = 6.0079 (vs EP13 6.0172, −9.3bp). The late-cosine extension gains compose linearly with 6-res TTA — additive prediction was val ~5.945, actual 5.9452 (error 0.03bp).
+
+**Merge gate (updated):** val_abupt < **5.9452%** AND test_abupt < **5.7896%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+---
+
+## Prior Single-Model SOTA: PR #1413 H252 H185+Weight-Noise×3-res×Mirror Stack TTA (tay) — 2026-05-29 (superseded by #1415)
 
 **val_abupt=5.9492%** / **test_abupt=5.7975%** (corrected split, H185 EP13 EMA + 30-pass weight-noise σ=5e-4 K=5 × mirror × 3-res TTA)
-
-**New SOTA — beats H243 (PR #1414) by −5.4bp val, −0.4bp test. First validated weight-space+input-space stacking TTA. Two mechanisms (weight-noise perturbation + multi-res/mirror) are orthogonal and super-additive (+4bp excess over predicted sum).**
 
 **W&B run:** `vgq5f8kf` (tanjiro/h242-stacked-multi-res)
 **Source checkpoint:** H185 EP13 EMA (`runs/h210/artifacts/h185/checkpoint.pt`)
@@ -113,16 +141,7 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 **Paper floors:** test_VP 3.3996 < 3.421 ✓ | test_WSS 6.7030 < 6.727 ✓ | test_SP 3.6662 > 3.577 ✗
 
-**TTA method**: 30-pass = K=5 weight-noise draws (σ_rel=5e-4, seed=(42+k)×100003) × {orig, mirror-y} × {vol_points ∈ 49152, 65536, 81920}. Each pass uses the same perturbed-weight snapshot across all (res, mirror) inner sub-passes. DDP deterministic via same per-rank CURAND seed. Eval cost: ~90 min on DDP×8.
-
-**Gain analysis (vs H243):**
-- Δval: −5.4bp | Δtest: −0.4bp
-- test_VP: −3.3996 vs 3.3947 H243 (+0.5bp — VP regresses slightly vs H243 6-res; 6-res covers more volume density)
-- test_WSS: 6.7030 vs 6.7025 H243 (+0.05bp — WSS also marginal regression; 3-res stack net negative here)
-- Orthogonality confirmed: stacked gain (−26.3bp val vs H209) > predicted sum of arms (−22.3bp = multi-res alone + noise alone)
-
-**Merge gate (updated):** val_abupt < **5.9492%** AND test_abupt < **5.7975%**
-**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+**Merge gate (superseded):** val_abupt < **5.9492%** AND test_abupt < **5.7975%**
 
 **Reproduce:**
 ```bash
