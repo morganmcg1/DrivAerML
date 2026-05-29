@@ -98,7 +98,45 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1382 H209 H185+TTA mirror (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1408 H236 H185+Multi-Res TTA (tay) — 2026-05-29 ***
+
+**val_abupt=5.9613%** / **test_abupt=5.8081%** (corrected split, H185 EP13 EMA + 6-pass mirror×multi-res TTA)
+
+**New SOTA — beats H209 (PR #1382) by −14bp val, −14bp test. First compound TTA win: mirror symmetry × cross-resolution averaging.**
+
+**W&B run:** `faa8ymsy` (nezuko/h236-multi-res-tta)
+**Source checkpoint:** `yw2a5dyl` EP13 EMA (same as H209)
+**PR:** #1408
+
+**Val metrics (corrected split, mirror_res_avg):** val_abupt=5.9613%, val_SP=3.9379%, val_VP=3.4870%, val_WSS=6.7566%, val_WSS_x=5.9070%, val_WSS_y=7.3389%, val_WSS_z=9.1356%
+**Test metrics (corrected split, mirror_res_avg):** test_abupt=5.8081%, test_VP=**3.4033%**, test_SP=3.6759%, test_WSS=**6.7130%**, test_WSS_x=5.9585%, test_WSS_y=7.2922%, test_WSS_z=8.7107%
+
+**Paper floors crossed:** test_VP 3.4033 < 3.421 ✓ | test_WSS 6.7130 < 6.727 ✓ | test_SP 3.6759 > 3.577 ✗ (still above)
+
+**TTA method**: 6-pass = {orig, mirror-y} × {vol_points ∈ 49152, 65536, 81920}. Surface_points fixed at 65536. Mirror un-mirroring via tau_y negation. Per-case 32-bit CPU index_add_ accumulation. Eval cost: 29.9 min on DDP×8.
+
+**Gain analysis:**
+- Mirror alone (H209): −5.2bp val, −3.9bp test abupt
+- Multi-res alone (res_avg): +2.4bp val vs H209 TTA (mild degradation)
+- Mirror+multi-res (mirror_res_avg): −14bp val, −14bp test vs H209 (COMPOUND WIN)
+- VP gain: −0.037pp test (largest per-channel gain — volume sampling stride variance reduction)
+
+**Merge gate (updated):** val_abupt < **5.9613%** AND test_abupt < **5.8081%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+**Reproduce:**
+```bash
+torchrun --standalone --nproc-per-node=8 target/eval_multi_res.py \
+  --resolutions "49152,65536,81920" \
+  --eval-modes "res_avg,mirror_res_avg" \
+  --batch-size 2 \
+  --wandb-name "nezuko/h236-multi-res-tta" \
+  --wandb-group "h236-nezuko-multi-res-tta"
+```
+
+---
+
+## Prior Single-Model SOTA: PR #1382 H209 H185+TTA mirror (tay) — 2026-05-29 (superseded by #1408)
 
 **val_abupt=5.9755%** / **test_abupt=5.8221%** (corrected split, H185 EP13 EMA + 2-pass y-mirror TTA)
 
