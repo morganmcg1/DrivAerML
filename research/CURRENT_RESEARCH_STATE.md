@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 02:53Z (**H155 CLOSED** test_WSS=6.8936%, lr=9e-5 standalone falsified; **H157 ASSIGNED** to fern PR #1378 — wss-charbonnier-weight=0.1 on H150-β stack; **H150 EP21=6.6244%** — noise bump +0.002pp, conservative EP30 test proj=6.497% beats H147 by 0.04pp; **H156 EP3=7.182%** gap to H147 compressing; H151 EP21.6=6.815% slow grind)_
+_Last updated: 2026-05-29 03:35Z (**H157 RE-ASSIGNED** to fern PR #1385 — original PR #1378 accidentally auto-merged via advisor `git merge --no-ff` error; fern was idle ~30min, branch refresh with new slug `h157b-`; **H150 EP21.9=6.6244%** stable awaiting EP22 val log; **H156 EP4=7.0417%** descent confirmed (-0.14pp EP3→EP4, gap to H147 compressing to +0.18pp); **H151 EP22.2=6.8062%** slow grind continues)_
 
 ---
 
@@ -42,14 +42,14 @@ _Last updated: 2026-05-29 02:53Z (**H155 CLOSED** test_WSS=6.8936%, lr=9e-5 stan
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-29 02:53Z)
+### Fleet status (2026-05-29 03:35Z)
 
 | Run ID | Student | H# | Epoch | val_WSS | val_ABUPT | State | vs H147 |
 |---|---|---|---:|---:|---:|---|---|
-| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **21.33** | **6.6244%** | **5.884%** | running | 🏆 **-0.016pp vs H147 EP10; EP30 test proj 6.50%** |
-| d20sf8th | nezuko | H151 (extended 45EP canonical) | 21.61 | 6.815% | 6.078% | running | +0.191pp stable (RNG baseline) |
-| ugpyo62a (+7 ranks) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | **3.62** | **7.182%** | **6.648%** | running | EP1=13.15%, EP3=7.18% — gap compressing from +0.33pp→+0.20pp |
-| (new) | **fern** | **H157 (wss-charbonnier=0.1 + H150-β)** | — | (launching) | — | **ASSIGNED PR #1378** | 🎯 compound: H150-β + charbonnier aux loss |
+| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **21.90** | **6.6244%** | **5.884%** | running | 🏆 **-0.016pp vs H147 EP10; EP30 test proj 6.50%** |
+| d20sf8th | nezuko | H151 (extended 45EP canonical) | 22.16 | 6.806% | 6.070% | running | +0.18pp stable (RNG baseline) |
+| ugpyo62a (+7 ranks) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | **4.18** | **7.042%** | **6.435%** | running | EP4=7.042% — gap compressing +0.33pp→+0.20pp→+0.18pp |
+| (PR #1385 launching) | **fern** | **H157b (wss-charbonnier=0.1 + H150-β)** | — | (launching) | — | **RE-ASSIGNED PR #1385** | 🎯 compound: H150-β + charbonnier aux loss (PR #1378 was advisor merge-error, no work lost) |
 | 9xo566ws | (fern prev) | H155 (lr=9e-5) | 10.27 | 7.092% | 6.157% | **CLOSED (PR #1368 03:00Z)** | ⛔ test_WSS=6.8936%, lr-axis falsified |
 | 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.991% | 6.123% | **CLOSED (PR #1367 22:57Z)** | ⛔ EP7 falsified |
 | u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | crashed | β1↓+β2↓ falsifying |
@@ -128,37 +128,38 @@ Created 19:37:55Z. Config verified: `lr=9e-5`, `lion_beta1=0.95`, `lion_beta2=0.
 
 **CLOSED 03:00Z (PR #1368):** fern posted terminal SENPAI-RESULT 02:53Z — test_WSS=**6.8936%** (regression vs H147 6.5409% by +0.35pp). EMA best-val checkpoint EP10. W&B rank0=9xo566ws. Standalone lr=9e-5 axis **falsified**. H157 (wss-charbonnier compound) assigned to fern at PR #1378.
 
-### H156 primary EP1-EP2 — β + lr compound TRACKING H147 +0.30pp (ugpyo62a)
+### H156 primary EP1-EP4 — β + lr compound GAP COMPRESSING (ugpyo62a)
 
 Launched 00:40Z after `grdap1rg` smoke passed clean. Config: `lion_beta1=0.97`, `lion_beta2=0.985`, `lr=9e-5`, canonical H147 stack otherwise. DDP8 active, 8 W&B run-IDs in group (rank 0 = `ugpyo62a` canonical).
 
-| EP | H156 val_WSS | H147 reference | H155 reference | val_ABUPT |
+| EP | H156 val_WSS | H147 reference | H156−H147 offset | val_ABUPT |
 |---:|---:|---:|---:|---:|
-| 1 | 13.154% | 12.82% | 16.34% | 13.168% |
-| 2 | 7.572% | 7.26% | 7.804% | 7.146% |
+| 1 | 13.154% | 12.82% | +0.33pp | 13.168% |
+| 2 | 7.572% | 7.26% | +0.31pp | 7.146% |
+| 3 | 7.182% | 6.98% | +0.20pp | 6.648% |
+| **4** | **7.042%** | **~6.86% (interp)** | **+0.18pp** | **6.435%** |
 
-**Compound β + lr partially recovers H155's lr penalty:** EP1 only +0.33pp vs H147 (vs H155 +3.52pp), EP2 only +0.31pp vs H147 (vs H155 +0.54pp). The higher-β momentum config compensates for ~85% of the lower-lr early-EP overshoot reduction.
+**H156 vs H147 gap actively closing:** offset went from +0.33pp (EP1) → +0.31pp (EP2) → +0.20pp (EP3) → +0.18pp (EP4). Per-EP descent EP3→EP4 of -0.14pp matches healthy mid-cosine descent. The β1↑/β2↑ momentum is compensating for the lr=9e-5 deficit at a steeper rate than predicted.
 
-**Trajectory parallel to H147 + 0.30pp offset (if persists):**
-- H156 EP3 ≈ 7.29% (expected to PASS EP3 gate >7.50%)
-- H156 EP10 ≈ 6.94% (would FAIL EP10 soft kill >6.65% by 0.29pp)
-- H156 EP30 ≈ 6.85% val → ~6.75% test (would NOT beat H147 SOTA)
+**Updated EP10 projection (gap-closing at -0.02pp/EP):**
+- EP5 gap ≈ +0.16pp → EP5 ≈ 6.91% (would FAIL EP5 gate of >6.85% by 0.06pp — but kill criteria was set at >7.05% in original assignment, so still passes)
+- EP10 gap ≈ +0.06pp → EP10 ≈ 6.70% (would marginally FAIL EP10 soft kill >6.65% by 0.05pp)
+- EP30 gap ≈ ~0pp → EP30 val ≈ 6.45% → test ≈ 6.35% (would BEAT H147 SOTA if gap closes)
 
-**Risk flag:** ABUPT=7.146% at EP2 is HIGH (H155 EP2 ABUPT=6.837%). The compound may have a worse ABUPT trajectory than its WSS suggests. Will track ABUPT specifically through EP5-10.
+**Risk note tracked:** ABUPT=7.146% at EP2 was HIGH but EP3=6.648%, EP4=6.435% — sharp descent shows ABUPT trajectory is healthy, the EP2 anomaly was warmup transient.
 
-**Hold position to EP3 final reading (~03:00Z).** If +0.30pp offset persists, plan to terminate at EP6-10. If H156 closes the gap to H147 by EP3-5, ride further.
+**Decision: ride to EP10 hard-kill check.** Gap closing trajectory is the right signal — compound β+lr has the late-EP advantage hypothesis we expected. EP10 soft kill informs whether to ride or harvest.
 
 ---
 
 ## Decisive epochs ahead (active runs)
 
-- **H157 smoke + EP1** (~04:00Z) — fern launching PR #1378; gate >13.5% (compounded β should produce EP1 ≤12.5%)
-- **H156 EP4 reading** (~03:45Z) — tracking gap compression (EP3=+0.20pp to H147); EP5 gate >7.05%
-- **H156 EP5 kill check** (~04:30Z) — gate >7.05%
-- **H150 EP22-30 ride** — conservative EP30 test proj 6.497%; ABUPT still descending (-0.001/EP)
-- **H156 EP10 soft kill** (~10:00Z) — gate >6.65% (must beat H147 EP10 floor)
+- **H157b smoke + EP1** (~04-05:00Z) — fern launching PR #1385 (re-assignment of #1378); gate >13.5% (compounded β should produce EP1 ≤12.5%)
+- **H156 EP5 kill check** (~04:30Z) — gate >7.05% (projected 6.91% → PASS)
+- **H150 EP22 val log** (~03:45Z) — expected ~6.620-6.625% if trend intact
+- **H156 EP10 soft kill** (~10:00Z) — gate >6.65% (must beat H147 EP10 floor; projected ~6.70% → marginal FAIL)
 - **H150 EP30 terminal harvest** (~10:30Z 2026-05-29) — single-model SOTA candidate; test_WSS vs H147 6.5409%
-- **H157 EP1-10 trajectory** (~04-14:00Z) — wss-charbonnier on H150-β; kill gates EP1 >12.5%, EP3 >7.40%, EP5 >6.85%
+- **H157b EP1-10 trajectory** (~05-15:00Z) — wss-charbonnier on H150-β; kill gates EP1 >12.5%, EP3 >7.40%, EP5 >6.85%
 - **H151 EP25-45** — RNG-baseline confirmation arm; EP45 terminal useful for duration comparison
 
 ---
