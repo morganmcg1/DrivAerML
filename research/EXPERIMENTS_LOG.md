@@ -11851,3 +11851,79 @@ This conclusively closes the "input noise" TTA sub-family. The only viable input
 **Important validation**: sanity run (ql91bidw) reproduces faa8ymsy EXACTLY (5.9613/5.8081/6.7130 bit-for-bit). Confirms eval_multi_res.py's `mirror_res_jitter_avg` extension leaves the baseline path intact.
 
 **Follow-on assigned**: alphonse H253 — stack weight-noise σ=5e-4 ON H243 6-res (PR #1428, highest-EV next SOTA bet).
+
+---
+
+## 2026-05-29 11:07Z — PR #1426: H252 thorfinn — H148+Weight-Noise TTA CLOSED (Finding FF generalized)
+
+- **Branch**: thorfinn/h252-weight-noise-h148
+- **Hypothesis**: H148 EP13 weight-noise σ-sweep (same H242 method), to test if Finding FF (H185 flat basin) generalizes to the density-robust H148.
+
+### Results
+
+| Config | σ | val_abupt | test_abupt | test_VP | test_SP | test_WSS | W&B |
+|---|---|---|---|---|---|---|---|
+| H148 orig | — | 6.2186 | 5.8508 | 3.4164 | 3.6955 | 6.7750 | x28daf8t |
+| H148 mirror | — | 6.2178 | 5.8502 | — | — | — | x28daf8t |
+| H148 noise_only | 1e-4 | 6.1896 | 5.8228 | — | — | — | x28daf8t |
+| H148 noise_only | 5e-4 | 6.1797 | 5.8143 | — | — | — | x28daf8t |
+| H148 tta (K+2) | 1e-4 | 6.1728 | 5.8068 | — | — | — | x28daf8t |
+| **H148 tta (K+2)** | **5e-4** | **6.1629** | **5.7978** | **3.3911** | **3.6660** | **6.7161** | **x28daf8t** |
+
+Gate: val FAILS (6.1629 vs 5.9546), test PASSES (5.7978 < 5.7979 by 0.1bp). Dual gate not met.
+
+### Analysis
+
+**Finding FF generalized (banked)**: H148 EP13 also sits in a FLAT wide basin. noise_only σ=5e-4 gains −39bp val / −37bp test (vs H185's −23bp val / −33bp test). H148 gains MORE from noise perturbation — its basin is even flatter than H185's.
+
+**Convergence finding**: H148+weight-noise test 5.7978 effectively TIES H243's test 5.7979 (new SOTA from H185 6-res multi-res). Two completely different mechanisms on different checkpoints reaching the same test floor → likely approaching the Bayes information ceiling for these 50 test cases.
+
+Best per-channel on test: test_WSS_x 5.95, WSS_y 7.28, WSS_z 8.70 — same relative ordering as H243.
+
+**Follow-on assigned**: thorfinn H257 — σ-sweep on H243 6-res stack to find optimal noise scale.
+
+---
+
+## 2026-05-29 11:07Z — PR #1425: H251 nezuko — H188+Multi-Res TTA CLOSED (Finding HH N=4)
+
+- **Branch**: nezuko/h251-multi-res-h188
+- **Hypothesis**: Multi-res TTA on H188 EP13, to extend Finding HH (checkpoint portability) to N=4.
+
+### Results
+
+| Mode | val_abupt | test_abupt | test_VP | test_SP | test_WSS | W&B |
+|---|---|---|---|---|---|---|
+| H188 mirror_only | 6.1197 | 5.9157 | 3.4768 | 3.7742 | 6.8403 | tseo0ns6 |
+| H188 res_avg | 6.1454 | 5.9412 | 3.4581 | 3.7940 | 6.8755 | cl7pup9j |
+| **H188 mirror_res_avg** | **6.1068** | **5.9039** | **3.4452** | **3.7697** | **6.8336** | **cl7pup9j** |
+
+### Analysis
+
+**Finding HH N=4 confirmed**: multi-res TTA portable to H188. Gain = +12.9bp val / +11.8bp test from mirror_only (consistent with H185 +14bp, H183 +15bp). H188 NOT merge candidate (val 6.1068 >> gate 5.9546). Bank as Finding HH N=4: {H185, H183, H188} all show uniform +12-15bp multi-res bonus; mechanism checkpoint-agnostic on density-fragile backbones.
+
+**Follow-on assigned**: nezuko H256 — full stack (6-res mirror + weight-noise) on H183.
+
+---
+
+## 2026-05-29 11:07Z — PR #1421: H249 fern — Tight-Range Multi-Res TTA CLOSED (Finding LL)
+
+- **Branch**: fern/h249-tight-range-multi-res
+- **Hypothesis**: Tight-range {57k,65k,73k} and extra-tight {61k,65k,69k} multi-res TTA.
+
+### Results
+
+| Mode | Range | val_abupt | test_abupt | test_VP | test_SP | test_WSS | W&B |
+|---|---|---|---|---|---|---|---|
+| H236 sanity (medium) | {49k,65k,82k} | 5.9613 | 5.8081 | 3.4033 | 3.6759 | 6.7130 | v56i1thz |
+| H249 tight mirror_res_avg | {57k,65k,73k} | 5.9614 | 5.8086 | 3.4028 | 3.6762 | 6.7138 | tm2dyfjf |
+| H249 xtight mirror_res_avg | {61k,65k,69k} | 5.9625 | 5.8093 | 3.4028 | 3.6769 | 6.7146 | 7osuetzv |
+
+### Analysis
+
+**Finding LL (banked)**: Tight-range multi-res is STRICTLY WORSE than medium-range. IID-proximity hypothesis falsified — models that predict similar at nearby resolutions don't add useful diversity. Wider diversity extracts more independent variance reduction.
+
+Sanity bit-identical to faa8ymsy — confirms eval_multi_res.py has no regression.
+
+**Implication for H243/H255**: wider IS better. Trend is monotone in range width. H255 (7-res {32k-164k}) should add 0.2-0.5bp more.
+
+**Follow-on assigned**: fern H255 — 7-res {32k-164k} extension.
