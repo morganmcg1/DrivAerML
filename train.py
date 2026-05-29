@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import DrivAerMLSurfaceDataset, SurfaceBatch
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -139,6 +139,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    mirror_augmentation: bool = False
+    mirror_augmentation_prob: float = 0.5
     debug: bool = False
 
 
@@ -238,6 +240,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "mirror_augmentation": (
+            "H148/H185: Train-time y=0 yaw-mirror augmentation. DrivAerML "
+            "is bilaterally symmetric (symmetry-plane BC at y=0); every "
+            "case has an exact physically valid mirror twin. Per-sample "
+            "flip with prob --mirror-augmentation-prob (default 0.5): "
+            "negate y/normal_y in surface_x, y in volume_x, tau_y in "
+            "surface_y; cp, tau_x, tau_z, sdf, volume_pressure are "
+            "invariant. Off for val/test. Zero parameter cost."
+        ),
+        "mirror_augmentation_prob": (
+            "H190/H216: Per-sample probability of applying the y=0 yaw-"
+            "mirror augmentation when --mirror-augmentation is enabled. "
+            "0.5 is canonical H148; 0.25 halves the effective augmentation "
+            "frequency (H190/H216 boundary probe)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -283,6 +300,32 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     if any(s <= 0.0 for s in sigmas):
         raise ValueError(f"--rff-init-sigmas must be positive: {spec!r}")
     return sigmas
+
+
+def apply_mirror_augmentation(batch: SurfaceBatch, prob: float) -> tuple[SurfaceBatch, float]:
+    B = batch.surface_x.shape[0]
+    flip = torch.rand(B) < float(prob)
+    if not flip.any():
+        return batch, 0.0
+    sign = torch.where(flip, -1.0, 1.0).to(batch.surface_x.dtype)
+    sign_col = sign[:, None]
+    surface_x = batch.surface_x.clone()
+    surface_x[..., 1] = surface_x[..., 1] * sign_col
+    surface_x[..., 4] = surface_x[..., 4] * sign_col
+    surface_y = batch.surface_y.clone()
+    surface_y[..., 2] = surface_y[..., 2] * sign_col
+    volume_x = batch.volume_x.clone()
+    volume_x[..., 1] = volume_x[..., 1] * sign_col
+    return SurfaceBatch(
+        case_ids=batch.case_ids,
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=batch.metadata,
+    ), float(flip.float().mean().item())
 
 
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
@@ -905,6 +948,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"DropPath (H112): per-block schedule "
                         f"(attn=mlp) = {drop_path_schedule}"
                     )
+            wandb.summary["mirror_augmentation/enabled"] = bool(config.mirror_augmentation)
+            wandb.summary["mirror_augmentation/prob"] = float(
+                config.mirror_augmentation_prob if config.mirror_augmentation else 0.0
+            )
+            if config.mirror_augmentation:
+                print(
+                    f"Mirror augmentation (H148/H185/H216): enabled with "
+                    f"per-sample prob = {config.mirror_augmentation_prob}"
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -958,6 +1010,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                mirror_flip_fraction = 0.0
+                if config.mirror_augmentation:
+                    batch, mirror_flip_fraction = apply_mirror_augmentation(
+                        batch, config.mirror_augmentation_prob
+                    )
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1078,6 +1135,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/mirror_flip_fraction": mirror_flip_fraction,
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
