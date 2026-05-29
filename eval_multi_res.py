@@ -1,20 +1,28 @@
 # SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-PackageName: senpai
-"""H236: Multi-resolution TTA — eval at varied volume point counts and average.
+"""H236/H243/H254: Multi-resolution TTA — eval at varied point counts and average.
 
-For each case, accumulates per-point predictions across multiple
-``eval_volume_points`` resolutions (optionally combined with mirror TTA),
-averages them per-point in real space, and reports the standard relL2/MAE
-metrics against the unchanged ground truth.
+For each case, accumulates per-point predictions across multiple eval
+resolutions (optionally combined with mirror TTA), averages them per-point in
+real space, and reports the standard relL2/MAE metrics against the unchanged
+ground truth.
+
+Two independent resolution axes are supported:
+    * volume axis  — vary ``max_volume_points`` (H236/H243)
+    * surface axis — vary ``max_surface_points`` (H254)
 
 Cases are sharded across DDP ranks (case_ids[rank::world_size]); each rank
 processes its assigned cases sequentially with single-case loaders. Per-case
 scratch buffers live on CPU (~200MB per case).
 
 Modes:
-    res_avg:        average over N resolutions, no mirror
-    mirror_res_avg: 2N-pass = orig + mirror at each of N resolutions
+    res_avg:                  vol axis, no mirror — N passes
+    mirror_res_avg:           vol axis + mirror   — 2N passes
+    surf_res_avg:             surf axis, no mirror — M passes
+    mirror_surf_res_avg:      surf axis + mirror   — 2M passes
+    surf_vol_res_avg:         surf×vol cross-product, no mirror — N*M passes
+    mirror_surf_vol_res_avg:  surf×vol cross-product + mirror   — 2*N*M passes
 
 Mirror convention (H148/H183/H209):
     surface_x [x, y, z, nx, ny, nz, area] -> negate y(1) and ny(4)
@@ -69,10 +77,12 @@ class EvalConfig:
     cache_root: str = "outputs/h236_eval/_artifacts"
 
     # Multi-resolution TTA configuration
-    resolutions: str = "49152,65536,81920"
-    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
-    # Surface resolution stays fixed; only volume is varied.
+    resolutions: str = "49152,65536,81920"  # volume-axis resolutions
+    surface_resolutions: str = ""  # surface-axis resolutions (H254); empty disables surf axis
+    eval_modes: str = "res_avg,mirror_res_avg"
+    # When the volume axis is held fixed (surf-only modes), use this point count.
     eval_surface_points: int = 65536
+    eval_volume_points: int = 65536
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -249,10 +259,15 @@ def process_case_multires(
     device: torch.device,
     store: DrivAerMLCaseStore,
     cfg: EvalConfig,
-    resolutions: list[int],
+    surface_resolutions: list[int],
+    volume_resolutions: list[int],
     use_mirror: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run multi-res TTA passes for one case and return per-point averaged predictions.
+
+    Iterates the cross product (S_K in surface_resolutions) × (V_K in volume_resolutions)
+    × (mirror in {False, True} if use_mirror else {False}). Each (S_K, V_K) pair builds
+    a fresh ``eval_chunk`` dataset where every point is covered exactly once per pass.
 
     Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
              surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
@@ -270,93 +285,96 @@ def process_case_multires(
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
 
-    for K in resolutions:
-        dataset = DrivAerMLSurfaceDataset(
-            case_ids=[case_id],
-            store=store,
-            max_surface_points=cfg.eval_surface_points,
-            max_volume_points=K,
-            sampling_mode="eval_chunk",
-        )
-        loader_iter = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=cfg.batch_size,
-            shuffle=False,
-            num_workers=cfg.num_workers,
-            pin_memory=cfg.pin_memory,
-            collate_fn=pad_collate,
-            persistent_workers=False,
-            prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
-        )
+    for S_K in surface_resolutions:
+        for K in volume_resolutions:
+            dataset = DrivAerMLSurfaceDataset(
+                case_ids=[case_id],
+                store=store,
+                max_surface_points=S_K,
+                max_volume_points=K,
+                sampling_mode="eval_chunk",
+            )
+            loader_iter = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=cfg.batch_size,
+                shuffle=False,
+                num_workers=cfg.num_workers,
+                pin_memory=cfg.pin_memory,
+                collate_fn=pad_collate,
+                persistent_workers=False,
+                prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
+            )
 
-        mirror_flags = (False, True) if use_mirror else (False,)
-        for batch in loader_iter:
-            batch = batch.to(device)
-            metas_cached = list(batch.metadata)
-            for mirror in mirror_flags:
-                t0 = time.time()
-                model_input = mirror_inputs(batch) if mirror else batch
+            mirror_flags = (False, True) if use_mirror else (False,)
+            for batch in loader_iter:
+                batch = batch.to(device)
+                metas_cached = list(batch.metadata)
+                for mirror in mirror_flags:
+                    t0 = time.time()
+                    model_input = mirror_inputs(batch) if mirror else batch
 
-                with autocast_context(device, cfg.amp_mode):
-                    out = eval_module(
-                        surface_x=model_input.surface_x,
-                        surface_mask=model_input.surface_mask,
-                        volume_x=model_input.volume_x,
-                        volume_mask=model_input.volume_mask,
-                    )
-                surface_pred_real = transform.invert_surface(out["surface_preds"].float())
-                volume_pred_real = transform.invert_volume(out["volume_preds"].float())
-                if mirror:
-                    surface_pred_real = unmirror_surface_real(surface_pred_real)
-                    # volume_pressure is scalar and invariant under y-mirror.
+                    with autocast_context(device, cfg.amp_mode):
+                        out = eval_module(
+                            surface_x=model_input.surface_x,
+                            surface_mask=model_input.surface_mask,
+                            volume_x=model_input.volume_x,
+                            volume_mask=model_input.volume_mask,
+                        )
+                    surface_pred_real = transform.invert_surface(out["surface_preds"].float())
+                    volume_pred_real = transform.invert_volume(out["volume_preds"].float())
+                    if mirror:
+                        surface_pred_real = unmirror_surface_real(surface_pred_real)
+                        # volume_pressure is scalar and invariant under y-mirror.
 
-                timing["forward_seconds"] += time.time() - t0
-                timing["n_forwards"] += int(batch.surface_x.shape[0])
+                    timing["forward_seconds"] += time.time() - t0
+                    timing["n_forwards"] += int(batch.surface_x.shape[0])
 
-                t1 = time.time()
-                surface_pred_real_cpu = surface_pred_real.detach().cpu()
-                volume_pred_real_cpu = volume_pred_real.detach().cpu()
-                surface_mask_cpu = batch.surface_mask.detach().cpu()
-                volume_mask_cpu = batch.volume_mask.detach().cpu()
-                for i in range(len(batch.case_ids)):
-                    meta = metas_cached[i]
-                    s_view_idx = int(meta["surface_view_index"])
-                    s_view_count = int(meta["surface_view_count"])
-                    v_view_idx = int(meta["volume_view_index"])
-                    v_view_count = int(meta["volume_view_count"])
+                    t1 = time.time()
+                    surface_pred_real_cpu = surface_pred_real.detach().cpu()
+                    volume_pred_real_cpu = volume_pred_real.detach().cpu()
+                    surface_mask_cpu = batch.surface_mask.detach().cpu()
+                    volume_mask_cpu = batch.volume_mask.detach().cpu()
+                    for i in range(len(batch.case_ids)):
+                        meta = metas_cached[i]
+                        s_view_idx = int(meta["surface_view_index"])
+                        s_view_count = int(meta["surface_view_count"])
+                        v_view_idx = int(meta["volume_view_index"])
+                        v_view_count = int(meta["volume_view_count"])
 
-                    if s_view_idx < s_view_count:
-                        s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf)
-                        s_mask_i = surface_mask_cpu[i].bool()
-                        s_chunk = surface_pred_real_cpu[i][s_mask_i]
-                        if s_global.shape[0] != s_chunk.shape[0]:
-                            raise RuntimeError(
-                                f"surface global-index mismatch case={case_id} K={K} "
-                                f"view_idx={s_view_idx}/{s_view_count}: "
-                                f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
-                            )
-                        if s_global.numel() > 0:
-                            surf_sum.index_add_(0, s_global, s_chunk)
-                            surf_cnt.index_add_(
-                                0, s_global, torch.ones_like(s_global, dtype=torch.int32)
-                            )
+                        if s_view_idx < s_view_count:
+                            s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf)
+                            s_mask_i = surface_mask_cpu[i].bool()
+                            s_chunk = surface_pred_real_cpu[i][s_mask_i]
+                            if s_global.shape[0] != s_chunk.shape[0]:
+                                raise RuntimeError(
+                                    f"surface global-index mismatch case={case_id} "
+                                    f"S_K={S_K} V_K={K} "
+                                    f"view_idx={s_view_idx}/{s_view_count}: "
+                                    f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
+                                )
+                            if s_global.numel() > 0:
+                                surf_sum.index_add_(0, s_global, s_chunk)
+                                surf_cnt.index_add_(
+                                    0, s_global, torch.ones_like(s_global, dtype=torch.int32)
+                                )
 
-                    if v_view_idx < v_view_count:
-                        v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
-                        v_mask_i = volume_mask_cpu[i].bool()
-                        v_chunk = volume_pred_real_cpu[i][v_mask_i]
-                        if v_global.shape[0] != v_chunk.shape[0]:
-                            raise RuntimeError(
-                                f"volume global-index mismatch case={case_id} K={K} "
-                                f"view_idx={v_view_idx}/{v_view_count}: "
-                                f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
-                            )
-                        if v_global.numel() > 0:
-                            vol_sum.index_add_(0, v_global, v_chunk)
-                            vol_cnt.index_add_(
-                                0, v_global, torch.ones_like(v_global, dtype=torch.int32)
-                            )
-                timing["io_seconds"] += time.time() - t1
+                        if v_view_idx < v_view_count:
+                            v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
+                            v_mask_i = volume_mask_cpu[i].bool()
+                            v_chunk = volume_pred_real_cpu[i][v_mask_i]
+                            if v_global.shape[0] != v_chunk.shape[0]:
+                                raise RuntimeError(
+                                    f"volume global-index mismatch case={case_id} "
+                                    f"S_K={S_K} V_K={K} "
+                                    f"view_idx={v_view_idx}/{v_view_count}: "
+                                    f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
+                                )
+                            if v_global.numel() > 0:
+                                vol_sum.index_add_(0, v_global, v_chunk)
+                                vol_cnt.index_add_(
+                                    0, v_global, torch.ones_like(v_global, dtype=torch.int32)
+                                )
+                    timing["io_seconds"] += time.time() - t1
 
     if int(surf_cnt.min()) == 0:
         raise RuntimeError(
@@ -377,7 +395,7 @@ def process_case_multires(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    n_passes = len(resolutions) * (2 if use_mirror else 1)
+    n_passes = len(surface_resolutions) * len(volume_resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -471,7 +489,8 @@ def evaluate_split_multires(
     device: torch.device,
     store: DrivAerMLCaseStore,
     cfg: EvalConfig,
-    resolutions: list[int],
+    surface_resolutions: list[int],
+    volume_resolutions: list[int],
     use_mirror: bool,
     distributed_state,
 ) -> dict[str, float]:
@@ -498,7 +517,8 @@ def evaluate_split_multires(
             device=device,
             store=store,
             cfg=cfg,
-            resolutions=resolutions,
+            surface_resolutions=surface_resolutions,
+            volume_resolutions=volume_resolutions,
             use_mirror=use_mirror,
         )
         add_case_to_accumulator(
@@ -542,22 +562,73 @@ def evaluate_split_multires(
     return finalize_eval_accumulator(merged)
 
 
+SUPPORTED_MODES = (
+    "res_avg",
+    "mirror_res_avg",
+    "surf_res_avg",
+    "mirror_surf_res_avg",
+    "surf_vol_res_avg",
+    "mirror_surf_vol_res_avg",
+)
+
+# (uses_surface_axis, uses_volume_axis, use_mirror)
+_MODE_AXES: dict[str, tuple[bool, bool, bool]] = {
+    "res_avg":                  (False, True,  False),
+    "mirror_res_avg":           (False, True,  True),
+    "surf_res_avg":             (True,  False, False),
+    "mirror_surf_res_avg":      (True,  False, True),
+    "surf_vol_res_avg":         (True,  True,  False),
+    "mirror_surf_vol_res_avg":  (True,  True,  True),
+}
+
+
+def resolve_axes(
+    mode: str,
+    *,
+    surface_resolutions: list[int],
+    volume_resolutions: list[int],
+    eval_surface_points: int,
+    eval_volume_points: int,
+) -> tuple[list[int], list[int], bool]:
+    """Map an eval mode to (surface_resolutions, volume_resolutions, use_mirror).
+
+    Single-axis modes fix the unused axis to ``eval_*_points``. Cross-product
+    modes use both lists. Mirror modes set ``use_mirror=True``.
+    """
+    if mode not in _MODE_AXES:
+        raise ValueError(f"Unknown eval mode: {mode!r}")
+    uses_surf, uses_vol, use_mirror = _MODE_AXES[mode]
+    surf_list = surface_resolutions if uses_surf else [eval_surface_points]
+    vol_list = volume_resolutions if uses_vol else [eval_volume_points]
+    if uses_surf and not surface_resolutions:
+        raise ValueError(
+            f"Mode {mode!r} requires non-empty --surface-resolutions"
+        )
+    if uses_vol and not volume_resolutions:
+        raise ValueError(
+            f"Mode {mode!r} requires non-empty --resolutions"
+        )
+    return surf_list, vol_list, use_mirror
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     state = init_distributed()
     cfg = parse_args(argv)
     device = state.device
 
-    resolutions = parse_resolutions(cfg.resolutions)
+    volume_resolutions = parse_resolutions(cfg.resolutions) if cfg.resolutions else []
+    surface_resolutions = parse_resolutions(cfg.surface_resolutions) if cfg.surface_resolutions else []
     modes = parse_modes(cfg.eval_modes)
     for mode in modes:
-        if mode not in ("res_avg", "mirror_res_avg"):
+        if mode not in SUPPORTED_MODES:
             raise ValueError(f"Unknown eval mode: {mode!r}")
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
         print(f"Source run_id={cfg.run_id} alias={cfg.checkpoint} use_ema={cfg.use_ema}")
-        print(f"Resolutions: {resolutions}")
+        print(f"Volume resolutions: {volume_resolutions}")
+        print(f"Surface resolutions: {surface_resolutions}")
         print(f"Modes: {modes}")
 
     # Download/locate the checkpoint on rank 0 only, then broadcast the path.
@@ -633,7 +704,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "checkpoint_run_id": cfg.run_id,
                 "checkpoint_epoch": ck.get("epoch"),
                 "checkpoint_source": ck.get("checkpoint_source"),
-                "resolutions_list": resolutions,
+                "resolutions_list": volume_resolutions,
+                "surface_resolutions_list": surface_resolutions,
                 "modes_list": modes,
                 "n_val_cases": len(val_case_ids),
                 "n_test_cases": len(test_case_ids),
@@ -644,6 +716,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "multi-res",
                 "eval-only",
                 cfg.agent,
+                *(["h254", "surf-multi-res"] if surface_resolutions else []),
             ],
             reinit="finish_previous",
         )
@@ -657,11 +730,18 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode == "mirror_res_avg"
+            mode_surf_res, mode_vol_res, use_mirror = resolve_axes(
+                mode,
+                surface_resolutions=surface_resolutions,
+                volume_resolutions=volume_resolutions,
+                eval_surface_points=cfg.eval_surface_points,
+                eval_volume_points=cfg.eval_volume_points,
+            )
             if state.is_main:
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror} ===",
+                    f"surf_res={mode_surf_res} vol_res={mode_vol_res} "
+                    f"mirror={use_mirror} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -673,7 +753,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 device=device,
                 store=store,
                 cfg=cfg,
-                resolutions=resolutions,
+                surface_resolutions=mode_surf_res,
+                volume_resolutions=mode_vol_res,
                 use_mirror=use_mirror,
                 distributed_state=state,
             )
