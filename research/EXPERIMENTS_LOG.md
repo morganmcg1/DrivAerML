@@ -3837,3 +3837,94 @@ H147 has matched val/test on every metric. **The 2.84x val/test gap on VP is uni
 PR closed 2026-05-29T08:23Z. GPUs freed; frieren assigned H158 (vol_p_charbonnier=0.1 on H147 stack).
 
 ---
+
+## 2026-05-29 09:50Z — PR #1359: H150 β1=0.97/β2=0.985 — CLOSED, NON-MERGE + β-DECOUPLING FINDING
+
+- dl24-tanjiro/h150-lion-beta-sweep-high
+- Hypothesis: continue (β1↑, β2↑) direction beyond H147 — H147 was the leading edge of an extrapolatable WSS-favoring trend
+- W&B runs: rank0 = `5bgp2ryq`, eval-only = (terminal SENPAI-RESULT cites combined eval)
+- Best EMA checkpoint: EP20 / 30 (selection metric val_primary/abupt_axis_mean_rel_l2_pct=5.8831)
+- Wall time: 22.39h on 8× Blackwell DDP, fits SENPAI_TIMEOUT_MINUTES=1440
+
+**Terminal test metrics (EMA EP20):**
+
+| Metric | H150 EMA-best (EP20) | H147 SOTA | Δ | Hard constraint | Status |
+|---|---:|---:|---:|---:|:---|
+| **test_WSS** | **6.5650%** | 6.5409% | **+0.024pp** | beat 6.5409% to win | ❌ FAILS win target |
+| test_ABUPT | 5.7188% | 5.6648% | +0.054pp | ≤ 5.844% | ❌ regresses, but within hard cap |
+| test_VP | **3.5016%** | 3.6033% | **−0.102pp** | ≤ 3.643% | ✅ IMPROVES |
+| test_SP | **3.6088%** | 3.6498% | **−0.041pp** | ≤ 3.577% (over) | ✅ improves (still over hard cap by 0.032pp; not a hard fail since H147 was also over) |
+| test_WSS_x | 5.826% | 5.768% | +0.058pp | — | — |
+| test_WSS_y | 7.078% | 7.011% | +0.067pp | — | — |
+| test_WSS_z | 8.580% | 8.554% | +0.026pp | — | — |
+
+**RESEARCH FINDING — β-decoupling between pressure heads and wall-shear head:**
+
+> β1↑ and β2↑ pull in opposite WSS directions. Pressure heads (VP, SP) want more averaging (β2↑). Wall-shear head wants more momentum memory (β1↑ hurts it). H147 β1=0.95/β2=0.98 is the best joint compromise for the *primary* WSS metric.
+
+Independent corroboration of the H156 finding with cleaner attribution: it's β1 specifically that hurts WSS when raised, not a fragile interaction term. H150's val/test ratio is **healthy** (val 6.62 → test 6.57, ~0.1pp gap matching H147 norm), so this is NOT the same VP-overfit pathology that H156 produced; it is a genuine β-axis tradeoff.
+
+**Mechanistic conclusions:**
+
+1. **H147 β1=0.95/β2=0.98 is a true local optimum on WSS**, not the leading edge of an extrapolatable trend.
+2. **Pressure heads are over-served by H147's β** — H150's β2↑ improved test_VP by 0.10pp and test_SP by 0.04pp; further β2-up direction is open.
+3. **β-grid upper-axis closure is complete** — β1≥0.97 is WSS-regressive (H150, H153), β1≥0.95 with β2≤0.97 is unstable (H149, H152). Only (β1=0.95, β2=0.985) remains untested as H160.
+4. **EMA-best EP20 was the correct harvest target** — EP30 val_WSS=6.6433% > EP20 EMA-best 6.6223%. Late-cosine drift (EP21-30 bounced 6.622–6.644%) made EP20 the clear winner.
+
+**Suggested follow-ups (per tanjiro's terminal report):**
+1. β1↓ neighbor (β1=0.93, β2=0.98) — tests if H147 is on the WSS-favoring side of a saddle. Inexpensive single arm.
+2. **Decoupled β by head** (architectural change): two-optimizer setup, β1=0.95/β2=0.98 on WSS branch, β1=0.97/β2=0.985 on pressure branches. Cleanest test of the decoupling hypothesis.
+3. **β2-only sweep at β1=0.95**: isolate which mover delivered H147 SOTA — assigned as H160 PR #1424.
+4. Do NOT pursue β1≥0.98 — H153 EP1 destabilization and H150 monotonic WSS regression close the door.
+
+**Bug-fix flag (separate from H150 results):** Commit e31fd60 adds `scripts/precompute_curvature_proxy.py` and `curvature_proxy_stats_k16_v1.json` (400-case train stats). Required because `trainer_runtime.py` references `python -m scripts.precompute_curvature_proxy` when `--use-curvature-attention-bias` is set, but neither the script nor the JSON existed in the workspace, causing FileNotFoundError on all 8 ranks before step 1. Unblocks any future curvature-attention-bias use. **Advisor cherry-pick into drivaerml-long-20260504 pending.**
+
+PR closed 2026-05-29T09:50Z. GPUs freed; tanjiro assigned H160 (β1=0.95, β2=0.985 missing β-grid cell) PR #1424.
+
+---
+
+## 2026-05-29 09:50Z — PR #1420: H158 vol_p_charbonnier=0.1 on H147 stack — ABORTED EP2, ADVISOR ERROR
+
+- dl24-frieren/h158-vol-p-charbonnier
+- Hypothesis (as written): vol_p_charbonnier_weight=0.1 was "the only single-flag VP-regularization lever in train.py that has not been tried" — would test if Charbonnier on volume axis closes the H156 val/test VP gap finding
+- W&B run: `wyf77dqa` (rank0, state=crashed at student abort)
+- Aborted at EP2 ~24% (step ~13.6k of 109.7k), kill gate EP1 val_WSS > 13.5% tripped at 16.11%
+
+**Root cause: advisor error in PR command construction.**
+
+Diffing `wyf77dqa` (this run) vs `k6q4c3on` (H147 baseline) configs revealed four H147 SOTA defaults silently dropped from the H158 reproduce command (all `False`/`0` defaults in `train.py`):
+
+| Config key | H147 baseline (k6q4c3on) | H158 (wyf77dqa, this run) |
+|---|:---:|:---:|
+| `use_curvature_attention_bias` | True | False |
+| `use_gradnorm` (α=0.5, min_w_vol_p=0.15) | True | False |
+| `use_y_symmetry_aug` (p=0.5) | True | False |
+| `wss_charbonnier_weight` (axes=z) | 0.1 | 0 |
+| `vol_p_charbonnier_weight` | **0.1** | 0.1 (no change!) |
+
+**The PR's premise was internally inconsistent: `vol_p_charbonnier_weight=0.1` was already in H147 SOTA and H156.** The "only untried single-flag VP-regularization lever" claim was wrong — vol_p_charbonnier=0.1 has been in every recent SOTA stack.
+
+**EP1 reading:**
+
+| Metric | H158 EP1 | H147 EP1 ref | Δ |
+|---|---:|---:|---:|
+| val_primary/wall_shear_rel_l2_pct | **16.11%** | 12.82% | **+3.29pp** |
+| val_primary/volume_pressure_rel_l2_pct | 8.12% | (not given) | — |
+| val_primary/surface_pressure_rel_l2_pct | 9.79% | (not given) | — |
+| val_primary/abupt_axis_mean_rel_l2_pct | 14.32% | (not given) | — |
+
+The expected Charbonnier overhead (PR-stated: "≤ 0.05pp to early-EP val_WSS") was exceeded by 65× — because the run was actually testing the *bare* PE+model stack with all of H147's loss/balancing/aug machinery removed.
+
+**Student credit:** frieren caught the config bug at EP1 instead of letting it ride to EP10. The EP2 abort saved ~6h of GPU time.
+
+**Lessons learned (advisor-side):**
+
+1. **BASELINE.md reproduce command is incomplete.** It does not list the four flag set (curvature_attention_bias, GradNorm, y_sym_aug, wss_charbonnier z) as part of the canonical H147 stack, even though they are part of the actual SOTA run. Future PRs that "use the H147 stack" can silently strip them.
+2. **Always reproduce from a verified working command, not from prose description.** The H147 reproduce command in PR #1344 (tanjiro confirmed working in H150 launch) is the authoritative source.
+3. **Students should diff configs vs the named baseline before EP1.** frieren's diff of `wyf77dqa` vs `k6q4c3on` is the workflow that caught this; that step should be required for any PR claiming to be "X on H147 stack".
+
+**Re-assignment:** frieren redirected to H159 PR #1423 with the same `vol_p_charbonnier_weight=0.3` (raised from H147's 0.1) on the CORRECTED full H147 SOTA stack.
+
+PR closed 2026-05-29T09:50Z. Advisor apology issued. CURRENT_RESEARCH_STATE.md updated with corrected H147 reproduce command + the four missing flag set documented as canonical-stack requirements.
+
+---

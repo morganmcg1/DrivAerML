@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 08:25Z (**H156 TERMINAL — CLOSED PR #1369 (no merge)**: test_WSS=6.6909% (+0.150pp regression), test_VP=11.8441% (3.3x violation of 3.643% cap), test_SP=3.7103% (+0.13pp over 3.577% cap), test_ABUPT=7.4963%; **RESEARCH FINDING — val_VP→test_VP gap = 2.84x is unique to compound β+lr** (H147 has val/test ≈ 1.0x); mechanism hypothesis: high-β + low-lr drives optimizer into val-distribution-specific local minimum on VP; tau_z floor confirmed 3rd independent time (~9.40% on H147 stack). **H158 (vol_p_charbonnier=0.1 on H147 stack)** being assigned to frieren — addresses VP regularization symmetric to H157b's wss_charbonnier. **H157b EP4.6=7.070% val_ABUPT=6.240%** — EP5 gate imminent ~08:25Z. **H150 EP28.67=6.6404% val_ABUPT=5.899%** — terminal harvest ~10:00Z. **H151 EP28.95=6.8118%** noise. **HUMAN DEADLINE 15:45Z (7.3h remaining)** — H158 10-EP terminal ~15:25Z; H157b EP10 terminal ~11:34Z)_
+_Last updated: 2026-05-29 09:50Z (**H150 TERMINAL — CLOSED PR #1359 (no merge)**: test_WSS=6.5650% (+0.024pp regression vs H147), test_VP=3.5016% (-0.102pp improvement), test_SP=3.6088% (-0.041pp improvement), test_ABUPT=5.7188%; **RESEARCH FINDING — β-decoupling**: pressure heads (VP, SP) prefer higher β2 (averaging); wall-shear head prefers lower β1 (momentum memory). H147 β=0.95/0.98 is the joint compromise optimum for WSS. **H158 ABORTED EP1 — advisor error (PR #1420 CLOSED)**: my H158 reproduce command stripped 4 H147 SOTA defaults (curvature_attention_bias, GradNorm α=0.5 min_w_vol_p=0.15, y_symmetry_aug p=0.5, wss_charbonnier=0.1 axes=z); vol_p_charbonnier=0.1 was already in H147 stack so original hypothesis was invalid; frieren caught it at EP1 (val_WSS=16.11% vs 12.82% reference). **H159 (vol_p_charbonnier=0.3 on corrected H147 stack)** assigned to frieren PR #1423 — tests heavier VP regularization to free GradNorm head-weight for WSS. **H160 (β1=0.95, β2=0.985 — missing β-grid cell)** assigned to tanjiro PR #1424 — isolates β2-only mover from H150. Both 8-EP T_max=8 to fit deadline. **H157b EP6.91=6.921% val_ABUPT=6.078%** running on fern/tay (PR #1385). **H151 EP30.6 running on nezuko** (PR #1360). **CRITICAL BUG-FIX FLAGGED**: tanjiro committed e31fd60 (scripts/precompute_curvature_proxy.py + curvature_proxy_stats_k16_v1.json) — unblocks --use-curvature-attention-bias from FileNotFoundError; cherry-pick pending. **HUMAN DEADLINE 15:45Z (5h55m remaining)** — H159 8-EP terminal ~15:25Z; H160 8-EP terminal ~15:30Z; H157b EP15 terminal ~14:46Z; H151 EP45 terminal ~14:50-15:30Z)_
 
 ---
 
@@ -42,17 +42,35 @@ _Last updated: 2026-05-29 08:25Z (**H156 TERMINAL — CLOSED PR #1369 (no merge)
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-29 08:25Z)
+### Fleet status (2026-05-29 09:50Z)
 
 | Run ID | Student | H# | Epoch | val_WSS | val_ABUPT | State | vs H147 |
 |---|---|---|---:|---:|---:|---|---|
-| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **28.67** | **6.6404%** | **5.8993%** | running | cosine-floor plateau; EMA EP18-20 ~6.622% harvest target; ~10:00Z terminal |
-| d20sf8th | nezuko | H151 (extended 45EP canonical) | 28.95 | 6.8118% | 6.0726% | running | noise band oscillation; +0.17pp vs H150 holding |
-| ew63yb7p (+7 ranks) | **fern (tay)** | **H157b (wss-charbonnier=0.1 + H150-β)** | **4.61** | **7.070%** | **6.240%** | running | ✅ EP3 PASS; EP5 gate ≤6.85% imminent ~08:25Z; EP10 terminal ~11:34Z |
-| (H158 PR pending) | **frieren (dl24)** | **H158 (vol_p_charbonnier=0.1 on H147 stack)** | — | — | — | **assigning** | symmetric to H157b, targets VP regularization (H156 val/test gap finding); 10 EPs / ~7h |
-| ugpyo62a + 66ys15yn | (frieren prev) | H156 (β1=0.97/β2=0.985 + lr=9e-5) | 10 (terminal) | 6.8949% (val) | 6.2370% (val) | **CLOSED PR #1369 08:23Z** | ⛔ test_WSS=6.6909% (+0.150pp), test_VP=11.8441% (3.3x cap), test_SP=3.7103% — val/test VP gap 2.84x is the finding |
+| (H159 launching) | **frieren (dl24)** | **H159 (vol_p_charbonnier=0.3 on corrected H147 stack)** | — | — | — | **assigning PR #1423** | 8-EP T_max=8; tests heavier VP reg to free GradNorm head-weight for WSS; deadline 15:30Z harvest |
+| (H160 launching) | **tanjiro (dl24)** | **H160 (β1=0.95, β2=0.985 — missing β-grid cell)** | — | — | — | **assigning PR #1424** | 8-EP T_max=8; isolates β2-only mover from H150 finding |
+| d20sf8th | nezuko (dl24) | H151 (extended 45EP canonical) | ~30.6 | ~6.81% | ~6.07% | running | noise band oscillation; +0.17pp vs H150 holding; EP45 terminal ~14:50-15:30Z |
+| ew63yb7p (+7 ranks) | fern (dl24) | H157b (wss-charbonnier=0.1 + H150-β) | **6.91** | **6.921%** | **6.078%** | running | EP5 PASS at 6.998%; descending; EP15 realistic terminal ~14:46Z |
+| 5bgp2ryq + (eval) | (tanjiro prev) | H150 (β1=0.97/β2=0.985) | 30 (terminal, EMA EP20) | 6.6223% (val EMA) | 5.8831% (val EMA) | **CLOSED PR #1359 09:50Z** | ⛔ test_WSS=6.5650% (+0.024pp); ✅ test_VP=3.5016% (-0.102pp); β-decoupling finding |
+| wyf77dqa | (frieren prev) | H158 (vol_p_charbonnier=0.1, stripped stack) | 2 (aborted) | 16.11% (EP1) | 14.32% (EP1) | **CLOSED PR #1420 09:50Z** | ⛔ ADVISOR ERROR: missing 4 H147 SOTA flags; vol_p_charbonnier was already in H147 SOTA |
+| ugpyo62a + 66ys15yn | (frieren prev) | H156 (β1=0.97/β2=0.985 + lr=9e-5) | 10 (terminal) | 6.8949% (val) | 6.2370% (val) | **CLOSED PR #1369 08:23Z** | ⛔ test_WSS=6.6909% (+0.150pp), test_VP=11.8441% (3.3x cap) — val/test VP gap 2.84x finding |
 | 9xo566ws | (fern prev) | H155 (lr=9e-5) | 10.27 | 7.092% | 6.157% | **CLOSED PR #1368 03:00Z** | ⛔ test_WSS=6.8936%, lr-axis falsified |
 | 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.991% | 6.123% | **CLOSED PR #1367 22:57Z** | ⛔ EP7 falsified |
+
+### CRITICAL: H147 SOTA stack is broader than BASELINE.md reproduce command shows
+
+**Discovered 2026-05-29 09:37Z (via frieren's diff of `wyf77dqa` vs `k6q4c3on`).** The H147 SOTA reference run `k6q4c3on` (PR #1344) uses these flags that are **`False`/`0` by default** in `train.py` and must be explicitly set:
+
+```
+--use-curvature-attention-bias              # default False
+--use-gradnorm --gradnorm-alpha 0.5 --gradnorm-min-w-vol-p 0.15   # default False
+--use-y-symmetry-aug --y-symmetry-aug-prob 0.5   # default False
+--wss-charbonnier-weight 0.1 --wss-charbonnier-axes z   # default 0
+--vol-p-charbonnier-weight 0.1 --vol-p-charbonnier-eps 1e-3   # default 0
+```
+
+**BASELINE.md reproduce command (line 80+) is OUTDATED** — does not list these flags as defaults. **Any new advisor PR must include them explicitly** or the run will not reproduce H147 SOTA. H158 PR #1420 was killed at EP1 because four of these flags were silently dropped. H159 PR #1423 and H160 PR #1424 include the full corrected stack.
+
+**Bug-fix commit e31fd60 (on tanjiro's H150 branch)**: adds `scripts/precompute_curvature_proxy.py` + `curvature_proxy_stats_k16_v1.json` (400-case train stats), unblocking `--use-curvature-attention-bias` from FileNotFoundError on cold environments. Should be cherry-picked into advisor branch independently of H150 closure.
 
 ### H147 SOTA trajectory reference
 
@@ -186,61 +204,68 @@ This finding **directly motivates H158** (vol_p_charbonnier on H147 stack) — t
 
 ## Decisive epochs ahead (active runs)
 
-**⚠️ HUMAN DEADLINE 15:45Z** (7.3h from current 08:25Z) — all terminal harvests must land before this.
+**⚠️ HUMAN DEADLINE 15:45Z** (5h55m from current 09:50Z) — all terminal harvests must land before this.
 
-- **H156 TERMINAL** (08:13Z) — CLOSED PR #1369; test_WSS=6.6909% (+0.150pp), test_VP=11.84% (3.3x cap), test_SP=3.71% (+0.13pp) — no merge; **val/test VP gap 2.84x is the publishable finding**
-- **H157b EP5 kill check** (~08:25Z, imminent) — gate >6.85%; EP3 PASS by 0.34pp
-- **H158 launch** (~08:35Z) — vol_p_charbonnier=0.1 on H147 stack; tests if Charbonnier on volume axis closes val/test VP gap
-- **H151 EP30 first inflection** (~09:50Z) — extended-training value signal (15-EP tail)
-- **H150 EP30 terminal harvest** (~10:00-11:00Z) — EMA-best at EP18-20 ~6.622% val → ~6.522% test, marginal win vs H147 6.5409%
-- **H157b EP10 soft kill** (~11:34Z) — gate >6.65%
-- **H158 EP10 terminal** (~15:25Z) — 1.5h buffer; harvest EMA-best for test eval if val ≤6.65% and val_VP < 4.0%
-- **H157b EP15 realistic terminal** (~14:46Z) — last gate within 1h buffer to deadline; harvest EMA-best for test eval if val ≤6.60%
+- **H159 launch (frieren)** (~10:00Z) — vol_p_charbonnier=0.3 on CORRECTED H147 SOTA stack; tests if heavier VP reg frees GradNorm head-weight for WSS
+- **H160 launch (tanjiro)** (~10:00Z) — β1=0.95 + β2=0.985 (missing β-grid cell); isolates β2-only mover from H150 finding
+- **H159/H160 EP1 read** (~10:40Z) — both must show val_WSS < 13.5% (H147 EP1=12.82%)
+- **H159/H160 EP3 kill check** (~12:00Z) — val_WSS gate ≤ 7.20%
+- **H157b EP10 soft kill** (~11:34Z) — gate >6.65% (EP6.91=6.921% currently)
+- **H159/H160 EP5 kill check** (~13:30Z) — val_WSS ≤ 6.85%
+- **H157b EP15 realistic terminal** (~14:46Z) — harvest EMA-best for test eval if val ≤6.60%
 - **H151 EP45 terminal** (~14:50-15:30Z) — 45-EP extended-training experiment final
+- **H159 EP8 terminal** (~15:25Z) — harvest EMA-best for test eval; 20min buffer to deadline
+- **H160 EP8 terminal** (~15:30Z) — harvest EMA-best for test eval; 15min buffer to deadline
 - **HARD DEADLINE 15:45Z** — all test_eval harvests must complete before this
 
 ---
 
-## Potential next research directions (post H155 kill, post H150 re-accel)
+## Potential next research directions (after H159/H160 terminal, given 09:50Z state)
 
-### H157 (fern next, QUEUED) — HIGH PRIORITY: WSS Charbonnier auxiliary loss on H150-β stack
-**Rationale:** `wss_charbonnier_weight` (train.py:137) is a single-flag lever **never enabled** in any wave. Adds a Charbonnier loss term on WSS axes (default `axes=all`, covers tau_x/tau_y/tau_z surface-channel indices 1:4). Charbonnier is L1-like in the tails but smooth at zero — robust against outlier surface points where WSS is poorly localized. Directly targets the primary metric.
+### Wave 41 β-grid status (after H150 + H160 land)
 
-Config: H150 winning β (β1=0.97, β2=0.985) + `--wss-charbonnier-weight 0.5 --wss-charbonnier-axes all`, canonical H147 lr=1e-4, 30 EP cosine.
+```
+        β1=0.93    β1=0.95    β1=0.97
+β2=0.97  H149⛔    H152⛔     —
+β2=0.98            H147⭐     H153⛔
+β2=0.985           **H160⏳** H150⛔ (test_WSS+0.024pp)
+```
 
-Test compounds: H150-β-win + direct WSS upweighting. If H150 EP30 hits SOTA, H157 stacks further. If H150 EP30 misses by hair, charbonnier may push H157 across the threshold.
+H160 is the last untested cell. If it does NOT beat H147 6.5409%, **β-grid is fully closed** and Wave 41 is exhausted as a single-knob tuning axis.
 
-**Kill ladder:**
-- EP1 > 13.5% kill
-- EP3 > 7.40% kill (must be tighter than H156 since charbonnier should help, not hurt early)
-- EP10 > 6.65% soft kill (must beat H147 EP10 floor)
-- EP18 plateau gate as in H150
+### Branch A — H159 wins (test_WSS ≤ 6.50%)
+1. **Merge winner** as new dl24 SOTA (H147 dethroned)
+2. **Compound**: H159 stack + Charbonnier weight=0.5 or 1.0 sweep — explore the heavier-VP-reg regime further
+3. **Cross-compound**: H159 stack + H160's β2=0.985 (if H160 also positive on VP) — combine VP-reg with β2 advantage
 
-### If H150 EP30 wins (test_WSS < 6.5409%)
-1. **Merge winner** + cleanup PR removing H149-H156 abort branches
-2. **Compound on H150**: H157 (charbonnier, queued) extends this
-3. **Next compound**: try H150-β + EMA decay 0.9995 (slower averaging on the winning config)
-4. **Final push**: H150-β + Charbonnier + slower EMA — stacked single-arm
+### Branch B — H160 wins (test_WSS ≤ 6.50%)
+1. **Merge winner** + record β2=0.985 / β1=0.95 as the new canonical-stack β
+2. **Decoupled-β per head** (the natural next step from H150's finding): two-optimizer setup with H147 β on WSS head, H160 β on pressure heads. Architectural change, but no new losses.
+3. **β-grid completion**: try β1=0.95 / β2=0.99 to see if β2 monotonic-up continues helping pressure
 
-### If H150 EP30 misses by < 0.05pp
-1. **Harvest EMA best-val checkpoint** from H150 — likely captured a tighter local optimum
-2. **45-EP extension** of H150-β (H151 analog on winning β) — does duration extension help?
-3. **H157 Charbonnier** still high-EV — same single-axis test
+### Branch C — neither H159 nor H160 wins (β + Charbonnier exhausted)
 
-### If H150 EP30 plateaus above H147
-1. **β-grid optimum confirmed at H147 (0.95, 0.98)** — abandon β-axis tuning
-2. **Architecture tier**: more sigmas in STRING PE, hidden_dim 512→768
-3. **Per-axis WSS reformulation**: Charbonnier on `axes=z` only (tau_z most informative)
-4. **Schedule reformulation**: cosine restarts, polynomial decay
+**This is the critical decision point.** If both single-flag deltas miss, Wave 41 single-knob axis is fully closed. Tier-shift required:
 
-### Bold tier (if shutdown ≈ 24h away & nothing landing)
-1. **Per-axis WSS Charbonnier** reformulation (z-only)
-2. **RoPE PE** replacing STRING PE
-3. **Multi-resolution FPS** hierarchical processing
+1. **Decoupled-β per head** (architectural): test H150's hypothesis directly — separate Lion state per parameter group. Code change in `target/train.py` to split optimizer groups by head.
+2. **Per-axis WSS reformulation**:
+   - `wss_charbonnier_axes=y,z` (extend from current z-only — tau_z is the floor)
+   - Independent `wss_charbonnier_weight` per axis (requires train.py change)
+3. **Capacity bump**: `hidden_dim=512→640` or `model_layers=6→7` on H147 stack — first capacity-axis test in Wave 41
+4. **Schedule reformulation**: cosine restarts (`SGDR`) — gives the optimizer multiple bounces out of the late-cosine plateau region
+5. **PE bandwidth**: extend STRING-multisigma sigmas to `0.125,0.25,0.5,1.0,2.0,4.0,8.0` — wider band for finer WSS detail
+6. **GradNorm hyperparams**: `gradnorm_alpha=0.3` (more equal head weighting) or `min_w_vol_p=0.05` (let VP head lose weight — H150 already shows it's at floor)
+
+### Pre-shutdown contingency (if 15:45Z arrives with no merge winner)
+
+- Cherry-pick e31fd60 (curvature precompute bug-fix) regardless of H150/H159/H160 outcome
+- Update BASELINE.md reproduce command with the 4 missing H147 SOTA defaults so future advisors don't repeat the H158 advisor error
+- File a publishable-finding note on val/test VP gap (2.84x H156, ~1.0x H147, H150 ratio) + β-decoupling (pressure vs WSS prefer different β)
+- Document that Wave 41 β-grid closure is the wave's conclusion
 
 ---
 
-## Key technical constraints (canonical H147 config)
+## Key technical constraints (canonical H147 config — **CORRECTED 09:50Z**)
 
 ```bash
 torchrun --nproc_per_node=8 target/train.py \
@@ -253,13 +278,20 @@ torchrun --nproc_per_node=8 target/train.py \
   --ema-decay 0.999 --ema-start-step 500 \
   --model-hidden-dim 512 --model-layers 6 --model-heads 4 --model-slices 128 \
   --model-pe string_multisigma --pe-init-sigmas "0.25,0.5,1.0,2.0,4.0" --pe-num-features 16 \
-  --surface-out-width-factor 2.0
+  --surface-out-width-factor 2.0 \
+  --vol-p-charbonnier-weight 0.1 --vol-p-charbonnier-eps 1e-3 \
+  --wss-charbonnier-weight 0.1 --wss-charbonnier-axes z \
+  --use-gradnorm --gradnorm-alpha 0.5 --gradnorm-min-w-vol-p 0.15 \
+  --use-curvature-attention-bias --use-y-symmetry-aug --y-symmetry-aug-prob 0.5
 ```
+
+**⚠️ The last four lines (Charbonnier, GradNorm, curvature, y_sym_aug) were missing from BASELINE.md's listed reproduce command and from the H158 PR — they are `False`/`0` defaults in `train.py` and must be set explicitly. Causing H158 to skip them produced an EP1 val_WSS=16.11% disaster.**
 
 **Dataset:** `rawcanon_20260511` (corrected split — old split had +7-8pp artifact)  
 **EMA:** eval EMA with decay=0.999, start_step=500 (already wired in train.py)  
 **Optimizer:** Lion (NOT Adam) — β changes have outsized impact on early-epoch trajectory  
 **DDP8:** 8-GPU distributed training, effective batch=8  
+**Curvature stats file:** `curvature_proxy_stats_k16_v1.json` required at repo root when `--use-curvature-attention-bias` is set; bug-fix commit e31fd60 (tanjiro's H150 branch) generates it — cherry-pick into advisor branch.  
 
 ---
 
@@ -269,23 +301,26 @@ torchrun --nproc_per_node=8 target/train.py \
 |------|-------------|--------------|
 | Pre-wave | H39 wider surface_out MLP (factor=2.0) | 6.6506% (PR #1284) |
 | Wave 36 (H138-H148) | Disentanglement: β-drift is single driver; wd-drift null; curvature null | 6.5409% (H147) |
-| Wave 41 (H149-H156) | β-grid exhausted; tau_z falsified on canonical lr; lr-axis viable; compound H156 = highest-EV next | TBD |
+| Wave 41 (H149-H160) | β-grid mostly closed; lr-axis falsified; compound β+lr induces val-VP overfit; β-decoupling finding (pressure vs WSS prefer different β); BASELINE reproduce command discovered incomplete | TBD (H157b/H159/H160 in flight) |
 
-The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. β-sweep closed 0pp (H147 stays optimum). Remaining headroom must come from compound mechanism (H156 = β + lr), early-harvest from H150 plateau, capacity/density, or architecture/loss reformulation.
+The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. β-sweep closed 0pp (H147 stays optimum after H150 +0.024pp regression on test_WSS). H160 (the last untested β-grid cell, β1=0.95/β2=0.985) plus H159 (heavier VP Charbonnier on corrected H147) plus H157b (heavier WSS Charbonnier on H150-β) are Wave 41's terminal trio. If none beats H147, single-knob axis is closed and Branch C (architectural / capacity / decoupled-β) is required.
 
 ---
 
 ## References
 
 - Issue #1056 — active research directive and hard constraints
-- BASELINE.md — locked scoreboard with corrected-split results
+- BASELINE.md — locked scoreboard with corrected-split results (**reproduce cmd missing 4 flags — see CRITICAL note above**)
 - PR #1344 — H147 merge commit with full β-attribution analysis
-- PR #1359 — H150 β1=0.97/β2=0.985 (tanjiro, running)
-- PR #1360 — H151 45-EP extended (nezuko, running)
+- PR #1359 — H150 β1=0.97/β2=0.985 (tanjiro, **CLOSED 09:50Z** non-merge — test_WSS=6.5650% +0.024pp; β-decoupling finding documented)
+- PR #1360 — H151 45-EP extended (nezuko, running ~EP30.6)
 - PR #1367 — H154 tau_z=1.3 (frieren, CLOSED 22:57Z aborted_descent_reversal_ep7)
-- PR #1368 — H155 lr=9e-5 (fern, running)
-- PR #1369 — H156 β1=0.97/β2=0.985 + lr=9e-5 compound (frieren, **CLOSED 08:23Z** — test_VP 3.3x cap, test_SP +0.13pp, test_WSS +0.150pp regression; **val/test VP gap 2.84x finding documented**)
+- PR #1368 — H155 lr=9e-5 (fern, CLOSED 03:00Z lr-axis falsified)
+- PR #1369 — H156 β1=0.97/β2=0.985 + lr=9e-5 compound (frieren, **CLOSED 08:23Z** — val/test VP gap 2.84x finding)
 - PR #1378 — H157 (auto-merged in error, superseded by PR #1385)
-- PR #1385 — H157b wss_charbonnier=0.1 on H150 stack (fern/tay, RUNNING)
-- (H158 PR TBD) — vol_p_charbonnier=0.1 on H147 stack (frieren, ASSIGNING 08:25Z)
+- PR #1385 — H157b wss_charbonnier=0.1 on H150 stack (fern/tay, RUNNING EP6.91)
+- PR #1420 — H158 vol_p_charbonnier=0.1 (frieren, **CLOSED 09:50Z aborted_advisor_error**: reproduce cmd dropped 4 H147 SOTA flags)
+- **PR #1423 — H159** vol_p_charbonnier=0.3 on CORRECTED H147 stack (frieren, ASSIGNING 09:50Z)
+- **PR #1424 — H160** β1=0.95 β2=0.985 missing β-grid cell (tanjiro, ASSIGNING 09:50Z)
+- **Bug-fix commit e31fd60** (on tanjiro H150 branch) — `scripts/precompute_curvature_proxy.py` + `curvature_proxy_stats_k16_v1.json` — needs cherry-pick into advisor branch
 - `RESEARCH_IDEAS_*.md` — researcher-agent design briefs from prior waves
