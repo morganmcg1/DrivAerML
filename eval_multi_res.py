@@ -170,7 +170,15 @@ def download_checkpoint(
     alias: str,
     cache_root: Path,
 ) -> Path:
-    """Download model artifact for run_id with the given alias (e.g. 'best', 'epoch-13')."""
+    """Resolve a checkpoint path.
+
+    If ``alias`` already points to an existing local file, return it directly
+    (supports passing ``--checkpoint outputs/.../checkpoint.pt``). Otherwise
+    treat ``alias`` as a W&B artifact alias and download via run_id.
+    """
+    direct = Path(alias)
+    if direct.is_file():
+        return direct
     cache_dir = cache_root / run_id / alias
     ckpt_path = cache_dir / "checkpoint.pt"
     if ckpt_path.exists():
