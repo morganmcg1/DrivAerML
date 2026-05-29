@@ -98,7 +98,37 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1283 H112 DropPath (tay) — 2026-05-24 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1382 H209 H185+TTA mirror (tay) — 2026-05-29 ***
+
+**val_abupt=5.9755%** / **test_abupt=5.8221%** (corrected split, H185 EP13 EMA + 2-pass y-mirror TTA)
+
+First sub-6.0% val_abupt observed in program. test_abupt improves on H112 by −1.7bp. TTA = 2× forward pass (original + y-mirrored), 0.5 average in normalized space; mirror op flips y in surface_x/n_y/volume_x, un-mirrors tau_y output. Eval-only on top of H185 (mirror p=0.25 + tau_y=3.0 + compound recipe). NOT considered ensembling — single model, single checkpoint, deterministic test-time augmentation only.
+
+**W&B run:** `bx3t1vdw` (frieren/h209-h185-ep13-tta)
+**Source H185 checkpoint:** W&B run `yw2a5dyl` EP13 EMA (`epoch-13`/`best`)
+**PR:** #1382
+
+**Val metrics (corrected split, TTA):** val_abupt=5.9755%, val_SP=3.9423%, val_VP=3.5261%, val_WSS=6.7645%, val_WSS_x=5.9132%, val_WSS_y=7.3510%, val_WSS_z=9.1450%
+**Test metrics (corrected split, TTA):** test_abupt=5.8221%, test_VP=3.4400%, test_SP=3.6806%, test_WSS=6.7214%, test_WSS_x=5.9651%, test_WSS_y=7.3045%, test_WSS_z=8.7204%
+
+**Merge gate (updated):** val_abupt < **5.9755%** AND test_abupt < **5.8221%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ **3.421%** AND test_SP ≤ 3.577% AND test_WSS ≤ 6.727%
+
+**TTA gain over H185 orig (test):** WSS_y −8.6bp (largest), WSS −4.3bp, abupt −3.9bp. Uniform ~4-5bp improvement across all channels; WSS_x slope NOT recovered (stays +0.052pp).
+
+**Reproduce:**
+```bash
+torchrun --standalone --nproc-per-node=8 target/eval_tta_h209.py \
+  --checkpoint outputs/h185_ep13/checkpoint.pt \
+  --output-dir outputs/h209_eval/full \
+  --wandb-group h209-frieren-tta-h185 \
+  --wandb-name "frieren/h209-h185-ep13-tta" \
+  --batch-size 2
+```
+
+---
+
+## Prior Single-Model SOTA: PR #1283 H112 DropPath (tay) — 2026-05-24 (superseded by #1382)
 
 **val_abupt=6.1358%** / **test_abupt=5.839%** (corrected split, EMA best checkpoint EP13)
 
