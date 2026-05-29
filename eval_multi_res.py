@@ -13,8 +13,15 @@ processes its assigned cases sequentially with single-case loaders. Per-case
 scratch buffers live on CPU (~200MB per case).
 
 Modes:
-    res_avg:        average over N resolutions, no mirror
-    mirror_res_avg: 2N-pass = orig + mirror at each of N resolutions
+    res_avg:                 average over N resolutions, no mirror
+    mirror_res_avg:          2N-pass = orig + mirror at each of N resolutions
+    res_avg_weighted:        average over N resolutions, no mirror, using
+                             per-resolution weights from --resolution-weights
+    mirror_res_avg_weighted: 2N-pass weighted variant of mirror_res_avg
+
+H250 weighting motivation: predictions at K=65536 (training-dominant) carry
+lower bias than K=49152 (less-trained) and K=81920 (OOD high). Bayes-optimal
+blending therefore upweights the most-calibrated resolution.
 
 Mirror convention (H148/H183/H209):
     surface_x [x, y, z, nx, ny, nz, area] -> negate y(1) and ny(4)
@@ -70,7 +77,11 @@ class EvalConfig:
 
     # Multi-resolution TTA configuration
     resolutions: str = "49152,65536,81920"
-    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
+    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg, res_avg_weighted, mirror_res_avg_weighted
+    # Per-resolution blending weights for *_weighted modes. Comma-separated
+    # floats with one entry per --resolutions; auto-normalized to sum=1.
+    # Empty (default) preserves uniform weighting and the unweighted modes.
+    resolution_weights: str = ""
     # Surface resolution stays fixed; only volume is varied.
     eval_surface_points: int = 65536
 
@@ -143,6 +154,24 @@ def parse_resolutions(spec: str) -> list[int]:
 
 def parse_modes(spec: str) -> list[str]:
     return [m.strip() for m in spec.split(",") if m.strip()]
+
+
+def parse_weights(spec: str, n_resolutions: int) -> list[float]:
+    """Parse comma-separated floats, normalize to sum=1. Empty → uniform."""
+    if not spec.strip():
+        return [1.0 / n_resolutions] * n_resolutions
+    parts = [float(x.strip()) for x in spec.split(",") if x.strip()]
+    if len(parts) != n_resolutions:
+        raise ValueError(
+            f"--resolution-weights has {len(parts)} entries but "
+            f"--resolutions has {n_resolutions}"
+        )
+    if any(w < 0 for w in parts):
+        raise ValueError(f"--resolution-weights must be non-negative, got {parts}")
+    total = sum(parts)
+    if total <= 0:
+        raise ValueError(f"--resolution-weights must sum to a positive value, got {total}")
+    return [w / total for w in parts]
 
 
 def build_model(cfg: EvalConfig) -> SurfaceTransolver:
@@ -250,27 +279,37 @@ def process_case_multires(
     store: DrivAerMLCaseStore,
     cfg: EvalConfig,
     resolutions: list[int],
+    weights: list[float],
     use_mirror: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run multi-res TTA passes for one case and return per-point averaged predictions.
+
+    ``weights[r]`` is the blending weight applied to all predictions from
+    resolution ``resolutions[r]`` (mirror and orig get the same weight). The
+    per-point output is sum_r(w_r * pred_r) / sum_r(w_r), which trivially
+    reduces to the uniform mean when all weights are equal.
 
     Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
              surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
     Predictions are in **real units** (already denormalized).
     """
+    assert len(weights) == len(resolutions), (
+        f"weights ({len(weights)}) must match resolutions ({len(resolutions)})"
+    )
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
     n_vol = counts["n_volume"]
 
     surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
-    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
+    surf_cnt = torch.zeros(n_surf, dtype=torch.float32)
     vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
-    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
+    vol_cnt = torch.zeros(n_vol, dtype=torch.float32)
 
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
 
-    for K in resolutions:
+    for r_idx, K in enumerate(resolutions):
+        w_r = float(weights[r_idx])
         dataset = DrivAerMLSurfaceDataset(
             case_ids=[case_id],
             store=store,
@@ -336,9 +375,13 @@ def process_case_multires(
                                 f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
                             )
                         if s_global.numel() > 0:
-                            surf_sum.index_add_(0, s_global, s_chunk)
+                            surf_sum.index_add_(0, s_global, s_chunk * w_r)
                             surf_cnt.index_add_(
-                                0, s_global, torch.ones_like(s_global, dtype=torch.int32)
+                                0,
+                                s_global,
+                                torch.full(
+                                    (s_global.shape[0],), w_r, dtype=torch.float32
+                                ),
                             )
 
                     if v_view_idx < v_view_count:
@@ -352,25 +395,29 @@ def process_case_multires(
                                 f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
                             )
                         if v_global.numel() > 0:
-                            vol_sum.index_add_(0, v_global, v_chunk)
+                            vol_sum.index_add_(0, v_global, v_chunk * w_r)
                             vol_cnt.index_add_(
-                                0, v_global, torch.ones_like(v_global, dtype=torch.int32)
+                                0,
+                                v_global,
+                                torch.full(
+                                    (v_global.shape[0],), w_r, dtype=torch.float32
+                                ),
                             )
                 timing["io_seconds"] += time.time() - t1
 
-    if int(surf_cnt.min()) == 0:
+    if float(surf_cnt.min()) <= 0.0:
         raise RuntimeError(
             f"surface coverage incomplete for case {case_id}: "
-            f"{int((surf_cnt == 0).sum())} points have zero contributing chunks"
+            f"{int((surf_cnt <= 0).sum())} points have zero contributing chunks"
         )
-    if int(vol_cnt.min()) == 0:
+    if float(vol_cnt.min()) <= 0.0:
         raise RuntimeError(
             f"volume coverage incomplete for case {case_id}: "
-            f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
+            f"{int((vol_cnt <= 0).sum())} points have zero contributing chunks"
         )
 
-    surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
-    vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
+    surf_avg = surf_sum / surf_cnt.unsqueeze(-1)
+    vol_avg = vol_sum / vol_cnt.unsqueeze(-1)
 
     # Load full ground truth once for metric computation.
     case = store.load_case(case_id)
@@ -472,6 +519,7 @@ def evaluate_split_multires(
     store: DrivAerMLCaseStore,
     cfg: EvalConfig,
     resolutions: list[int],
+    weights: list[float],
     use_mirror: bool,
     distributed_state,
 ) -> dict[str, float]:
@@ -499,6 +547,7 @@ def evaluate_split_multires(
             store=store,
             cfg=cfg,
             resolutions=resolutions,
+            weights=weights,
             use_mirror=use_mirror,
         )
         add_case_to_accumulator(
@@ -549,15 +598,27 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
+    valid_modes = ("res_avg", "mirror_res_avg", "res_avg_weighted", "mirror_res_avg_weighted")
     for mode in modes:
-        if mode not in ("res_avg", "mirror_res_avg"):
-            raise ValueError(f"Unknown eval mode: {mode!r}")
+        if mode not in valid_modes:
+            raise ValueError(f"Unknown eval mode: {mode!r}; valid={valid_modes}")
+
+    uniform_weights = [1.0 / len(resolutions)] * len(resolutions)
+    custom_weights = parse_weights(cfg.resolution_weights, len(resolutions))
+    any_weighted = any(m.endswith("_weighted") for m in modes)
+    if any_weighted and not cfg.resolution_weights.strip():
+        raise ValueError(
+            "*_weighted eval modes require --resolution-weights; got empty string"
+        )
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
         print(f"Source run_id={cfg.run_id} alias={cfg.checkpoint} use_ema={cfg.use_ema}")
         print(f"Resolutions: {resolutions}")
+        print(f"Uniform weights: {uniform_weights}")
+        if any_weighted:
+            print(f"Custom weights (normalized): {custom_weights}")
         print(f"Modes: {modes}")
 
     # Download/locate the checkpoint on rank 0 only, then broadcast the path.
@@ -635,6 +696,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "checkpoint_source": ck.get("checkpoint_source"),
                 "resolutions_list": resolutions,
                 "modes_list": modes,
+                "uniform_weights": uniform_weights,
+                "custom_weights_normalized": custom_weights,
+                "any_weighted_mode": any_weighted,
                 "n_val_cases": len(val_case_ids),
                 "n_test_cases": len(test_case_ids),
             },
@@ -657,11 +721,13 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode == "mirror_res_avg"
+            use_mirror = mode in ("mirror_res_avg", "mirror_res_avg_weighted")
+            mode_weights = custom_weights if mode.endswith("_weighted") else uniform_weights
             if state.is_main:
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror} ===",
+                    f"resolutions={resolutions} weights={mode_weights} "
+                    f"mirror={use_mirror} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -674,6 +740,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 store=store,
                 cfg=cfg,
                 resolutions=resolutions,
+                weights=mode_weights,
                 use_mirror=use_mirror,
                 distributed_state=state,
             )
