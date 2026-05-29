@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 12:25Z | Branch: `tay` | **SOTA: H252 (PR #1413)** | Round 4i: 8 active | **H244 EP15 checkpoint is a BIG deal — sent back for 6-res TTA SOTA push**
+**Updated**: 2026-05-29 13:00Z | Branch: `tay` | **SOTA: H252 (PR #1413)** | Round 4i: 8 active | **H244 EP15 sent back for 6-res push; frieren H260 novel mechanism**
 
 ---
 
@@ -21,7 +21,7 @@
 
 ---
 
-## Round 4i Active Fleet (as of 12:25Z)
+## Round 4i Active Fleet (as of 13:00Z)
 
 | PR | Student | Hypothesis | Status | ETA |
 |---|---|---|---|---|
@@ -31,10 +31,10 @@
 | **#1431** | **fern** | **H255: 7-res {32k-164k} extension** | 🟢 running | ~12:30-13:00Z |
 | **#1432** | **nezuko** | **H256: H183 + 6-res mirror + weight-noise stack** | 🟢 running | ~13:00-13:30Z |
 | **#1433** | **thorfinn** | **H257: σ-sweep on H243 6-res stack {1e-4,2e-4,1e-3}** | 🟢 running | ~13:30-14:30Z |
-| **#1434** | **frieren** | **H258: H148 EP13 + 6-res mirror multi-res TTA** | 🟢 running | ~12:00-12:30Z |
+| **#1436** | **frieren** | **H260: Volume-point coordinate jitter TTA (novel axis)** | 🟢 just assigned | ~13:45-14:00Z |
 | **#1435** | **tanjiro** | **H259: σ basin-edge probe {5e-4,1e-3,5e-3,1e-2} (FINDING)** | 🟢 running | ~12:10-12:30Z |
 
-**Budget remaining**: ~3.3h (deadline ~15:45Z).
+**Budget remaining**: ~2.7h (deadline ~15:45Z).
 
 ### H244 edward result (submitted 12:14Z, sent back)
 
@@ -81,6 +81,7 @@ H252 used 3-res {49k,65k,82k} × K=5 noise × mirror = 30 passes. It beats H243 
 | DD-ext3 | H250 frieren | Frequency-weighted multi-res MONOTONICALLY WORSE |
 | Test-floor convergence | H252 thorfinn | H148 weight-noise ≈ H243 multi-res (≈5.7978) |
 | **Stacking orthogonality** | **H252 tanjiro** | **Weight-space + input-space TTA orthogonal; super-additive (+4bp excess)** |
+| GG-decomp | H258 frieren | H148 multi-res gain 14× smaller than H185: mirror −4.5bp works (symmetry), multi-res −1.1bp fails (pre-absorbed by density robustness) |
 
 ---
 
@@ -98,7 +99,8 @@ H252 used 3-res {49k,65k,82k} × K=5 noise × mirror = 30 passes. It beats H243 
 | Noise + 6-res×mirror stacked | UNKNOWN — H253 alphonse testing (HIGHEST EV) |
 | Noise + H183 6-res×mirror stacked | UNKNOWN — H256 nezuko testing |
 | σ optimal for noise (σ basin edge) | UNKNOWN — H259 tanjiro probing (5e-4 still on slope) |
-| Multi-res portability H148 | UNKNOWN — H258 frieren testing |
+| Multi-res portability H148 | ✗ PARTIAL — mirror −4.5bp works; multi-res −1.1bp only (density-robustness pre-absorbs, Finding GG-decomp) |
+| Volume-point jitter | UNKNOWN — H260 frieren testing |
 | Tight-range multi-res | ✗ WORSE than medium (Finding LL) |
 | Frequency-weighted multi-res | ✗ MONOTONICALLY WORSE (Finding DD-ext3) |
 | Per-channel/per-res α blending | ✗ ALL FALSIFIED (Findings DD, DD-ext, DD-ext2) |

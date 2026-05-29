@@ -1,3 +1,30 @@
+## 2026-05-29 13:00 — PR #1434 H258 frieren CLOSED; Finding GG-decomp; H260 frieren assigned
+
+### PR #1434 frieren H258 — CLOSED: Finding GG confirmed with mechanism decomposition
+
+- **Branch**: frieren/h258-h148-multi-res
+- **Hypothesis**: H148 EP13 + 6-res mirror multi-res TTA ports (Finding HH N=5). Negative → mirror-aug coupling.
+- **W&B run**: `cc0vfem7` (frieren/h258-h148-6res-mirror)
+
+| Mode | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| H148 orig (single-res 65k) | 6.2186 | 5.8508 | 3.4164 | 3.6955 | 6.7750 |
+| H148 + mirror only | 6.1712 | 5.8054 | 3.3957 | 3.6674 | 6.7247 |
+| H148 + 6-res mirror (mirror_res_avg) | **6.1620** | **5.7940** | **3.3561** | 3.6672 | 6.7188 |
+
+**Mechanism decomposition (test_abupt gains, H148 vs H185 family):**
+- Mirror axis: H148 −4.5bp | H185 family ~−5bp — similar (mirror is a SYMMETRY signal, independent of density training)
+- Multi-res axis: H148 −1.1bp | H185 family ~−15bp — **14× smaller on H148**
+- Finding GG-decomp: H148's density-robust training (Finding CC) swallows the multi-res signal. The model has already internalized most cross-res variance at single resolution. Mirror TTA still works (symmetry != density robustness) but multi-res TTA barely helps.
+
+**Merge gate**: val_abupt 6.1620 >> 5.9492 gate (FAILS by 207bp). test_abupt 5.7940 < 5.7975 (passes test gate but val gate is hard requirement).
+
+**Finding GG-decomp (new detail)**: Quantifies the mechanism split — proves that H148's density robustness specifically "pre-absorbs" multi-res TTA, while the mirror axis remains independent of that property. This is the first experiment that separates the mirror gain from the multi-res gain on H148.
+
+**Note**: This experiment was a near-duplicate of PR #1417 (H246 thorfinn, closed at Finding GG). H246 logged res_avg + mirror_res_avg only; H258 adds the orig + mirror breakdown, which is new. Advisor error — H258 should have checked the experiments log before assigning.
+
+---
+
 ## 2026-05-29 11:50 — PR #1413 H252 tanjiro MERGED NEW SOTA; H259 tanjiro assigned
 
 ### PR #1413 tanjiro H252 — MERGED: NEW SOTA — stacked weight-noise × 3-res × mirror TTA
