@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 15:00Z | Branch: `tay` | **SOTA: H244 EP15+6-res (PR #1415 merged 14:57Z)** | Round 4j: 8 active
+**Updated**: 2026-05-29 15:20Z | Branch: `tay` | **SOTA: H244 EP15+6-res (PR #1415 merged 14:57Z)** | Round 4j: 8 active | **H253 val clears gate** ✓
 
 ---
 
@@ -20,18 +20,18 @@
 
 ---
 
-## Active Fleet (Round 4j, as of 15:00Z)
+## Active Fleet (Round 4j, as of 15:20Z)
 
 | PR | Student | Hypothesis | Status | ETA |
 |---|---|---|---|---|
-| **#1428** | **alphonse** | **H253: noise σ=5e-4 + 6-res stack EP13 (HIGHEST EV)** | 🟢 running | ~16:30Z |
+| **#1428** | **alphonse** | **H253: noise σ=5e-4 + 6-res stack EP13 (val 5.9418 ✓ clears gate)** | 🟢 test arm pending | ~17:00Z |
 | **#1432** | **nezuko** | **H256: H183 + 6-res + noise stack (portability)** | 🟢 running (crash fixed) | ~16:00Z |
 | **#1433** | **thorfinn** | **H257: σ-sweep on 6-res+noise stack** | 🟢 running (σ=1e-3 arm) | ~16:30Z |
-| **#1438** | **tanjiro** | **H262: K-noise saturation K=10/20 noise_only** | 🟡 just assigned | ~15:45Z |
-| **#1439** | **frieren** | **H263: avg(EP14,EP15) EMA + 6-res mirror TTA** | 🟡 just assigned | ~16:15Z |
-| **#1440** | **fern** | **H264: EP16 + 6-res mirror TTA** | 🟡 just assigned | ~16:10Z |
-| **#1441** | **edward** | **H265: EP14 + 6-res mirror TTA (fills EP-chain gap)** | 🟡 just assigned | ~16:10Z |
-| **#1442** | **askeladd** | **H268: Anti-thetic noise pairs ±δ (novel mechanism)** | 🟡 just assigned | ~15:45Z |
+| **#1438** | **tanjiro** | **H262: K-noise saturation K=10/20 noise_only** (run dev5yglv) | 🟢 running, step=0 only | ~16:00Z |
+| **#1439** | **frieren** | **H263: avg(EP14,EP15) EMA + 6-res mirror TTA** | 🟡 BLOCKED on edward W&B artifact upload | TBD |
+| **#1440** | **fern** | **H264: EP16 + 6-res mirror TTA** | 🟡 BLOCKED on edward W&B artifact upload | TBD |
+| **#1441** | **edward** | **H265: EP14 + 6-res mirror TTA + UPLOAD ARTIFACTS** | 🟡 instructed to upload EP14/15/16 first | ~16:30Z+ |
+| **#1442** | **askeladd** | **H268: Anti-thetic noise pairs ±δ** (run n2j8u2lo) | 🟢 running, no metrics yet | ~16:00Z |
 | (background) | edward | Arm 2: EP15+full stack h1ae7x1j | 🟢 running | ~16:39Z |
 
 ---
@@ -49,10 +49,16 @@ The EP15 checkpoint is the key differentiator. EP15 single-res val_orig 6.0079 (
 
 ### Next SOTA candidates (ranked by EV)
 
-1. **Edward Arm 2 (h1ae7x1j)**: EP15 + full H252 stack = EP15 × noise × 6-res × mirror. Predicted val ~5.938-5.942. ETA ~16:39Z.
-2. **Alphonse H253**: EP13 + noise × 6-res × mirror. Predicted val ~5.940-5.945. ETA ~16:30Z.
-3. **Frieren H263**: avg(EP14,EP15) + 6-res mirror. Novel weight-averaging — predicted val ~5.940-5.945 if EMAs diverse. ETA ~16:15Z.
-4. **Fern H264**: EP16 + 6-res mirror. Could push further if EP16 > EP15 (sanity arm decides). ETA ~16:10Z.
+1. **Alphonse H253** (`qytjlv97`): val_stacked **5.9418** ✓ clears val gate. EP13 + noise × 6-res × mirror. Test arm pending ~17:00Z. **If test_stacked < 5.7896 → IMMEDIATE SOTA merge.**
+2. **Edward Arm 2 (h1ae7x1j)**: EP15 + full H252 stack = EP15 × noise × 6-res × mirror. Predicted val ~5.935-5.940 (compounds H253 stack with EP15 advantage). ETA ~16:39Z.
+3. **Frieren H263** (BLOCKED): avg(EP14,EP15) + 6-res mirror. Pending edward W&B artifact upload.
+4. **Fern H264** (BLOCKED): EP16 + 6-res mirror. Pending edward W&B artifact upload.
+
+### Checkpoint accessibility blocker (15:15Z)
+
+- **Issue**: EP14/EP15/EP16 EMA checkpoints from edward's H244 run `0gjfv45i` exist ONLY on his pod local disk (`outputs/drivaerml/run-0gjfv45i/`). The W&B run only logged the final `model-edward-h244-h185-ep16-cosine-ext-0gjfv45i:v0` artifact (single `checkpoint.pt` = EP15 EMA).
+- **Resolution**: Instructed edward (PR #1441) to log EP14, EP15, EP16 as W&B artifacts before running H265. Frieren and fern will download via W&B API and proceed.
+- **Lesson for next round**: Add a routine artifact-upload step to checkpoint-saving training PRs so downstream eval-time hypotheses don't get blocked on pod-local files.
 
 ---
 
