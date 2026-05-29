@@ -11134,3 +11134,29 @@ Pipeline parity confirmed: original-mode test_WSS = 7.119606 vs published 7.1195
 
 **Follow-up assigned**: H212 edward — mirror invariance profile across 5 cohort EP13 checkpoints (PR #1386).
 
+---
+
+## 2026-05-29 04:00Z — PR #1383: H210 cross-recipe SWA over 5 EP13 artifacts (tanjiro, **CLOSED — NEGATIVE, Finding O banked**)
+
+- tanjiro/h210-swa-cohort-5recipe
+- **Hypothesis**: Cross-recipe SWA across 5 EP13 best artifacts (H112, H164e, H183, H185, H190) finds a consensus basin flatter and more test-robust than any individual recipe.
+- **W&B runs**: `1utf07yl` (swa5_all), `r3d3g2l1` (swa3_baseline_h183), `2jnatpxj` (swa3_val_sota_only), `qgb9r74q` (swa_weighted_h112_heavy), `xovknq3s` (H112 sanity baseline)
+
+### Results
+
+| Config | val_abupt | test_WSS | Notes |
+|---|---:|---:|---|
+| H112 sanity (`xovknq3s`) | **6.1358** | **6.752** | exact canonical reproduction (≤0.0001pp) |
+| swa5_all (`1utf07yl`) | 88.10 | 91.35 | **MODEL DESTROYED** |
+| swa3_baseline_h183 (`r3d3g2l1`) | 89.58 | 93.84 | destroyed |
+| swa3_val_sota_only (`2jnatpxj`) | 90.36 | 95.09 | destroyed |
+| swa_weighted_h112_heavy (`qgb9r74q`) | 89.10 | 92.57 | destroyed (even 3:2:1:1:1 heavy H112 fails) |
+
+H112 baseline sanity: every column matches canonical H112 to ≤0.0001pp — eval pipeline correct. Catastrophic SWA failure is a real signal.
+
+**Finding O (program-permanent)**: Naive cross-recipe parameter-space averaging in Transformers collapses to ~90% rel-L2 error (essentially random predictions). The mechanism is the **permutation-symmetry / loss-landscape connectivity problem** (Ainsworth et al. 2022 "Git Re-Basin"): independently-trained Transformers settle in permutation-equivalent but parameter-distinct basins. Averaging in parameter space destroys hidden-state representations.
+
+**Corollary (WARNING to H207/H208)**: Uniform 2-way interpolation at alpha=0.5 between H112 and H183/H190 will likely also destroy the model. Only alpha very near 0 or 1 may be workable.
+
+**Follow-up assigned**: H213 tanjiro — layer-wise block splice H112↔H183, 6 configs k=0..5 (PR #1387). Block splicing preserves intra-block coherence, bypasses permutation conflict.
+
