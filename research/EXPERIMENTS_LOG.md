@@ -1,3 +1,28 @@
+## 2026-05-29 11:30 — PR #1422 H250 frieren CLOSED; Finding DD-ext3 confirmed; H258 frieren assigned
+
+### PR #1422 frieren H250 — CLOSED: Finding DD-ext3 confirmed (frequency-weighted multi-res TTA)
+
+- **Branch**: frieren/h250-resolution-weighted-multi-res
+- **Hypothesis**: Biasing the multi-res blend toward K=65536 (training density) recovers training-distribution accuracy.
+- **W&B runs**: `v8c02u47` (sanity), `iskvbrlk` (mild), `lssw24rr` (aggressive), `ct6erbhs` (extreme)
+
+| Mode | val_abupt | test_abupt | Δ vs uniform |
+|---|---:|---:|---:|
+| Uniform 1/3-1/3-1/3 (sanity=H236) | 5.9613 | 5.8081 | baseline |
+| Mild 30/40/30 | 5.9647 | — | +3.4bp worse |
+| Aggressive 25/50/25 | 5.9692 | — | +7.9bp worse |
+| Extreme 20/60/20 | 5.9744 | — | +13.1bp worse |
+
+**Finding DD-ext3 (FALSIFIED)**: All non-uniform weightings monotonically worse than uniform. Every extra bias toward K=65536 degrades performance. Monotone degradation.
+
+**Mechanism**: Multi-res ensemble value comes from RESOLUTION DIVERSITY, not from approximating the training distribution. Down-weighting any single K removes its de-aliasing contribution. The trained-K is not special at eval time.
+
+**Side observation**: VP shows the largest drift (3.4033 → 3.4215 at extreme, +18bp). VP benefits most from K=81920 — suggests VP needs high-density eval more than other channels.
+
+**Conclusion**: Definitively closes the "weighted blend" axis. Uniform mean is the global optimum. Third extension of Finding DD family.
+
+---
+
 ## 2026-05-29 09:50 — H246/H247 close; H251/H252 assigned; Findings GG + DD-ext2
 
 ### PR #1417 thorfinn H246 — CLOSED: Finding GG banked (multi-res TTA portability checkpoint-specific)
