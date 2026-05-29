@@ -1,0 +1,84 @@
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+Device: cuda:0
+DDP world_size=7
+Loaded checkpoint epoch=13 source=ema params=17.41M
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_041416-um80i114
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run thorfinn/h192-h164e-tta-mirror
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/um80i114
+
+=== Evaluating val (7295 views) ===
+val_original   loss=0.00466 abupt_axis_rel_l2_pct=6.0836 surface_p_mae=0.01074 volume_p_mae=6.84139 wall_shear_mae=0.05957 cases=34
+  val_original -> abupt=6.0836% | SP=3.9948% | WSS=6.9253% | VP=3.4640% | WSS_x=6.0410% | WSS_y=7.5603% | WSS_z=9.3579%
+val_mirrored   loss=0.01571 abupt_axis_rel_l2_pct=11.1360 surface_p_mae=0.02513 volume_p_mae=17.69141 wall_shear_mae=0.09475 cases=34
+  val_mirrored -> abupt=11.1360% | SP=9.0119% | WSS=11.4551% | VP=8.5805% | WSS_x=9.9268% | WSS_y=13.0455% | WSS_z=15.1151%
+val_tta        loss=0.00719 abupt_axis_rel_l2_pct=7.5868 surface_p_mae=0.01626 volume_p_mae=11.10985 wall_shear_mae=0.07165 cases=34
+  val_tta -> abupt=7.5868% | SP=5.6160% | WSS=8.1721% | VP=5.1840% | WSS_x=7.1153% | WSS_y=9.0647% | WSS_z=10.9541%
+  runtime=149.1s n_batches=261
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+
+=== Evaluating test (11091 views) ===
+test_original  loss=0.00418 abupt_axis_rel_l2_pct=5.8236 surface_p_mae=0.01059 volume_p_mae=6.80565 wall_shear_mae=0.05770 cases=50
+  test_original -> abupt=5.8236% | SP=3.6769% | WSS=6.7509% | VP=3.4087% | WSS_x=6.0207% | WSS_y=7.3298% | WSS_z=8.6818%
+test_mirrored  loss=0.01567 abupt_axis_rel_l2_pct=11.1029 surface_p_mae=0.02539 volume_p_mae=18.14701 wall_shear_mae=0.09396 cases=50
+  test_mirrored -> abupt=11.1029% | SP=8.9119% | WSS=11.5098% | VP=8.6830% | WSS_x=10.0165% | WSS_y=13.1982% | WSS_z=14.7050%
+test_tta       loss=0.00698 abupt_axis_rel_l2_pct=7.4954 surface_p_mae=0.01660 volume_p_mae=11.51059 wall_shear_mae=0.07070 cases=50
+  test_tta -> abupt=7.4954% | SP=5.5146% | WSS=8.1282% | VP=5.3280% | WSS_x=7.1795% | WSS_y=9.0341% | WSS_z=10.4209%
+  runtime=226.6s n_batches=397
+
+=== TTA vs original (test) ===
+  abupt: +1.6718pp
+  wall_shear: +1.3773pp
+  wall_shear_x: +1.1587pp
+  wall_shear_y: +1.7044pp
+  wall_shear_z: +1.7391pp
+  surface_pressure: +1.8376pp
+  volume_pressure: +1.9193pp
+wandb: updating run metadata
+wandb: uploading history steps 0-0, summary, console lines 13-28
+wandb: 
+wandb: Run history:
+wandb:            test_delta_tta_minus_original/abupt ▁
+wandb: test_delta_tta_minus_original/surface_pressure ▁
+wandb:  test_delta_tta_minus_original/volume_pressure ▁
+wandb:       test_delta_tta_minus_original/wall_shear ▁
+wandb:     test_delta_tta_minus_original/wall_shear_x ▁
+wandb:     test_delta_tta_minus_original/wall_shear_y ▁
+wandb:     test_delta_tta_minus_original/wall_shear_z ▁
+wandb:           test_mirrored/abupt_axis_mean_rel_l2 ▁
+wandb:       test_mirrored/abupt_axis_mean_rel_l2_pct ▁
+wandb:                            test_mirrored/cases ▁
+wandb:                                           +219 ...
+wandb: 
+wandb: Run summary:
+wandb:                                 model/n_params 17413721
+wandb:            test_delta_tta_minus_original/abupt 1.67183
+wandb: test_delta_tta_minus_original/surface_pressure 1.83761
+wandb:  test_delta_tta_minus_original/volume_pressure 1.91931
+wandb:       test_delta_tta_minus_original/wall_shear 1.37729
+wandb:     test_delta_tta_minus_original/wall_shear_x 1.15874
+wandb:     test_delta_tta_minus_original/wall_shear_y 1.70437
+wandb:     test_delta_tta_minus_original/wall_shear_z 1.73911
+wandb:           test_mirrored/abupt_axis_mean_rel_l2 0.11103
+wandb:       test_mirrored/abupt_axis_mean_rel_l2_pct 11.10292
+wandb:                                           +220 ...
+wandb: 
+wandb: 🚀 View run thorfinn/h192-h164e-tta-mirror at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/um80i114
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_041416-um80i114/logs

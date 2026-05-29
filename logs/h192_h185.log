@@ -1,0 +1,82 @@
+wandb: [wandb.Api()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Downloading large artifact 'model-thorfinn-h185-h171-mirror-aug-compound-yw2a5dyl:best', 66.48MB. 2 files...
+wandb: \ 1 of 2 files downloaded...wandb:   2 of 2 files downloaded.  
+Done. 00:00:00.2 (319.7MB/s)
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_032921-rwrrwm6i
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run h192-tta-h185-mirror-aug-yw2a5dyl
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/rwrrwm6i
+Fetching artifact for run yw2a5dyl...
+Loaded run yw2a5dyl: epoch 13, src=ema, layers=5/512d/4h, pos=string_separable, qk_norm=True, rff_feat=16
+  agent=thorfinn  group=thorfinn-h185-gradnorm-mirror-aug-compound  val_abupt=6.017157919281892  test_abupt=5.861300699286877
+
+Loading data (root=/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511)...
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+=== no_tta eval on val (7295 views, 1824 batches) ===
+  [no_tta/val] abupt=6.0172  sp=3.9673  wss=6.8104  vp=3.5412  tau_x=5.9416  tau_y=7.4420  tau_z=9.1937  (480.2s)
+
+=== no_tta eval on test (11091 views, 2773 batches) ===
+  [no_tta/test] abupt=5.8613  sp=3.7046  wss=6.7642  vp=3.4585  tau_x=5.9926  tau_y=7.3902  tau_z=8.7606  (731.0s)
+
+=== tta eval on val (7295 views, 1824 batches) ===
+  [tta/val] abupt=5.9755  sp=3.9423  wss=6.7645  vp=3.5261  tau_x=5.9132  tau_y=7.3510  tau_z=9.1449  (949.5s)
+
+=== tta eval on test (11091 views, 2773 batches) ===
+wandb: updating run metadata
+wandb: uploading history steps 0-0, summary, console lines 11-31
+wandb: 
+wandb: Run history:
+wandb:  delta_tta_minus_no_tta_test/abupt_axis_mean_rel_l2_pct ▁
+wandb: delta_tta_minus_no_tta_test/surface_pressure_rel_l2_pct ▁
+wandb:  delta_tta_minus_no_tta_test/volume_pressure_rel_l2_pct ▁
+wandb:       delta_tta_minus_no_tta_test/wall_shear_rel_l2_pct ▁
+wandb:     delta_tta_minus_no_tta_test/wall_shear_x_rel_l2_pct ▁
+wandb:     delta_tta_minus_no_tta_test/wall_shear_y_rel_l2_pct ▁
+wandb:     delta_tta_minus_no_tta_test/wall_shear_z_rel_l2_pct ▁
+wandb:   delta_tta_minus_no_tta_val/abupt_axis_mean_rel_l2_pct ▁
+wandb:  delta_tta_minus_no_tta_val/surface_pressure_rel_l2_pct ▁
+wandb:   delta_tta_minus_no_tta_val/volume_pressure_rel_l2_pct ▁
+wandb:                                                    +147 ...
+wandb: 
+wandb: Run summary:
+wandb:  delta_tta_minus_no_tta_test/abupt_axis_mean_rel_l2_pct -0.0392
+wandb: delta_tta_minus_no_tta_test/surface_pressure_rel_l2_pct -0.02397
+wandb:  delta_tta_minus_no_tta_test/volume_pressure_rel_l2_pct -0.01844
+wandb:       delta_tta_minus_no_tta_test/wall_shear_rel_l2_pct -0.04284
+wandb:     delta_tta_minus_no_tta_test/wall_shear_x_rel_l2_pct -0.02756
+wandb:     delta_tta_minus_no_tta_test/wall_shear_y_rel_l2_pct -0.08578
+wandb:     delta_tta_minus_no_tta_test/wall_shear_z_rel_l2_pct -0.04025
+wandb:   delta_tta_minus_no_tta_val/abupt_axis_mean_rel_l2_pct -0.04169
+wandb:  delta_tta_minus_no_tta_val/surface_pressure_rel_l2_pct -0.02505
+wandb:   delta_tta_minus_no_tta_val/volume_pressure_rel_l2_pct -0.01509
+wandb:                                                    +148 ...
+wandb: 
+wandb: 🚀 View run h192-tta-h185-mirror-aug-yw2a5dyl at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/rwrrwm6i
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_032921-rwrrwm6i/logs
+  [tta/test] abupt=5.8221  sp=3.6806  wss=6.7213  vp=3.4400  tau_x=5.9650  tau_y=7.3045  tau_z=8.7204  (1441.0s)
+
+=== Delta (TTA - no-TTA) on val ===
+  val/abupt_axis_mean_rel_l2_pct: no_tta=6.0172  tta=5.9755  delta=-0.0417pp
+  val/surface_pressure_rel_l2_pct: no_tta=3.9673  tta=3.9423  delta=-0.0251pp
+  val/wall_shear_rel_l2_pct: no_tta=6.8104  tta=6.7645  delta=-0.0458pp
+  val/wall_shear_x_rel_l2_pct: no_tta=5.9416  tta=5.9132  delta=-0.0285pp
+  val/wall_shear_y_rel_l2_pct: no_tta=7.4420  tta=7.3510  delta=-0.0910pp
+  val/wall_shear_z_rel_l2_pct: no_tta=9.1937  tta=9.1449  delta=-0.0488pp
+  val/volume_pressure_rel_l2_pct: no_tta=3.5412  tta=3.5261  delta=-0.0151pp
+
+=== Delta (TTA - no-TTA) on test ===
+  test/abupt_axis_mean_rel_l2_pct: no_tta=5.8613  tta=5.8221  delta=-0.0392pp
+  test/surface_pressure_rel_l2_pct: no_tta=3.7046  tta=3.6806  delta=-0.0240pp
+  test/wall_shear_rel_l2_pct: no_tta=6.7642  tta=6.7213  delta=-0.0428pp
+  test/wall_shear_x_rel_l2_pct: no_tta=5.9926  tta=5.9650  delta=-0.0276pp
+  test/wall_shear_y_rel_l2_pct: no_tta=7.3902  tta=7.3045  delta=-0.0858pp
+  test/wall_shear_z_rel_l2_pct: no_tta=8.7606  tta=8.7204  delta=-0.0402pp
+  test/volume_pressure_rel_l2_pct: no_tta=3.4585  tta=3.4400  delta=-0.0184pp
+
+Peak GPU memory: 12.53 GB
