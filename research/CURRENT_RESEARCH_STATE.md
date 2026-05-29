@@ -1,6 +1,24 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 11:05Z._
+_Last updated: 2026-05-29 13:50Z._
+
+**13:50Z EP4 trajectory check — fleet status snapshot:**
+
+| Hyp | Run | rt | EP1 | EP2 | EP3 | EP4 | vs H147 EP4 (~6.85%) |
+|-----|-----|----|------|------|------|------|------|
+| H147 SOTA | k6q4c3on | — | 12.82 | 7.26 | 6.98 | (interp 6.85) | reference |
+| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7 | 3.58h | 12.85 | 7.30 | 6.98 | **6.85 ★** | TIED to H147 — strongest arm |
+| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 3.11h | 12.87 | 7.28 | 7.00 | 6.90 | +0.05pp (marginal) |
+| **H161** wss_charb=0.3 z (nezuko) | y9xrfk5t | 3.05h | 12.75 | 7.36 | 7.13 | 7.05 | **+0.20pp (kill-watch)** |
+| **H162** pe_features=24 (fern) | 7vdb5zwz | 2.38h | 12.80 | 7.35 | 7.03 | EP3 only | EP3 +0.05pp behind |
+
+**Key 13:50Z reads:**
+- H159 (vol_p_charbonnier=0.3) is **tracking H147 trajectory exactly through EP4**. WSS=6.85%, VP=3.92% (no regression risk). Strongest candidate.
+- H161 (wss_charbonnier=0.3 z) **WSS-Charbonnier is hurting WSS, not helping** — gap to H147 widens monotonically EP1→EP4 (Δ -0.07, +0.10, +0.15, +0.20). Useful negative evidence about wss vs vol_p Charbonnier asymmetry. Kill watch on EP5 ≥ 6.95%.
+- H160 β2=0.985 axis is stable but marginally worse than β2=0.98 (consistent with H147 being β-grid optimum).
+- H162 pe_features=24 EP3 is +0.05pp behind H147 EP3 — within noise, not a clean win signal yet.
+
+**Deadline:** 15:45Z = 1h55m remaining. H160/H162 will likely finish 5-23 min past deadline; consider aborting at EP7 for test harvest.
 
 **CRITICAL — BASELINE.md correction (commit ea99dda was wrong):** nezuko discovered in PR #1360 that the 2026-05-28 H147 SOTA section copy-pasted H39's `yym5oa8x` test_VP/test_SP into the H147 row. Verified by W&B query of `k6q4c3on`. Correct H147 metrics: **test_VP=3.4014%** (clears 3.643% floor by 0.242pp) and **test_SP=3.5634%** (clears 3.577% floor by 0.014pp). **H147 actually CLEARS all 4 floors**, not 3-of-4. Patched in BASELINE.md this session.
 
