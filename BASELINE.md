@@ -98,33 +98,75 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1415 H244 H185+EP15+6-res Mirror TTA (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1447 H267 H185+EP15+Weight-Noise×6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
+
+**val_abupt=5.9367%** / **test_abupt=5.7825%** (corrected split, H185 EP15 EMA + 60-pass weight-noise σ=5e-4 K=5 × 6-res × mirror TTA)
+
+**New SOTA — beats H253 (PR #1428) by −0.51bp val / −0.22bp test. EP15 advantage compounds with weight-noise×6-res×mirror full stack — partial sub-additivity from Finding JJ partial-orthogonality, but residual stacking gain holds.**
+
+**W&B run:** `snouz8zi` (edward/h267-ep15-full-stack)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1447
+
+**Val metrics (corrected split, mirror_res_weight_noise_avg):** val_abupt=5.9367%, val_SP=3.9206%, val_VP=3.4673%, val_WSS=6.7341%
+**Test metrics (corrected split, mirror_res_weight_noise_avg):** test_abupt=5.7825%, test_VP=**3.3850%**, test_SP=3.6505%, test_WSS=**6.6898%**
+
+**Paper floors:** test_VP 3.3850 < 3.421 ✓ | test_WSS 6.6898 < 6.727 ✓ | test_SP 3.6505 > 3.577 ✗
+
+**TTA method**: 60-pass = 6-res {32768,49152,65536,81920,98304,131072} × K=5 weight-noise samples × {orig, mirror-y}. Eval cost: ~230 min on DDP×8.
+
+**Gain analysis (vs H253 prior SOTA):**
+- val: −0.51bp | test: −0.22bp
+- test_VP: 3.3850 vs 3.3891 (−0.41bp ✓)
+- test_WSS: 6.6898 vs 6.6895 (+0.03bp marginal)
+- test_SP: 3.6505 vs 3.6592 (−0.87bp ✓ — best SP-channel progress in months)
+
+**Finding QQ-EP15-stack-compound**: EP15 (−9.3bp single-res over EP13) compounds with the H253 full stack (K=5 noise × 6-res × mirror) at sub-additive rate. Predicted band 5.935-5.940 → landed 5.9367 (top end). EP15+stack adds −5.1bp on top of EP13+stack — about 55% of the pure-additive prediction (−9.3bp).
+
+**Merge gate (updated):** val_abupt < **5.9367%** AND test_abupt < **5.7825%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+**Reproduce:**
+```bash
+H185_EP15_CKPT="outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt"
+torchrun --standalone --nproc-per-node=8 target/eval_tta_h252.py \
+  --checkpoint $H185_EP15_CKPT \
+  --resolutions "32768,49152,65536,81920,98304,131072" \
+  --eval-modes "mirror_res_weight_noise_avg" \
+  --weight-noise-sigma 5e-4 \
+  --n-weight-noise-passes 5 \
+  --batch-size 2 --num-workers 4 \
+  --wandb-name "edward/h267-ep15-full-stack" \
+  --wandb-group "h267-edward-ep15-full-stack"
+```
+
+---
+
+## Prior Single-Model SOTA: PR #1428 H253 H185+EP13+Weight-Noise×6-res×Mirror Stack TTA (tay) — 2026-05-29 (superseded by #1447)
+
+**val_abupt=5.9418%** / **test_abupt=5.7847%** (corrected split, H185 EP13 EMA + 60-pass weight-noise σ=5e-4 K=5 × 6-res × mirror TTA)
+
+**W&B run:** `qytjlv97` (alphonse/h253-stacked-noise-6res-sigma5e-4-v2)
+**Source checkpoint:** H185 EP13 EMA (`outputs/ensemble_cache/run-yw2a5dyl-epoch-13-ema/checkpoint.pt`)
+**PR:** #1428
+
+**Val metrics (corrected split, mirror_res_weight_noise_avg):** val_abupt=5.9418%, val_SP=3.9274%, val_VP=3.4708%, val_WSS=6.7378%
+**Test metrics (corrected split, mirror_res_weight_noise_avg):** test_abupt=5.7847%, test_VP=**3.3891%**, test_SP=3.6592%, test_WSS=**6.6895%**
+
+**Finding JJ**: Weight-space TTA (noise σ=5e-4, K=5) and input-space TTA (multi-res) are partially orthogonal. ~80% of isolated weight-noise gain has already been captured by 6-res TTA, but residual ~20% (~1.3bp) compounds additively.
+
+**Merge gate (superseded):** val_abupt < **5.9418%** AND test_abupt < **5.7847%**
+
+---
+
+## Prior Single-Model SOTA: PR #1415 H244 H185+EP15+6-res Mirror TTA (tay) — 2026-05-29 (superseded by #1428)
 
 **val_abupt=5.9452%** / **test_abupt=5.7896%** (corrected split, H185 EP15 EMA + 12-pass 6-res mirror TTA)
 
-**New SOTA — beats H252 (PR #1413) by −0.40bp val / −0.79bp test. Every channel improved: test_VP −1.14bp, test_WSS −0.83bp, test_SP −0.67bp. EP15 EMA (−9.3bp single-res over EP13) compounds additively with 6-res TTA.**
-
 **W&B run:** `bh7we7p6` (edward/h244-ep15-6res-mirror-res-avg)
-**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
 **PR:** #1415
 
-**Val metrics (corrected split, mirror_res_avg):** val_abupt=5.9452%, val_SP=3.9301%, val_VP=3.4697%, val_WSS=6.7415%
 **Test metrics (corrected split, mirror_res_avg):** test_abupt=5.7896%, test_VP=**3.3882%**, test_SP=3.6595%, test_WSS=**6.6947%**
-
-**Paper floors:** test_VP 3.3882 < 3.421 ✓ | test_WSS 6.6947 < 6.727 ✓ | test_SP 3.6595 > 3.577 ✗
-
-**TTA method**: 12-pass = 6-res {32768,49152,65536,81920,98304,131072} × {orig, mirror-y}. Eval cost: ~60 min on DDP×8.
-
-**Gain analysis (vs H252 prior SOTA):**
-- val: −0.40bp | test: −0.79bp
-- test_VP: 3.3882 vs 3.3996 (−1.14bp ✓)
-- test_WSS: 6.6947 vs 6.7030 (−0.83bp ✓)
-- test_SP: 3.6595 vs 3.6662 (−0.67bp ✓)
-
-**EP15 mechanism**: EP15 single-res val_orig = 6.0079 (vs EP13 6.0172, −9.3bp). The late-cosine extension gains compose linearly with 6-res TTA — additive prediction was val ~5.945, actual 5.9452 (error 0.03bp).
-
-**Merge gate (updated):** val_abupt < **5.9452%** AND test_abupt < **5.7896%**
-**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
 
 ---
 
