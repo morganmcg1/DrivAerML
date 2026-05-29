@@ -168,17 +168,20 @@ _Last updated: 2026-05-24 10:57Z (session). **MERGED dl24 SOTA: PR #1284 run `yy
 - **W&B run:** `k6q4c3on`
 - **test_WSS:** **6.5409%** (−0.110pp vs H39 SOTA 6.6506%) ⭐ NEW WSS SOTA
 - **test_ABUPT:** 5.6648% ✓ (clears 5.844% floor)
-- **test_VP:** 3.6033% ✓ (clears 3.643% floor)
-- **test_SP:** 3.6498% (misses 3.577% floor by +0.073pp — same as H39)
+- **test_VP:** **3.4014%** ✓ (clears 3.643% floor by 0.242pp — **CORRECTED 2026-05-29: prior commit ea99dda copy-pasted H39's value 3.6033% by mistake**)
+- **test_SP:** **3.5634%** ✓ (clears 3.577% floor by 0.014pp — **CORRECTED 2026-05-29: H147 actually CLEARS the SP floor; prior commit ea99dda copy-pasted H39's value 3.6498%**)
+- **Per-axis WSS (corrected from W&B):** wss_x=5.8155%, wss_y=7.0556%, wss_z=8.4882%
 - **Config:** Clean H39 stack (hidden_dim=512, layers=6, heads=4, slices=128, surface_out_width_factor=2.0, PE=string_multisigma) + `--lion-beta1 0.95 --lion-beta2 0.98` ONLY. No weight-decay drift, no loss modifications.
 - **Key finding:** Lion β1=0.95/β2=0.98 (vs canonical 0.90/0.99) is the **confirmed single driver** of WSS improvement from the H138 complex. EP1 val exactly matched H138 (12.83%), confirming mechanism replication. β-drift is now the canonical optimizer config.
 - **Reproduce:** `cd "target/" && python train.py --hidden-dim 512 --layers 6 --heads 4 --slices 128 --surface-out-width-factor 2.0 --pe-type string_multisigma --lion-beta1 0.95 --lion-beta2 0.98 --ema-decay 0.999 --ema-start-step 500 --epochs 30`
 
 ### Current single-model best on `drivaerml-long-20260504` (updated 2026-05-28)
 
-**MERGED dl24 SOTA (2026-05-28):** PR #1344 (`k6q4c3on`) — H147 Lion β1=0.95/β2=0.98 ablation — **NEW WSS SOTA**
+**MERGED dl24 SOTA (2026-05-28; metrics CORRECTED 2026-05-29):** PR #1344 (`k6q4c3on`) — H147 Lion β1=0.95/β2=0.98 ablation — **NEW WSS SOTA, CLEARS ALL 4 FLOORS**
 test_primary/wall_shear_rel_l2_pct = **6.5409%** ⭐ (beats H39 6.6506% by −0.110pp)
-test_primary/volume_pressure_rel_l2_pct = **3.6033%** ✓ (clears 3.643% floor)
-test_primary/surface_pressure_rel_l2_pct = **3.6498%** (misses 3.577% floor by +0.073pp) ⚠️
+test_primary/volume_pressure_rel_l2_pct = **3.4014%** ✓ (clears 3.643% floor by 0.242pp)
+test_primary/surface_pressure_rel_l2_pct = **3.5634%** ✓ (clears 3.577% floor by 0.014pp)
 test_primary/abupt_axis_mean_rel_l2_pct = **5.6648%** ✓ (clears 5.844% floor)
 Canonical optimizer: Lion lr=1e-4, β1=0.95, β2=0.98
+
+> **CORRECTION 2026-05-29 (verified by W&B query `k6q4c3on` + cross-check by nezuko in PR #1360):** The prior BASELINE.md update (commit ea99dda, 2026-05-28) listed `test_VP=3.6033%` and `test_SP=3.6498%` for H147. Those values are actually H39's (run `yym5oa8x`), copy-pasted in error. The true H147 test metrics are `test_VP=3.4014%` and `test_SP=3.5634%`. **Material change in interpretation:** H147 actually CLEARS all 4 floors including SP (3.5634% < 3.577%); does NOT miss the SP floor by +0.073pp as previously documented. This corrects analyses banked from H150 (PR #1359 closure) and any other comparisons drawn against the old H147 numbers. New candidates must still beat test_WSS < 6.5409% (primary) and may use the PR #972 floor envelope (test_VP ≤ 3.643%, test_SP ≤ 3.577%, test_ABUPT ≤ 5.844%) as the merge-eligibility floor, but conclusions about whether H150-style β-shifts "improved" pressure heads against H147 must be re-derived from the corrected baseline.

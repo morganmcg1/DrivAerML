@@ -3838,44 +3838,46 @@ PR closed 2026-05-29T08:23Z. GPUs freed; frieren assigned H158 (vol_p_charbonnie
 
 ---
 
-## 2026-05-29 09:50Z — PR #1359: H150 β1=0.97/β2=0.985 — CLOSED, NON-MERGE + β-DECOUPLING FINDING
+## 2026-05-29 09:50Z — PR #1359: H150 β1=0.97/β2=0.985 — CLOSED, NON-MERGE (β-decoupling finding RETRACTED 10:30Z)
+
+> **⚠️ RETRACTION 2026-05-29 10:30Z:** This entry's "test_VP IMPROVES" and "test_SP improves" findings, and the β-decoupling mechanistic conclusion, were based on incorrect H147 baseline numbers from BASELINE.md (commit ea99dda — H39's values copy-pasted into the H147 row). After W&B verification of `k6q4c3on` (correct H147: test_VP=**3.4014%**, test_SP=**3.5634%**), the corrected verdict is below. **Pressure heads were NOT improved by H150; they were regressed alongside WSS.** The non-merge outcome stands; the mechanism behind it is the simpler "H147 is the optimum on every axis" reading. Corrigendum posted on the closed PR.
 
 - dl24-tanjiro/h150-lion-beta-sweep-high
-- Hypothesis: continue (β1↑, β2↑) direction beyond H147 — H147 was the leading edge of an extrapolatable WSS-favoring trend
+- Hypothesis (as filed): continue (β1↑, β2↑) direction beyond H147 — H147 was the leading edge of an extrapolatable WSS-favoring trend
 - W&B runs: rank0 = `5bgp2ryq`, eval-only = (terminal SENPAI-RESULT cites combined eval)
 - Best EMA checkpoint: EP20 / 30 (selection metric val_primary/abupt_axis_mean_rel_l2_pct=5.8831)
 - Wall time: 22.39h on 8× Blackwell DDP, fits SENPAI_TIMEOUT_MINUTES=1440
 
-**Terminal test metrics (EMA EP20):**
+**Terminal test metrics (EMA EP20) — corrected H147 baseline:**
 
-| Metric | H150 EMA-best (EP20) | H147 SOTA | Δ | Hard constraint | Status |
+| Metric | H150 EMA-best (EP20) | H147 SOTA (corrected) | Δ | Hard constraint | Status |
 |---|---:|---:|---:|---:|:---|
 | **test_WSS** | **6.5650%** | 6.5409% | **+0.024pp** | beat 6.5409% to win | ❌ FAILS win target |
-| test_ABUPT | 5.7188% | 5.6648% | +0.054pp | ≤ 5.844% | ❌ regresses, but within hard cap |
-| test_VP | **3.5016%** | 3.6033% | **−0.102pp** | ≤ 3.643% | ✅ IMPROVES |
-| test_SP | **3.6088%** | 3.6498% | **−0.041pp** | ≤ 3.577% (over) | ✅ improves (still over hard cap by 0.032pp; not a hard fail since H147 was also over) |
-| test_WSS_x | 5.826% | 5.768% | +0.058pp | — | — |
-| test_WSS_y | 7.078% | 7.011% | +0.067pp | — | — |
-| test_WSS_z | 8.580% | 8.554% | +0.026pp | — | — |
+| test_ABUPT | 5.7188% | 5.6648% | +0.054pp | ≤ 5.844% | ❌ regresses, within hard cap |
+| test_VP | **3.5016%** | **3.4014%** | **+0.100pp** ⚠️ | ≤ 3.643% | ❌ **REGRESSES** (still under cap) |
+| test_SP | **3.6088%** | **3.5634%** | **+0.045pp** ⚠️ | ≤ 3.577% | ❌ **CROSSES PR #972 cap by +0.032pp** |
+| test_WSS_x | 5.826% | 5.815% | +0.011pp | — | — |
+| test_WSS_y | 7.078% | 7.056% | +0.022pp | — | — |
+| test_WSS_z | 8.580% | 8.488% | +0.092pp | — | — |
 
-**RESEARCH FINDING — β-decoupling between pressure heads and wall-shear head:**
+**Corrected mechanistic conclusion:**
 
-> β1↑ and β2↑ pull in opposite WSS directions. Pressure heads (VP, SP) want more averaging (β2↑). Wall-shear head wants more momentum memory (β1↑ hurts it). H147 β1=0.95/β2=0.98 is the best joint compromise for the *primary* WSS metric.
+> Wave 41 β-grid CLOSURE — H147 (β1=0.95, β2=0.98) is the joint optimum across **every** test metric. Moving β1↑ OR β2↑ OR both monotonically worsens performance. There is no "pressure heads prefer β2↑" tradeoff to exploit. The simpler reading wins: a single Lion-β sweet spot dominates all neighbors on all axes.
 
-Independent corroboration of the H156 finding with cleaner attribution: it's β1 specifically that hurts WSS when raised, not a fragile interaction term. H150's val/test ratio is **healthy** (val 6.62 → test 6.57, ~0.1pp gap matching H147 norm), so this is NOT the same VP-overfit pathology that H156 produced; it is a genuine β-axis tradeoff.
+H150's val/test gap on WSS was actually ~0.06pp (val 6.6223 → test 6.5650), tighter than the +0.10pp assumption used in mid-run projections — so projections built on -0.10pp val-test gap should be tightened to ~-0.05 to -0.07pp for this stack family.
 
-**Mechanistic conclusions:**
+**Corrected mechanistic conclusions:**
 
-1. **H147 β1=0.95/β2=0.98 is a true local optimum on WSS**, not the leading edge of an extrapolatable trend.
-2. **Pressure heads are over-served by H147's β** — H150's β2↑ improved test_VP by 0.10pp and test_SP by 0.04pp; further β2-up direction is open.
-3. **β-grid upper-axis closure is complete** — β1≥0.97 is WSS-regressive (H150, H153), β1≥0.95 with β2≤0.97 is unstable (H149, H152). Only (β1=0.95, β2=0.985) remains untested as H160.
-4. **EMA-best EP20 was the correct harvest target** — EP30 val_WSS=6.6433% > EP20 EMA-best 6.6223%. Late-cosine drift (EP21-30 bounced 6.622–6.644%) made EP20 the clear winner.
+1. **H147 β1=0.95/β2=0.98 is the joint optimum on all 4 test metrics**, not just WSS.
+2. **No pressure-head over-served signal exists** — H150's β2↑ regressed test_VP by +0.10pp and test_SP by +0.045pp (crossing the 3.577% PR #972 cap). Earlier claim of "pressure heads over-served by H147" is FALSE.
+3. **β-grid upper-axis closure remains complete** — β1≥0.97 is monotonically worsens all metrics (H150, H153, H156). β1≥0.95 with β2≤0.97 is unstable at EP1 (H149, H152, H153). Only (β1=0.95, β2=0.985) remains untested as H160.
+4. **EMA-best EP20 was the correct harvest target on the H150 stack** — EP30 val_WSS=6.6433% > EP20 EMA-best 6.6223%. Late-cosine drift made EP20 the clear winner, even though the terminal result didn't merge.
 
-**Suggested follow-ups (per tanjiro's terminal report):**
-1. β1↓ neighbor (β1=0.93, β2=0.98) — tests if H147 is on the WSS-favoring side of a saddle. Inexpensive single arm.
-2. **Decoupled β by head** (architectural change): two-optimizer setup, β1=0.95/β2=0.98 on WSS branch, β1=0.97/β2=0.985 on pressure branches. Cleanest test of the decoupling hypothesis.
-3. **β2-only sweep at β1=0.95**: isolate which mover delivered H147 SOTA — assigned as H160 PR #1424.
-4. Do NOT pursue β1≥0.98 — H153 EP1 destabilization and H150 monotonic WSS regression close the door.
+**Original suggested follow-ups (per tanjiro's terminal report) — kept for record:**
+1. β1↓ neighbor (β1=0.93, β2=0.98) — closes the β1 axis below H147; can run cheaply post-deadline.
+2. ~~Decoupled β by head (two-optimizer setup)~~ — under corrected baseline, this hypothesis has weaker prior (no decoupling signal in single-optimizer data).
+3. **β2-only sweep at β1=0.95**: isolate which mover (β1 or β2) is the harmful axis — assigned as H160 PR #1424. **Even more informative under corrected baseline.**
+4. Do NOT pursue β1≥0.98 — H153 EP1 destabilization + H150 monotonic regression close the door.
 
 **Bug-fix flag (separate from H150 results):** Commit e31fd60 adds `scripts/precompute_curvature_proxy.py` and `curvature_proxy_stats_k16_v1.json` (400-case train stats). Required because `trainer_runtime.py` references `python -m scripts.precompute_curvature_proxy` when `--use-curvature-attention-bias` is set, but neither the script nor the JSON existed in the workspace, causing FileNotFoundError on all 8 ranks before step 1. Unblocks any future curvature-attention-bias use. **Advisor cherry-pick into drivaerml-long-20260504 pending.**
 
@@ -3926,5 +3928,54 @@ The expected Charbonnier overhead (PR-stated: "≤ 0.05pp to early-EP val_WSS") 
 **Re-assignment:** frieren redirected to H159 PR #1423 with the same `vol_p_charbonnier_weight=0.3` (raised from H147's 0.1) on the CORRECTED full H147 SOTA stack.
 
 PR closed 2026-05-29T09:50Z. Advisor apology issued. CURRENT_RESEARCH_STATE.md updated with corrected H147 reproduce command + the four missing flag set documented as canonical-stack requirements.
+
+---
+
+## 2026-05-29 10:30Z — PR #1360: H151 extended 45-EP training on canonical Lion-β — CLOSED, NON-MERGE + CONVERGENCE-CEILING FINDING + BASELINE.md BUG DISCOVERY
+
+- dl24-nezuko/h151-extended-training
+- Hypothesis: H147 was undertrained at EP30; extending the cosine schedule to T_max=45 (and the run length to 45 EP) extracts a lower test_WSS via additional gradient steps with EMA stabilization.
+- W&B run: rank0 = `d20sf8th` (state=finished, training_timeout cut after EP31 wall-clock-truncated; full eval ran on EP25 EMA-best checkpoint)
+- Best EMA checkpoint: EP25 (selection metric `val_primary/abupt_axis_mean_rel_l2_pct`)
+- Wall time: 22.84h on 8× Blackwell DDP, 335,807 steps total
+
+**Terminal test metrics (EMA EP25):**
+
+| Metric | H151 (T_max=45, ~EP31 trained) | H147 SOTA (corrected) | Δ | Hard constraint | Status |
+|---|---:|---:|---:|---:|:---|
+| **test_WSS** ⭐ | **6.5439%** | 6.5409% | **+0.003pp** | beat 6.5409% to win | ❌ noise tie (cannot claim improvement) |
+| test_ABUPT | 5.7115% | 5.6648% | +0.047pp | ≤ 5.844% | ❌ regresses, within hard cap |
+| test_VP | 3.5044% | 3.4014% | +0.103pp | ≤ 3.643% | ❌ regresses, within hard cap |
+| test_SP | 3.6118% | 3.5634% | +0.048pp | ≤ 3.577% | ❌ crosses PR #972 cap by +0.035pp |
+| test_WSS_x | 5.7898% | 5.8155% | −0.026pp | — | ✅ small improvement |
+| test_WSS_y | 7.0951% | 7.0556% | +0.040pp | — | — |
+| test_WSS_z | 8.5562% | 8.4882% | +0.068pp | — | — |
+
+**HEADLINE FINDING — H147 recipe at convergence ceiling:**
+
+> Despite H151 using `--lr-cosine-t-max 45` (which keeps the LR ~20× higher at EP30 than H147's `T_max=30` cool-down), the validation primary metric still peaked at **EP25 in BOTH H151 and H147**. Identical best-val epoch under different LR schedules is direct evidence the H147 recipe has saturated under the current model capacity / loss configuration / dataset. "More epochs" is not the unlocked direction; the next-wave hypothesis space should target capacity, loss reformulation, or schedule reformulation (cosine restart) rather than duration tuning.
+
+H151's primary scientific value is therefore a NEGATIVE result that constrains the Wave 41/42 boundary cleanly: duration axis is closed.
+
+**SECONDARY FINDING — BASELINE.md commit ea99dda is wrong on H147 VP/SP:**
+
+> nezuko discovered that the 2026-05-28 BASELINE.md update for PR #1344 (H147) listed `test_VP=3.6033%` and `test_SP=3.6498%`, which are actually H39's (run `yym5oa8x`) values. The true H147 numbers from W&B `k6q4c3on` are **test_VP=3.4014%** and **test_SP=3.5634%**. H147 actually CLEARS all 4 floors (3.5634% < 3.577% SP cap). The BASELINE error invalidated the β-decoupling finding I (advisor) had banked from H150 in this same session — H150 actually REGRESSED on all 4 metrics. BASELINE.md patched this session; PR #1359 corrigendum posted.
+
+**Schedule truncation honesty:**
+
+H151 was budgeted for 45 EP but wall-clock-truncated at EP31 (predicted in launch comment — 45 EP @ 44.6 min/EP = 33.4h exceeds the 22.5h train-timeout). Eval ran on the EP25 EMA-best checkpoint, which was the run's actual best-val anyway. Truncation does NOT confound the finding; the EP25 best-val plateau in both runs is the load-bearing evidence.
+
+**Secondary 60-EP arm not attempted** — would need ~44.6h, infeasible under 24h pod budget.
+
+**Suggested follow-ups (per nezuko's terminal report):**
+1. **More epochs lever exhausted for H147 recipe** — do not retry duration-axis on H147 base under current budget.
+2. **Cosine restart / 2-cycle schedule** — natural follow-up; tests if mid-budget LR re-warmup extracts a second descent burst from the saturated recipe. **Assigned as H161** PR pending.
+3. **Architectural / per-axis tier-shift** — deeper trunk, per-axis Charbonnier for tau_z (slowest-improving WSS axis at 8.49%).
+4. **Fix BASELINE.md** — patched this session ✓.
+5. **Add `scripts/precompute_curvature_proxy.py`** to the repo — bug-fix commit e31fd60 (tanjiro's H150 branch) provides this; cherry-pick pending into advisor branch.
+
+**Bug-fix flag (separate):** nezuko had to manually aggregate `curvature_proxy_stats_k16_v1.json` from per-case files because the precompute script referenced by `trainer_runtime.py` didn't exist in the workspace. Tanjiro's e31fd60 supplies this script + matching stats artifact; both nezuko's and tanjiro's stats are consistent across the 400-case train split. Cherry-pick into advisor branch is now urgent (any future cold-env advisor will need it).
+
+PR closed 2026-05-29T10:30Z. nezuko reassigned to H161 (cosine restart).
 
 ---
