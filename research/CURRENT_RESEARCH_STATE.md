@@ -1,118 +1,101 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 05:05Z | Branch: `tay` | **NEW SOTA: H185+TTA PR #1382 merged** | ~6h compute remaining
+**Updated**: 2026-05-29 05:30Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4 fleet: 8/8 active
 
 ---
 
-## 🎯 NEW SOTA MERGED — First Sub-6.0% val_abupt, Closing Gap to Transolver-3 SOTA
-
-H209 frieren MERGED at 04:35Z. H185+TTA pulls **val_abupt under 6.0%** for the first time in program history and improves test on every primary channel except a paper-floor near-miss on VP.
+## Current SOTA
 
 | Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP |
 |---|---:|---:|---:|---:|---:|
 | Prior SOTA H112 (PR #1283) | 6.1358% | 5.839% | 6.752% | 3.421% | 3.695% |
-| **NEW SOTA H185+TTA (PR #1382)** | **5.9755%** | **5.8221%** | **6.7214%** | 3.4400% | 3.6806% |
-| Δ | −16bp | −1.7bp | −3.1bp | +1.9bp | −14.4bp |
+| **SOTA H185+TTA (PR #1382)** | **5.9755%** | **5.8221%** | **6.7214%** | 3.4400% | 3.6806% |
 | Transolver-3 target (Morgan) | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% |
 
-**Gap to target test_WSS = 5.85**: now 0.87pp (~13% relative) from 0.90pp at session start. ~6h compute remaining.
+**Gap to test_WSS target**: 0.87pp (13% relative) — ~6h compute remaining.
 
-**Merge gate (updated)**: val_abupt < 5.9755% AND test_abupt < 5.8221%. Test floors for paper claims: VP ≤ 3.421, SP ≤ 3.577, WSS ≤ 6.727.
+**Merge gate**: val_abupt < **5.9755%** AND test_abupt < **5.8221%**
+**Paper floor**: test_VP ≤ 3.421, test_SP ≤ 3.577, test_WSS ≤ 6.727
 
----
-
-## Findings Q + R Banked (this cycle)
-
-### Finding Q — TTA on mirror-aug-trained models (N=3 across H183/H185/H190)
-- ~4-5bp **uniform gain** on test_WSS for ANY mirror-aug-trained checkpoint
-- WSS_y benefits most (−8 to −10bp) — direct y-mirror equivariance signal
-- **WSS_x slope flip NOT recovered** by TTA — basin disruption is a weight-trajectory property
-- TTA = STANDARD INFERENCE RECIPE for any future mirror-aug winner
-
-### Finding R — Linear mode connectivity ABSENT (N=2 pairs)
-- H112↔H183 (askeladd H207): val 88.78 at α=0.5
-- H112↔H190 (fern H208): val 88.78 at α=0.5
-- Both collapse to ~89% peak — wide high-loss ridge between basins
-- Permutation-symmetry per Ainsworth 2022. Naive LERP not viable without rebasin.
-
-### Finding N — TTA control floor (N=3 non-mirror-trained: H189/H112/H164e)
-- +1.27 to +1.38pp test_WSS degradation
-- Establishes control floor for TTA technique
-
-### Finding O — Cross-recipe SWA destroys models (H210 tanjiro)
-- Naive parameter averaging across 5 EP13 artifacts: 88-95% rel-L2
-- Same mechanism as Finding R (permutation symmetry)
+Source: W&B `bx3t1vdw` | H185 checkpoint: `yw2a5dyl` EP13 EMA
 
 ---
 
-## Active Fleet (as of 05:05Z) — 3 WIP eval-only sprints, 5 idle awaiting assignment
+## Round 4 Active Fleet (all 8 students WIP as of 05:30Z)
 
-| PR | Student | Hypothesis | Type | Status | ETA |
-|---|---|---|---|---|---|
-| #1386 | edward | H212: mirror invariance profile (5 EP13 cohort) | eval | WIP | ~25 min |
-| #1387 | tanjiro | H213: block-wise splice H112↔H183 k=0..5 | eval | WIP | ~30 min |
-| #1388 | askeladd | H214: sub-alpha sweep α ∈ {0.005..0.2} | eval | WIP | ~25 min |
+| PR | Student | Hypothesis | Type | ETA |
+|---|---|---|---|---|
+| #1389 | alphonse | H215: Ultra-low-LR continuation EP13→EP16 (lr=1e-6 constant) | training-light | ~2h |
+| #1390 | askeladd | H223: Rotational TTA ±2° on H185 (eval-only) | eval-only | ~45min |
+| #1391 | edward | H222: Tau_x channel upweight 2.0 — address WSS_x slope flip at training time | training-heavy | ~3.5h |
+| #1392 | fern | H216: H185 + tau_y=2.0 retrain (de-escalate below Finding J boundary) | training-heavy | ~3.5h |
+| #1393 | frieren | H217: H185 EP15 cosine extension from EP13 checkpoint | training-light | ~2h |
+| #1394 | nezuko | H218: Mirror p=0.5 + tau_y=2.0 — untested (p × tau_y) grid cell | training-heavy | ~4h |
+| #1395 | tanjiro | H221: Lion→AdamW switch at EP10 — late-epoch optimizer refinement | training-heavy | ~3.5h |
+| #1396 | thorfinn | H219: Fresh H185 seed + within-recipe LERP test | training-heavy | ~5h |
 
-**5 idle students** (alphonse, fern, frieren, nezuko, thorfinn) — researcher-agent generating next-round hypotheses.
-
----
-
-## Next-Round Strategy Priorities (descending EV, 6h window)
-
-1. **Training-heavy: H185 recipe extensions** (longer epochs, mirror p variants, different tau weighting) — direct extension of merged winner
-2. **Training-heavy: WSS_x slope penalty / trajectory regularization** — the ONLY known mechanism to address Finding Q's "TTA doesn't recover WSS_x slope" gap
-3. **Training-heavy: H112 fine-tune with mirror p=0.25 + L2 anchor** (fern's own H208 suggestion) — bypasses Finding R via optimizer-anchored continuation
-4. **Eval-only: rotational TTA on H185** — extend Finding Q with geometric augmentations beyond y-mirror
-5. **Eval-only: snapshot averaging WITHIN single H185 trajectory** (intra-recipe, late EP only) — not banned by ensemble policy
+**Expected first result**: H223 (askeladd, ~45min)
 
 ---
 
-## Recipe for current SOTA H185+TTA
+## Current Research Focus
 
-- **H185 training**: Lion, lr=9e-5, β1=0.9 β2=0.99, weight_decay=5e-4, batch=4, 13 EP, tau_y=3.0, tau_z=2.0, mirror p=0.25, compound H150-β, lr-warmup=1 EP, ema-decay=0.999
-- **Source W&B run**: `yw2a5dyl` EP13 EMA artifact alias `epoch-13`/`best`
-- **TTA**: `eval_tta_h209.py` 2-pass — original + y-mirrored pass, 0.5 avg in normalized space. Mirror op flips y in surface_x/n_y/volume_x, un-mirrors tau_y output. Eval-only at inference.
+### Primary Lever: WSS_x Slope Repair
+Finding Q established TTA cannot recover the WSS_x slope flip from H185. **Training-time interventions targeting the slope** are the only known path to further WSS improvement:
+- H222 (edward): tau_x upweight 2.0 — direct channel gradient pressure
+- H221 (tanjiro): Lion→AdamW switch at EP10 — late-epoch optimizer change
+- H216 (fern): tau_y=2.0 retrain — reduce tau_y below Finding J boundary
+- H218 (nezuko): p=0.5 + tau_y=2.0 — untested grid cell combining both mitigations
+
+If WSS_x slope is restored AND val_abupt is competitive → TTA stacks on top → SOTA candidate.
+
+### Secondary Lever: Continuation Strategies
+H185 EP13 is the strongest weight starting point in program history. Low-risk extensions:
+- H215 (alphonse): lr=1e-6 constant, 3 EP — optimizer-anchored refinement
+- H217 (frieren): cosine extended to EP15 — unconverged trajectory
+- H219 (thorfinn): fresh seed + within-recipe LERP — test same-recipe basin connectivity
+
+### Tertiary Lever: New TTA Geometry
+- H223 (askeladd): Rotational TTA ±2° — extends TTA equivariance to rotation axis model hasn't absorbed
 
 ---
 
-## Diagnostic Invariants (DO NOT VIOLATE)
+## Findings Banked (program-permanent)
+
+| Finding | Cycle | Summary |
+|---|---|---|
+| E-K | prior | slope-pres compound failures, mirror-aug load-bearing, tau_y stacking threshold |
+| L | prior | Mirror-aug bimodal: p=0.25 collapses slope, p=0.5 canonical |
+| M | prior | Mid-EP EMA checkpoints never saved program-wide |
+| N | this cycle | TTA on non-mirror-trained = +1.27-1.38pp control floor (N=3) |
+| O | this cycle | Cross-recipe SWA destroys models (permutation symmetry) |
+| Q | this cycle | TTA on mirror-aug = +4-5bp gain, WSS_x slope NOT recovered |
+| R | this cycle | Linear mode connectivity absent for tay-track checkpoints (N=2 pairs) |
+| S | this cycle | delta_mirror_WSS diagnostic: p=0.5 → ~0, p=0.25 → +0.002pp |
+| T | this cycle | Permutation barrier at sub-block granularity (even 1 cross-recipe block destroys) |
+| U | this cycle | H112 basin radius < 0.005 in H183 direction — definitively closes linear-interp arm |
+
+---
+
+## Diagnostic Invariants
 
 - No capacity additions (≥+1% param overhead → slope flattening)
-- **No ensembles** (Morgan directive). TTA is NOT ensembling (single model, single checkpoint, deterministic geometric averaging).
+- **No ensembles** (Morgan directive). TTA is NOT ensembling.
 - DDP 8 GPUs every training run
 - z-axis tau_z LOCKED at 2.0
-- WSS_x slope sign is the BASIN-DISRUPTION DIAGNOSTIC
+- WSS_x slope sign = BASIN-DISRUPTION DIAGNOSTIC (positive = flipped = bad)
 - data/loader.py, data/preload.py, data/split_manifest.json — READ-ONLY
 - EP boundaries: EP6=48902, EP9=59780, EP10=62501, EP11=65184, EP13≈70657
 
 ---
 
-## RNG Floor Calibration (N=2 EP12, PERMANENT)
+## H185 Recipe (current SOTA backbone)
 
-| Channel | N=2 val half-range | N=2 slope half-range |
-|---|---:|---:|
-| WSS_agg | ±0.065pp | **±0.001pp ← canonical slope screening** |
-| abupt | ±0.053pp | ±0.006pp |
-| SP | ±0.020pp ← tightest val | ±0.004pp |
-| WSS_z | ±0.082pp (LARGEST) | ±0.006pp |
-| VP | ±0.037pp | ±0.009pp |
-| WSS_x | ±0.065pp | ±0.012pp |
-| WSS_y | ±0.060pp | ±0.021pp |
+Lion, lr=9e-5, β1=0.9 β2=0.99, wd=5e-4, batch=4, 13 EP cosine, tau_y=3.0, tau_z=2.0, mirror p=0.25, compound H150-β, lr-warmup=1 EP, ema-decay=0.999 | TTA via eval_tta_h209.py (2-pass y-mirror average)
 
 ---
 
 ## Human Researcher Directives
 
 - **Morgan (Issue #1056, 2026-05-28 15:27Z)**: Ensembles BANNED. "PUSH HARD". test_WSS < 5.85% target.
-- ADVISOR replies: 2026-05-29 02:09Z, 03:00Z, **05:05Z (this cycle — new SOTA report)**
-
-## Findings Banked (full program)
-
-- **E-K** (prior cycles): slope-pres compound failures, mirror-aug as load-bearing, tau_y stacking threshold
-- **L** (cycle): Mirror-aug is BIMODAL (p=0.25 collapses slope, p=0.5 canonical)
-- **M** (cycle): Mid-EP EMA checkpoints never saved program-wide
-- **N** (this cycle): TTA on non-mirror-trained = +1.27-1.38pp control floor (N=3)
-- **O** (this cycle): Cross-recipe SWA destroys models (Ainsworth permutation symmetry)
-- **P** (this cycle): Linear mode connectivity ABSENT (covered by R below — finer naming)
-- **Q** (this cycle): TTA on mirror-aug = +4-5bp gain, WSS_x slope NOT recovered (N=3)
-- **R** (this cycle): Linear mode connectivity ABSENT for tay-track checkpoints (N=2)
+- Last advisor update to Morgan: 2026-05-29 05:30Z (Round 4 fleet deployed)

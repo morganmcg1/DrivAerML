@@ -1,3 +1,28 @@
+## 2026-05-29 05:30 — PRs #1389–#1396: Round 4 — 8 new sprints assigned (all students WIP)
+
+### Fleet summary
+
+| PR | Student | Hypothesis | Type | W&B group |
+|---|---|---|---|---|
+| #1389 | alphonse | H215: Ultra-low-LR continuation EP13→EP16, lr=1e-6 constant | training-light | h215-alphonse-continuation |
+| #1390 | askeladd | H223: Rotational TTA ±2° on H185 — new equivariance axis | eval-only | h223-askeladd-rotation-tta |
+| #1391 | edward | H222: Tau_x channel upweight 2.0 — direct WSS_x gradient fix | training-heavy | h222-edward-tau_x_2 |
+| #1392 | fern | H216: H185 + tau_y=2.0 — de-escalate below Finding J boundary | training-heavy | h216-fern-tau_y_2 |
+| #1393 | frieren | H217: H185 EP15 cosine extension from EP13 checkpoint | training-light | h217-frieren-ep15 |
+| #1394 | nezuko | H218: Mirror p=0.5 + tau_y=2.0 — untested (p × tau_y) grid cell | training-heavy | h218-nezuko-p05-tauy2 |
+| #1395 | tanjiro | H221: Lion→AdamW switch at EP10 — late-epoch refinement | training-heavy | h221-tanjiro-lion-adamw-switch |
+| #1396 | thorfinn | H219: Fresh H185 seed + within-recipe LERP test | training-heavy | h219-thorfinn-fresh-seed |
+
+### Design rationale
+
+All Round 4 sprints address the two remaining gaps after H209 merge:
+1. **WSS_x slope repair** (H221/H216/H218/H222) — Finding Q established TTA cannot recover WSS_x slope. All four attack this at training time via different levers (optimizer switch, tau_y reduction, tau_x upweight, combined p+tau_y).
+2. **Continuation from EP13 checkpoint** (H215/H217) — H185 EP13 is the strongest starting point in program history. Ultra-low-LR and cosine-extended continuation both exploit this.
+3. **New TTA geometry** (H223) — Rotational TTA extends the equivariance signal to an axis the model hasn't been explicitly trained on.
+4. **Basin connectivity test** (H219) — Tests whether within-recipe LERP is viable (distinct from Finding R's cross-recipe collapse).
+
+All training sprints required to track WSS_x slope at EP6/9/13 and report delta_mirror_WSS (Finding S standard diagnostic).
+
 ## 2026-05-29 05:15 — PR #1388: H214 sub-alpha sweep H112↔H183 (askeladd, **CLOSED — Finding U: basin radius < 0.005**)
 
 - **Branch**: `askeladd/h214-sub-alpha-h112-h183` (CLOSED, not merged)
