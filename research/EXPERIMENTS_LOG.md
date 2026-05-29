@@ -1,3 +1,61 @@
+## 2026-05-29 21:15Z — PR #1453 askeladd H273 CLOSED: Finding SS-Taylor-mixed-sign
+
+### PR #1453 askeladd H273 — CLOSED: Taylor 2nd-order curvature correction
+
+- **Branch**: askeladd/h273-taylor2-curvature-correction
+- **W&B run**: `zgrzjte7`
+- **Hypothesis**: Add Taylor 2nd-order correction `λ * r_mean` (r_mean ≈ ε^T H_w ε / 2) post-hoc to anti-thetic mean at EP13. λ-sweep in [0, 0.30]. Arm B (with mirror) gated on λ giving >0.3bp improvement.
+
+| Split | λ=0 (anti-thetic) | λ=0.10 (best) | Δ |
+|---|---:|---:|---:|
+| val | 5.9547 | **5.9543** | −0.04bp |
+| test | 5.7977 | **5.7973** | −0.04bp |
+
+**Finding SS-Taylor-mixed-sign**: At EP13 + anti-thetic K=3 + σ=5e-4, the quadratic residual r_mean has mixed sign across output channels: abupt/WSS/VP prefer λ=0.10 (small positive residual → correction helps), SP prefers λ=0 (monotone hurt by any λ>0). Maximum net benefit 0.04bp — 7.5× below Arm B 0.3bp gate. EP13 EMA loss surface is too flat at this σ scale for isotropic random projections to capture meaningful curvature signal on a 17.4M-param model.
+
+**Arm B**: NOT triggered (0.04bp << 0.3bp threshold).
+
+**Side result**: Confirms H273 λ=0 anti-thetic K=3 + 6-res (no mirror) = val 5.9547 / test 5.7977 — 6-res helps anti-thetic K=3 by ~1.7bp vs standalone H268 (5.9715 / 5.8165). Efficient design: 42 forward passes per case, 6 λ-values post-hoc at zero extra compute.
+
+**Operational note**: askeladd used `outputs/h236_eval/_artifacts/yw2a5dyl/epoch-13/checkpoint.pt` (same H185 EP13 EMA artifact, missing/unexpected=0).
+
+---
+
+## 2026-05-29 21:05Z — PR #1449 tanjiro H270 CLOSED: Finding RR-σ-EP13-stack
+
+### PR #1449 tanjiro H270 — CLOSED: σ=3e-4 in EP13+stack
+
+- **Branch**: tanjiro/h270-sigma3e-4-stacked
+- **W&B run**: (reported in PR comments)
+- **Hypothesis**: σ=3e-4 (vs baseline σ=5e-4) in EP13+K=5+6-res+mirror full stack.
+
+| Split | σ=5e-4 (H253 gate) | σ=3e-4 (H270) | Δ |
+|---|---:|---:|---:|
+| val | 5.9418 | 5.9394 | −2.4bp |
+| test | 5.7847 | **5.7827** | −2.0bp |
+
+**Finding RR-σ-EP13-stack**: σ=3e-4 gives −2.0bp test on EP13+stack vs σ=5e-4, driven primarily by test_WSS −3.2bp. Missed UPDATED gate (test needs < 5.7825, got 5.7827 — 0.2bp short). Gate shifted when H267 merged mid-session (H270 was compared against H253 gate originally). Narrowly missed new gate by 0.2bp on test. Motivates H276 thorfinn (σ=3e-4 + EP15) and H277 tanjiro (σ=3e-4 + EP15 + anti-thetic).
+
+---
+
+## 2026-05-29 21:02Z — PR #1433 thorfinn H257 CLOSED: Finding LL-noise-sweep-stacked
+
+### PR #1433 thorfinn H257 — CLOSED: σ-sweep in EP13+stack
+
+- **Branch**: thorfinn/h257-noise-sigma-stacked
+- **W&B runs**: Multi-σ sweep in stacked form
+- **Hypothesis**: σ-basin exploration in EP13+K=5+6-res+mirror: σ ∈ {1e-4, 5e-4, 1e-3}.
+
+| σ | val_abupt | Notes |
+|---|---:|---|
+| 1e-4 | 5.9417 | Slightly better than σ=5e-4 (5.9418) but missed updated gate |
+| 5e-4 | 5.9418 | Baseline H253 recipe |
+| 1e-3 | 5.9626 | Monotone worse |
+
+**Finding LL-noise-sweep-stacked**: EP13 stack σ-basin is flat in [1e-4, 5e-4] (only 0.01bp difference), σ=1e-3 is clearly worse. No benefit from σ tuning at EP13 in stacked form beyond the flat plateau. Motivates σ=3e-4 experiments at EP15 checkpoint (H276/H277) where σ sensitivity may differ.
+
+---
+
 ## 2026-05-29 20:45Z — PR #1447 edward H267 MERGED: Finding QQ — EP15 stacks with full recipe
 
 ### PR #1447 edward H267 — MERGED as NEW SOTA (val 5.9367 / test 5.7825)
