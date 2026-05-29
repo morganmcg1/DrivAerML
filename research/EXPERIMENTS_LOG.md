@@ -1,3 +1,31 @@
+## 2026-05-29 16:20 — PR #1441 edward H265 CLOSED: LL-EPchain CONFIRMED (EP14 essentially flat)
+
+### PR #1441 edward H265 — CLOSED: EP14+6-res mirror misses gate by ~1bp
+
+- **Branch**: edward/h265-ep14-6res-mirror
+- **W&B runs**: `1hfmqjkk` (EP14 sanity single-res), `n3lamn1b` (EP14 + 6-res mirror TTA)
+- **Result**:
+
+| Mode | val_abupt | test_abupt | vs SOTA gate (5.9452 / 5.7896) |
+|---|---:|---:|---|
+| EP14 sanity (orig, 65k) | 6.0169 | 5.8615 | far miss |
+| EP14 + 6-res mirror | **5.9548** | **5.7979** | +0.96bp val / +0.83bp test — close miss |
+
+- **EP-chain (single-res val_orig, EMA, 65k)**:
+
+| EP | val_orig | Δ vs EP15 | source |
+|---|---:|---:|---|
+| EP13 | 6.0172 | +9.3bp | baseline |
+| EP14 | 6.0169 | +9.0bp | this PR (H265) |
+| **EP15** | **6.0079** | **(best)** | H244 SOTA |
+| EP16 | 6.0118 | +3.9bp | H264 fern |
+
+**Finding LL-EPchain CONFIRMED**: EP15 is a sharp single-epoch dip — NOT a smooth trend. EP14 is essentially flat vs EP13 (only −0.03bp). The cosine schedule lands in a particular basin only at EP15. EP16 escapes it. Has implications for paper narrative on cosine annealing sweet spots.
+
+**Negative gate result, valuable mechanism finding**: EP14 + 6-res mirror is the strongest non-SOTA EP-chain config, sitting within 1bp of SOTA on both splits — but not enough to merge. EP15 remains the canonical training-floor for the H185 recipe at T_max=16 cosine.
+
+---
+
 ## 2026-05-29 15:20 — PR #1440 fern H264 CLOSED: Finding LL-EPchain (EP15 is cosine optimum)
 
 ### PR #1440 fern H264 — CLOSED: Finding LL-EPchain
