@@ -1,8 +1,27 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-28 23:55Z | Branch: `tay` | SOTA: H112 PR #1283 (single-model) / PR #1102 (K=8 ensemble)
-**Constraint**: ~12-15 hours of training compute remain (Issue #1056 human directive, 2026-05-27)
-**Active fleet snapshot**: 8/8 students training healthy; first terminal frieren H164e ~01:08Z+1; H185 thorfinn merge-eligible candidate terminal ~03:00-04:00Z+1.
+**Updated**: 2026-05-29 01:42Z | Branch: `tay` | SOTA: H112 PR #1283 (single-model) / PR #1102 (K=8 ensemble)
+**Constraint**: ~12 hours of training compute remain (Issue #1056 human directive, 2026-05-27)
+
+## 🚨 H185 TEST EVAL LANDED 01:40Z — NOT A MERGE — Anti-compound on slope
+
+**Critical finding (NEW PROGRAM-PERMANENT)**: GradNorm + mirror-aug compound produces **FLATTER** val→test slope than either alone — slope-preservation interventions ANTI-COMPOUND when stacked.
+
+| Run | val_abupt | test_WSS_agg | test_VP | test_SP | val→test slope (WSS_agg) | Merge? |
+|---|---:|---:|---:|---:|---:|---|
+| H112 baseline | 6.1358 | **6.752** | 3.421 | 3.695 | −0.215pp | (current SOTA) |
+| **H185 thorfinn (GradNorm × mirror)** | **6.017 (−0.119pp = 2.25× RNG)** | **6.764 (+12bp FAIL)** | 3.458 (+37bp) | 3.705 (+10bp) | **−0.058pp (FLATTER)** | **NO** |
+| H164e frieren (H112-recipe N=2 RNG) | 6.084 | 6.751 (−1bp within noise) | 3.409 | 3.677 | −0.180pp (within H112 noise) | calibration only |
+
+**H185 program reading**:
+- Outstanding VAL gain (clearly above 2× RNG floor) but did NOT transfer to test
+- Compound HURT the slope-preservation mechanism — additive-on-val, anti-additive-on-test-slope
+- All 4 test channels regressed slightly vs H112 (within noise but no improvement)
+- The compound idea is structurally falsified for THIS specific pair (GradNorm × mirror-aug)
+
+**Program implication**: Wave 39+ cross-axis compound strategy needs revision. Slope-PRESERVATION individual interventions do NOT compound additively on slope. May need to test SLOPE-SLOPE compound pairs that target different mechanism axes more thoroughly.
+
+**H164e program reading**: confirms H112-recipe RNG distribution centeredness at terminal. test_WSS 6.751 ≈ H112 6.752 within noise; all 4 channels essentially at H112 within recipe distribution. Close as calibration (not a merge).
 
 ## ~23:55Z Active Fleet Health (W&B-verified)
 
