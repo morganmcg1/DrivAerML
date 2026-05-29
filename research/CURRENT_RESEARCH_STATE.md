@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 08:00Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4d: 7 active
+**Updated**: 2026-05-29 08:20Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4e: 9 active (3 just assigned)
 
 ---
 
@@ -65,19 +65,27 @@
 | ~~#1410~~ | thorfinn H239 | Running (mesh-subsample on H148, will confirm Finding AA at N=3) |
 | ~~#1411~~ | fern H240 | CLOSED — Finding AA confirmed on H183 at N=2 |
 
-### Round 4d active fleet (7 PRs)
+### Round 4d/e closures (2 PRs)
+
+| PR | Student | Outcome |
+|---|---|---|
+| ~~#1409~~ | alphonse H238 | CLOSED — Finding DD banked: α-sweep U-shapes at 0.5, α-tuning futile on equal-bias TTA pairs |
+| ~~#1410~~ | thorfinn H239 | CLOSED — Finding AA confirmed at N=3; **Finding CC banked** (H148 density robustness) |
+
+### Round 4e active fleet (9 PRs)
 
 | PR | Student | Hypothesis | Mechanism |
 |---|---|---|---|
-| #1409 | alphonse | H238: Weighted α-sweep on H185 EP13 | TTA α-tuning (vs new gate 5.9613) |
-| #1410 | thorfinn | H239: Mesh-subsample H148 (finding-confirm) | awaiting terminal |
 | #1412 | frieren | H241: Per-channel TTA α on H185 EP13 | per-channel α (vs new gate) |
 | #1413 | tanjiro | H242: Weight-space noise TTA on H185 | weight-space perturbation |
 | #1414 | askeladd | H243: Extended multi-res range {32k-98k}×{orig,mirror}=10-pass | eval-only ~25min |
 | #1415 | edward | H244: H185 EP14-16 cosine extension (TRAINING) | ~340min training + TTA |
 | #1416 | fern | H245: Multi-res TTA on H183 EP13 | eval-only ~20min |
+| **#1417** | **thorfinn** | **H246: Multi-res TTA on H148 EP13 — best test_abupt checkpoint** | eval-only ~20min |
+| **#1418** | **nezuko** | **H247: Per-channel α multi-res TTA on H185 EP13** | per-channel α on H236 mechanism |
+| **#1419** | **alphonse** | **H248: Mirror × multi-res × point-jitter TTA on H185 EP13** | third orthogonal TTA axis |
 
-**Budget remaining**: ~7.5h. edward H244 training sprint uses ~5.7h.
+**Budget remaining**: ~7.0h. edward H244 training sprint uses ~5.7h.
 
 **Findings banked (input-space TTA exhaustion map)**:
 | Mechanism | Result |
@@ -148,8 +156,10 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | **X** | this cycle | **Intra-trajectory SWA blocked on yw2a5dyl — per-EP EMA never persisted by train.py (Finding X banked from alphonse H232 abort #1405)** |
 | **Z** | this cycle | **Gaussian-noise TTA infeasible — no usable σ band (banked from tanjiro H229 #1402). Sub-finding: WSS more noise-sensitive than VP/SP.** |
 | **Q@N=8** | this cycle | **TTA-mirror on mirror-aug-trained EP13 EMA: mean -4.42bp test, stdev 0.77 — 8/8 checkpoints improve. Publication-grade (frieren H235 #1407).** |
-| **AA** | this cycle | **Mesh-subsample TTA falsified at 80%+95% on H185 (H231) and H183 (H240). No point-density invariance. MC bias correction insufficient. N=2 checkpoints.** |
+| **AA** | this cycle | **Mesh-subsample TTA falsified at 80%+95% on H185 (H231), H183 (H240), H148 (H239). No point-density invariance. N=3 checkpoints. Finding confirmed.** |
 | **BB** | this cycle | **Permutation TTA null — H185 slice-attention empirically permutation-invariant. Null signal, dilutes mirror weight (edward H233 #1406).** |
+| **CC** | this cycle | **H148 density robustness: H148 loses only −0.6bp under 20% subsampling vs H185 losing ~100bp. H148 backbone is materially more point-density robust. Backbone selection criterion for future density-perturbing TTA.** |
+| **DD** | this cycle | **α-sweep on equal-bias TTA pairs (same-model orig+mirror) is U-shaped at α=0.5 — theoretically guaranteed. Skip α-sweeps on same-architecture TTA pairs. (alphonse H238 #1409)** |
 
 ---
 

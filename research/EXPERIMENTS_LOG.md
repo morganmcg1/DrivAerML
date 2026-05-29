@@ -1,3 +1,49 @@
+## 2026-05-29 08:20 — Round 4d closures + Round 4e assignments
+
+### PR #1409 alphonse H238 — CLOSED: α-sweep at H209 baseline, Finding DD banked
+
+- **Hypothesis**: H209's α=0.5 may not be optimal; sweep α ∈ {0.3, 0.4, 0.5, 0.6, 0.7} for mirror TTA blend
+- **W&B runs**: `fclqr1f2` (α=0.3), `p95kkwvy` (0.4), `yok3zicd` (0.5), `filmp7vd` (0.6), `shrbqpam` (0.7) — group `h238-alphonse-blend-sweep`
+
+| α | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| 0.3 | 5.9819 | 5.8281 | 3.4431 | 3.6842 | 6.7279 |
+| 0.4 | 5.9770 | 5.8235 | 3.4408 | 3.6814 | 6.7228 |
+| **0.5 (H209)** | **5.9754** | **5.8221** | **3.4399** | **3.6806** | **6.7213** |
+| 0.6 | 5.9775 | 5.8240 | 3.4406 | 3.6819 | 6.7234 |
+| 0.7 | 5.9828 | 5.8290 | 3.4426 | 3.6850 | 6.7290 |
+
+- **Outcome**: α=0.5 is strictly optimal. U-shaped curve symmetric around 0.5. α=0.4 ≈ α=0.6 within 1bp. All configs FAIL new H236 gate (val < 5.9613 AND test < 5.8081) — best (α=0.5) is 14bp above gate on both sides.
+- **Analysis**: orig val=6.0172, mirror val=6.0195 (Δ=0.0023). Two near-iid noisy estimators → variance-minimizing convex combination is equal mean (α=0.5). The U-shape is theoretically guaranteed when both streams have equal expected error.
+- **Finding DD (banked)**: α-sweeps on same-architecture equal-bias TTA pairs always collapse to α=0.5. Methodological lesson: skip α-sweeps for identical-arch TTA. α-tuning only pays when one stream is systematically better.
+- **Student insight**: per-channel α (WSS vs VP/SP have different mirror noise structures) may be the non-trivial knob. → Assigned to nezuko H247, also in-flight at frieren H241.
+
+### PR #1410 thorfinn H239 — CLOSED: Finding AA confirmed at N=3, Finding CC banked
+
+- **Hypothesis**: mesh-subsample TTA on H148 — same mechanism as askeladd H231 / fern H240 on different checkpoint
+- **W&B run**: (group `h239-thorfinn-h148-mesh-subsample`)
+
+| Mode | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| H148 + mirror_only (H230 ref sanity) | 6.0824 | 5.7995 | — | — | — |
+| H148 + subsample_only | ≈6.0818 (−0.6bp!) | — | — | — | — |
+| H148 + mirror_x_subsample | slightly worse than mirror_only | — | — | — | — |
+
+- **Outcome**: FALSIFIED on H148. mirror×subsample slightly worse than mirror alone. Fails both old and new gates.
+- **Finding AA confirmed at N=3**: mesh-subsample TTA consistently worse than mirror across H185 (askeladd H231), H183 (fern H240), H148 (thorfinn H239). Finding AA is publication-grade across 3 distinct trained checkpoints.
+- **Finding CC (NEW — banked)**: H148 has near-zero point-density sensitivity — subsample_only loses only −0.6bp vs orig, while H185 loses ~100bp under same 20% subsampling. H148 is materially more point-density robust than H185, despite worse val_abupt overall. This is a backbone-selection criterion for any density-perturbing TTA design.
+- **Sub-insight**: H148's density robustness could mean multi-res TTA on H148 works BETTER than on H185 (less cross-resolution disagreement = stronger averaging signal). → Assigned to thorfinn H246.
+
+### Round 4e new assignments
+
+| PR | Student | Hypothesis | Rationale |
+|---|---|---|---|
+| #1417 | thorfinn | H246: Multi-res TTA on H148 EP13 | H148 has best test_abupt (5.7995) — if multi-res adds 14bp test gain → 5.785 (below H236 test gate) |
+| #1418 | nezuko | H247: Per-channel α multi-res TTA on H185 | Their follow-up #5; VP benefits more from multi-res than SP/WSS (asymmetric channel sensitivity) |
+| #1419 | alphonse | H248: Mirror × multi-res × point-jitter TTA on H185 | Third orthogonal TTA axis; their follow-up #2 — stack jitter on top of H236's 6-pass |
+
+---
+
 ## 2026-05-29 08:00 — NEW SOTA MERGED (PR #1408 H236) + Round 4c closures + Round 4d launch
 
 ### PR #1408 nezuko H236 — MERGED NEW SOTA: multi-resolution TTA
