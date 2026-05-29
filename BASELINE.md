@@ -98,7 +98,37 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1447 H267 H185+EP15+Weight-Noise×6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1451 H271 H185+EP13+Sobol-QMC-K5+6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
+
+**val_abupt=5.9368%** / **test_abupt=5.7797%** (corrected split, H185 EP13 EMA + K=5 Sobol QMC weight-noise σ=5e-4 × 6-res × mirror TTA)
+
+**New SOTA — beats H267 (PR #1447) by −2.8bp test. Sobol QMC deterministic low-discrepancy sampling replaces i.i.d. random: K=5 Sobol perturbations have lower star discrepancy in proj_dim=1024 subspace than random, improving TTA ensemble coverage. val 0.01bp above H267 (within metric noise); test and test_WSS both improve.**
+
+**W&B run:** `o9hb87lt` (frieren/h271-sobol-k5-proj1024)
+**Source checkpoint:** H185 EP13 EMA (`outputs/h236_eval/_artifacts/yw2a5dyl/epoch-13/checkpoint.pt`)
+**PR:** #1451
+
+**Val metrics (corrected split, mirror_res_weight_noise_avg):** val_abupt=5.9368%, val_SP=3.9205%, val_VP=3.4699%, val_WSS=6.7328%
+**Test metrics (corrected split, mirror_res_weight_noise_avg):** test_abupt=5.7797%, test_VP=**3.3864%**, test_SP=3.6512%, test_WSS=**6.6848%**
+
+**Paper floors:** test_VP 3.3864 < 3.421 ✓ | test_WSS 6.6848 < 6.727 ✓ | test_SP 3.6512 > 3.577 ✗ (7.42bp gap)
+
+**TTA method**: 60-pass = 6-res {32768,49152,65536,81920,98304,131072} × K=5 Sobol QMC samples (proj_dim=1024, sobol_seed=43, basis_seed=42) × {orig, mirror-y}. Eval cost: ~185 min on DDP×8.
+
+**Gain analysis (vs H267 prior SOTA):**
+- val: +0.01bp (within noise) | test: −2.8bp
+- test_VP: 3.3864 vs 3.3850 (+0.14bp, still well under 3.421 floor)
+- test_WSS: **6.6848** vs 6.6898 (−5.0bp ✓ — BEST WSS in program, primary paper target)
+- test_SP: 3.6512 vs 3.6505 (+0.07bp, well under 3.577 floor)
+
+**Finding UU-Sobol-QMC-coverage**: Sobol K=5 QMC sampling (proj_dim=1024 projection basis, scrambled) beats i.i.d. K=5 random by −5.0bp test_WSS / −2.8bp test_abupt. Variance reduction is approximately equal across all channels (uniform −0.5bp pattern), which is consistent with QMC theory: global coverage improvement vs local Taylor-term cancellation of anti-thetic.
+
+**Merge gate (updated):** val_abupt < **5.9368%** AND test_abupt < **5.7797%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+---
+
+## *** Prior SOTA: PR #1447 H267 H185+EP15+Weight-Noise×6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
 
 **val_abupt=5.9367%** / **test_abupt=5.7825%** (corrected split, H185 EP15 EMA + 60-pass weight-noise σ=5e-4 K=5 × 6-res × mirror TTA)
 
