@@ -62,6 +62,7 @@ class EvalConfig:
     """
 
     checkpoint: str = ""
+    run_id: str = "yw2a5dyl"
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
     output_dir: str = "outputs/h209_eval"
@@ -396,7 +397,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             entity=os.environ.get("WANDB_ENTITY", "wandb-applied-ai-team"),
             group=cfg.wandb_group,
             name=run_name,
-            config={**asdict(cfg), "checkpoint_run_id": "yw2a5dyl", "checkpoint_epoch": ck.get("epoch")},
+            config={**asdict(cfg), "checkpoint_run_id": cfg.run_id, "checkpoint_epoch": ck.get("epoch")},
             tags=["h209", "tta", "mirror-aug", "eval-only", cfg.agent],
             reinit="finish_previous",
         )
