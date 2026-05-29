@@ -1,0 +1,53 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run qgb9r74q
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_031000-qgb9r74q
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run tanjiro/h210-swa-weighted-h112-heavy
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/qgb9r74q
+Loading donor config: runs/h210/artifacts/h112/config.yaml
+Model built: 17.41M params
+Loading SWA checkpoint: runs/h210/swa/swa_weighted_h112_heavy.pt
+SWA members=['h112', 'h164e', 'h183', 'h185', 'h190'] weights={'h112': 3.0, 'h164e': 2.0, 'h183': 1.0, 'h185': 1.0, 'h190': 1.0}
+Loading data from manifest=data/split_manifest.json root='/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511'
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+full_val/val_surface loss=1.00881 abupt_axis_rel_l2_pct=89.0998 surface_p_mae=0.24167 volume_p_mae=177.88308 wall_shear_mae=0.90363 cases=34
+  (481.2s)
+wandb: updating run metadata
+wandb: uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: 
+wandb: Run history:
+wandb:                    full_val/val_surface/_seconds ▁
+wandb:      full_val/val_surface/abupt_axis_mean_rel_l2 ▁
+wandb:  full_val/val_surface/abupt_axis_mean_rel_l2_pct ▁
+wandb:                       full_val/val_surface/cases ▁
+wandb:                        full_val/val_surface/loss ▁
+wandb:               full_val/val_surface/surface_cases ▁
+wandb:                full_val/val_surface/surface_loss ▁
+wandb:        full_val/val_surface/surface_pressure_mae ▁
+wandb:     full_val/val_surface/surface_pressure_rel_l2 ▁
+wandb: full_val/val_surface/surface_pressure_rel_l2_pct ▁
+wandb:                                              +69 ...
+wandb: 
+wandb: Run summary:
+wandb:                    full_val/val_surface/_seconds 481.15597
+wandb:      full_val/val_surface/abupt_axis_mean_rel_l2 0.891
+wandb:  full_val/val_surface/abupt_axis_mean_rel_l2_pct 89.09981
+wandb:                       full_val/val_surface/cases 34
+wandb:                        full_val/val_surface/loss 1.00881
+wandb:               full_val/val_surface/surface_cases 34
+wandb:                full_val/val_surface/surface_loss 1.02254
+wandb:        full_val/val_surface/surface_pressure_mae 0.24167
+wandb:     full_val/val_surface/surface_pressure_rel_l2 0.77588
+wandb: full_val/val_surface/surface_pressure_rel_l2_pct 77.58822
+wandb:                                              +69 ...
+wandb: 
+wandb: 🚀 View run tanjiro/h210-swa-weighted-h112-heavy at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/qgb9r74q
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_031000-qgb9r74q/logs
+test/test_surface loss=1.01769 abupt_axis_rel_l2_pct=89.2450 surface_p_mae=0.24312 volume_p_mae=178.97782 wall_shear_mae=0.90020 cases=50
+  (729.5s)
+Peak GPU memory: 9.89 GB
