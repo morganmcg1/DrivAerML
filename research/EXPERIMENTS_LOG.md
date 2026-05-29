@@ -1,3 +1,29 @@
+## 2026-05-29 08:50 — H241 frieren close + H250 frieren assigned
+
+### PR #1412 frieren H241 — CLOSED: Finding DD-extension (per-channel), no SOTA
+
+- **Hypothesis**: Per-channel α-sweep on H185 EP13 mirror TTA — exploit H235 per-channel asymmetry (WSS_y 2.4× gain vs WSS_x) by shifting α_WSS_y > 0.5
+- **W&B runs**: `gap86394` (baseline), `o7z1regc` (wss_y_heavy), `gngfoki7` (wss_y_xtreme), `w2sy2czt` (vp_light), `d1b49y9b` (combo_a), `5r8zv573` (combo_b) — group `h241-frieren-per-channel-alpha`
+
+| Config | α_wss_y | α_vp | val_abupt | test_abupt | test_VP | test_WSS |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline (H209) | 0.5 | 0.5 | **5.9755** | **5.8221** | 3.4400 | 6.7214 |
+| wss_y_heavy | 0.6 | 0.5 | 5.9763 | 5.8228 | 3.4399 | 6.7222 |
+| wss_y_xtreme | 0.7 | 0.5 | 5.9786 | 5.8250 | 3.4399 | 6.7247 |
+| vp_light | 0.5 | 0.3 | 5.9758 | 5.8227 | 3.4430 | 6.7213 |
+| combo_a | 0.6 | 0.3 | 5.9766 | 5.8234 | 3.4430 | 6.7222 |
+| combo_b | 0.6 | 0.3 (α_wss_x=0.4) | 5.9768 | 5.8236 | 3.4430 | 6.7227 |
+
+- **Outcome**: ALL 5 variants strictly worse than uniform α=0.5. Monotonically degrading curves. H209 baseline is OPTIMAL. FAILS new H236 gate by 14bp+ on all axes.
+- **Finding DD-extension (per-channel)**: Finding DD applies AT PER-CHANNEL LEVEL. Per-channel α-sweep also collapses to 0.5 per channel. The H235 per-channel Δ asymmetry (WSS_y 2.4× WSS_x) measures PREDICTION DISAGREEMENT (variance reduction signal), NOT BIAS ASYMMETRY (bias asymmetry is what would justify non-0.5 α). The Bayes-equivalent argument: under near-symmetry, both orig and mirror are unbiased estimators for each channel separately; variance-minimizing per-channel blend = 0.5 per channel.
+- **Key theoretical insight**: TTA Δ at α=0.5 is the information content of the TTA axis, not evidence for α≠0.5. Larger Δ = more variance reduction available, NOT more bias asymmetry to exploit.
+
+### New assignment: PR #1422 frieren H250 — Frequency-weighted multi-res TTA
+
+Tests whether non-uniform resolution weighting (heavy toward K=65536, which H185 was trained most on) beats H236's uniform blend. The theoretical motivation avoids Finding DD: K=65536 and K=81920 are NOT equal-bias estimators (81920 is OOD-high), so weighting by training-frequency bias is theoretically justified.
+
+---
+
 ## 2026-05-29 08:35 — H245 fern close + H249 fern assigned
 
 ### PR #1416 fern H245 — CLOSED: Finding EE preliminary (N=2), no SOTA

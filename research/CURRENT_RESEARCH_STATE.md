@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 08:35Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4e: 9 active
+**Updated**: 2026-05-29 08:50Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4f: 9 active
 
 ---
 
@@ -85,7 +85,9 @@
 | **#1418** | **nezuko** | **H247: Per-channel α multi-res TTA on H185 EP13** | per-channel α on H236 mechanism |
 | **#1419** | **alphonse** | **H248: Mirror × multi-res × point-jitter TTA on H185 EP13** | third orthogonal TTA axis |
 | ~~#1416~~ | ~~fern~~ | ~~H245: Multi-res on H183~~ | CLOSED — Finding EE(N=2): +14bp checkpoint-agnostic |
+| ~~#1412~~ | ~~frieren~~ | ~~H241: Per-channel TTA α H185~~ | CLOSED — Finding DD-extension: per-channel α also collapses to 0.5 |
 | **#1421** | **fern** | **H249: Tight-range multi-res TTA on H185 {57k,65k,73k}** | resolution spacing sensitivity |
+| **#1422** | **frieren** | **H250: Frequency-weighted multi-res TTA — heavy K=65536** | resolution weighting by training-frequency bias |
 
 **Budget remaining**: ~7.0h. edward H244 training sprint uses ~5.7h.
 
@@ -163,6 +165,7 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | **CC** | this cycle | **H148 density robustness: H148 loses only −0.6bp under 20% subsampling vs H185 losing ~100bp. H148 backbone is materially more point-density robust. Backbone selection criterion for future density-perturbing TTA.** |
 | **DD** | this cycle | **α-sweep on equal-bias TTA pairs (same-model orig+mirror) is U-shaped at α=0.5 — theoretically guaranteed. Skip α-sweeps on same-architecture TTA pairs. (alphonse H238 #1409)** |
 | **EE (prelim N=2)** | this cycle | **Multi-res TTA bonus is CHECKPOINT-INVARIANT at ~14bp. H185 (8bp mirror) +14bp; H183 (50bp mirror) +14bp. Mirror and multi-res mechanisms are independent — bonus does NOT scale with mirror sensitivity. N=3 pending (thorfinn H246).** |
+| **DD-extension** | this cycle | **Per-channel α-sweep on same-checkpoint TTA ALSO collapses to 0.5 per channel (frieren H241). H235 Δ measures prediction disagreement, NOT bias asymmetry. α-tuning is futile at both global and per-channel levels for same-checkpoint mirror TTA.** |
 
 ---
 
