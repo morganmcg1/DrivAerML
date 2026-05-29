@@ -1,0 +1,54 @@
+wandb: [wandb.Api()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+Downloading A checkpoint (run u9ue2ryb)...
+Downloading B checkpoint (run 5k58uzqc)...
+State dicts compatible: 137 tensors, total params 17,413,806
+Loading data splits (val + test)...
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+=== alpha = 1.0 ===
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: WARNING Using a boolean value for 'reinit' is deprecated. Use 'return_previous' or 'finish_previous' instead.
+wandb: setting up run vuj4sqpi
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_033642-vuj4sqpi
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run h207-alpha-1.0
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/vuj4sqpi
+wandb: updating run metadata; uploading summary
+wandb: uploading config.yaml; uploading code/interp_eval.py; uploading wandb-metadata.json; uploading requirements.txt; uploading wandb-summary.json
+wandb: 
+wandb: Run history:
+wandb:                                        alpha ▁
+wandb:                              elapsed_seconds ▁
+wandb:  full_val_primary/abupt_axis_mean_rel_l2_pct ▁
+wandb:        full_val_primary/surface_pressure_mae ▁
+wandb: full_val_primary/surface_pressure_rel_l2_pct ▁
+wandb:         full_val_primary/volume_pressure_mae ▁
+wandb:  full_val_primary/volume_pressure_rel_l2_pct ▁
+wandb:              full_val_primary/wall_shear_mae ▁
+wandb:       full_val_primary/wall_shear_rel_l2_pct ▁
+wandb:            full_val_primary/wall_shear_x_mae ▁
+wandb:                                          +19 ...
+wandb: 
+wandb: Run summary:
+wandb:                                        alpha 1
+wandb:                              elapsed_seconds 1209.7447
+wandb:  full_val_primary/abupt_axis_mean_rel_l2_pct 6.03884
+wandb:        full_val_primary/surface_pressure_mae 0.0109
+wandb: full_val_primary/surface_pressure_rel_l2_pct 4.02571
+wandb:         full_val_primary/volume_pressure_mae 6.9111
+wandb:  full_val_primary/volume_pressure_rel_l2_pct 3.50455
+wandb:              full_val_primary/wall_shear_mae 0.05945
+wandb:       full_val_primary/wall_shear_rel_l2_pct 6.86427
+wandb:            full_val_primary/wall_shear_x_mae 0.07843
+wandb:                                          +19 ...
+wandb: 
+wandb: 🚀 View run h207-alpha-1.0 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/vuj4sqpi
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_033642-vuj4sqpi/logs
+  val_abupt = 6.0388
+  test_abupt = 5.9136
+  test_WSS = 6.8287  test_VP = 3.5277  test_SP = 3.7833
+  elapsed = 1209.7s  peak_mem = 9.1 GiB
