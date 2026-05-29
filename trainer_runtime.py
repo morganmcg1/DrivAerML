@@ -285,6 +285,8 @@ def make_loaders(
         eval_surface_points=config.eval_surface_points,
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
+        train_mirror_augmentation=getattr(config, "mirror_augmentation", False),
+        train_mirror_augmentation_prob=getattr(config, "mirror_augmentation_prob", 0.5),
         debug=config.debug,
     )
     train_sampler = None

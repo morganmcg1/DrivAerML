@@ -367,6 +367,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        mirror_augmentation: bool = False,
+        mirror_augmentation_prob: float = 0.5,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +378,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.mirror_augmentation = bool(mirror_augmentation)
+        self.mirror_augmentation_prob = float(mirror_augmentation_prob)
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -457,12 +461,38 @@ class DrivAerMLSurfaceDataset(Dataset):
         metadata["volume_view_count"] = int(view.volume_view_count)
         metadata["volume_sampling_mode"] = view.sampling_mode
         metadata["joint_view_count"] = int(view.view_count)
+        surface_x = case.surface_x
+        surface_y = case.surface_y
+        volume_x = case.volume_x
+        volume_y = case.volume_y
+        mirrored = False
+        if (
+            self.mirror_augmentation
+            and self.mirror_augmentation_prob > 0.0
+            and torch.rand(1).item() < self.mirror_augmentation_prob
+        ):
+            # y=0 yaw mirror: bilateral symmetry of DrivAerML geometry.
+            # surface_x cols: [x, y, z, nx, ny, nz, area]; negate y(1) and ny(4).
+            # surface_y cols: [cp, tau_x, tau_y, tau_z]; negate tau_y(2) only.
+            # volume_x cols: [x, y, z, sdf]; negate y(1); sdf invariant.
+            # volume_y: pressure scalar; invariant.
+            surface_x = surface_x.clone()
+            surface_x[..., 1] *= -1
+            surface_x[..., 4] *= -1
+            surface_y = surface_y.clone()
+            surface_y[..., 2] *= -1
+            volume_x = volume_x.clone()
+            volume_x[..., 1] *= -1
+            mirrored = True
+        metadata["mirror_augmentation"] = self.mirror_augmentation
+        metadata["mirror_augmentation_prob"] = self.mirror_augmentation_prob
+        metadata["mirrored"] = mirrored
         return DrivAerMLCase(
             case_id=case.case_id,
-            surface_x=case.surface_x,
-            surface_y=case.surface_y,
-            volume_x=case.volume_x,
-            volume_y=case.volume_y,
+            surface_x=surface_x,
+            surface_y=surface_y,
+            volume_x=volume_x,
+            volume_y=volume_y,
             metadata=metadata,
         )
 
@@ -543,6 +573,8 @@ def load_data(
     eval_surface_points: int = 40_000,
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
+    train_mirror_augmentation: bool = False,
+    train_mirror_augmentation_prob: float = 0.5,
     debug: bool = False,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
@@ -568,6 +600,8 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        mirror_augmentation=train_mirror_augmentation,
+        mirror_augmentation_prob=train_mirror_augmentation_prob,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(

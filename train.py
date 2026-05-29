@@ -139,6 +139,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    mirror_augmentation: bool = False
+    mirror_augmentation_prob: float = 0.5
     debug: bool = False
 
 
@@ -237,6 +239,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the attention and MLP branches with a linear schedule from "
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
+        ),
+        "mirror_augmentation": (
+            "H148: Train-time y=0 yaw-mirror augmentation. DrivAerML is "
+            "bilaterally symmetric (symmetry-plane BC at y=0); every case "
+            "has an exact physically valid mirror twin. Per-sample flip "
+            "with prob --mirror-augmentation-prob (default 0.5): negate "
+            "y/normal_y in surface_x and y in volume_x; negate tau_y in "
+            "surface_y; cp, tau_x, tau_z, sdf, volume_pressure invariant. "
+            "Off for val/test. Zero parameter cost."
+        ),
+        "mirror_augmentation_prob": (
+            "H190: Per-sample probability of applying the y=0 yaw-mirror "
+            "augmentation when --mirror-augmentation is enabled. 0.5 is "
+            "the canonical H148 value; 0.25 halves the effective "
+            "augmentation frequency to test the augmentation-strength "
+            "operating point."
         ),
     }
     for field in fields(Config):
@@ -693,6 +711,8 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        mirror_augmentation=config.mirror_augmentation,
+        mirror_augmentation_prob=config.mirror_augmentation_prob,
     )
     train_sampler = None
     train_shuffle = True
@@ -905,6 +925,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"DropPath (H112): per-block schedule "
                         f"(attn=mlp) = {drop_path_schedule}"
                     )
+            wandb.summary["mirror_augmentation/enabled"] = bool(config.mirror_augmentation)
+            wandb.summary["mirror_augmentation/prob"] = float(
+                config.mirror_augmentation_prob if config.mirror_augmentation else 0.0
+            )
+            if config.mirror_augmentation:
+                print(
+                    f"Mirror augmentation (H148): enabled with "
+                    f"per-sample prob = {config.mirror_augmentation_prob}"
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -958,6 +987,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                mirror_flip_fraction = 0.0
+                if config.mirror_augmentation and getattr(batch, "metadata", None):
+                    flips = [
+                        float(m.get("mirrored", False)) for m in batch.metadata
+                    ]
+                    if flips:
+                        mirror_flip_fraction = sum(flips) / len(flips)
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1078,6 +1114,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/mirror_flip_fraction": mirror_flip_fraction,
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
