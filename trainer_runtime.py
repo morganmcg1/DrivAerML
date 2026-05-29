@@ -1290,6 +1290,16 @@ def build_lr_scheduler(
     config,
     max_epochs: int,
 ) -> torch.optim.lr_scheduler.LRScheduler:
+    schedule = getattr(config, "lr_schedule", "cosine") or "cosine"
+    if schedule == "constant":
+        # ConstantLR with factor=1.0 holds the LR at its init value forever.
+        return torch.optim.lr_scheduler.ConstantLR(
+            optimizer, factor=1.0, total_iters=0
+        )
+    if schedule != "cosine":
+        raise ValueError(
+            f"Unknown --lr-schedule '{schedule}'. Supported: cosine, constant."
+        )
     t_max = config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,

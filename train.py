@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import DrivAerMLSurfaceDataset, SurfaceBatch
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -139,6 +139,13 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    mirror_augment_p: float = 0.0
+    checkpoint_path: str = ""
+    resume_from_wandb: str = ""
+    resume_alias: str = "best"
+    epochs_already_done: int = 0
+    lr_schedule: str = "cosine"
+    save_every_epoch_checkpoint: bool = False
     debug: bool = False
 
 
@@ -238,6 +245,48 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "mirror_augment_p": (
+            "H148/H183 y=0 yaw-mirror augmentation. Per-sample independent "
+            "Bernoulli flip with probability p: negate y/normal_y in surface_x, "
+            "y in volume_x, tau_y in surface_y; cp, tau_x, tau_z, sdf, "
+            "volume_pressure invariant. 0.0 disables (default). H185 used the "
+            "boolean True flag = H183 impl = per-sample p=0.5."
+        ),
+        "checkpoint_path": (
+            "Optional path to a checkpoint .pt file. When set, the model "
+            "state_dict is loaded into both the live model and the EMA "
+            "before training starts. Use with --epochs-already-done to "
+            "preserve the optimizer-step ordering for the LR scheduler."
+        ),
+        "resume_from_wandb": (
+            "Optional W&B run id; resolves to artifact "
+            "model-<run-name>-<run-id>:<resume_alias> via the wandb API and "
+            "downloads it before training starts. Equivalent to passing "
+            "--checkpoint-path to the downloaded file."
+        ),
+        "resume_alias": (
+            "Artifact alias used with --resume-from-wandb (e.g. 'epoch-13', "
+            "'best', 'latest'). Default 'best'."
+        ),
+        "epochs_already_done": (
+            "Number of epochs already trained on the loaded checkpoint. The "
+            "training loop starts at epoch=epochs_already_done and runs until "
+            "epoch=epochs. LR scheduler is advanced this many steps so cosine "
+            "schedules pick up where the source run left off."
+        ),
+        "lr_schedule": (
+            "LR schedule shape. 'cosine' (default) builds the legacy "
+            "cosine+warmup schedule from --lr-cosine-t-max / --lr-warmup-epochs. "
+            "'constant' holds the LR at --lr for the entire run (useful for "
+            "ultra-low-LR continuation from a strong checkpoint)."
+        ),
+        "save_every_epoch_checkpoint": (
+            "When set, write outputs/<run-dir>/checkpoint_ep<N>.pt at the end "
+            "of every validation epoch (EMA weights when EMA is enabled, raw "
+            "weights otherwise). The best-checkpoint at outputs/<run-dir>/"
+            "checkpoint.pt is still maintained independently. Useful for "
+            "downstream per-epoch TTA evaluation."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -283,6 +332,124 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     if any(s <= 0.0 for s in sigmas):
         raise ValueError(f"--rff-init-sigmas must be positive: {spec!r}")
     return sigmas
+
+
+def apply_mirror_augmentation(
+    batch: SurfaceBatch, p: float
+) -> tuple[SurfaceBatch, float]:
+    """H148/H183 y=0 yaw-mirror augmentation, per-sample with probability p.
+
+    Returns the augmented batch and the empirical flip fraction for logging.
+    surface_x cols [x, y, z, nx, ny, nz, area]: negate y(1)/ny(4).
+    surface_y cols [cp, tau_x, tau_y, tau_z]: negate tau_y(2).
+    volume_x cols [x, y, z, sdf]: negate y(1); sdf invariant.
+    volume_y (pressure) invariant.
+    """
+    if p <= 0.0:
+        return batch, 0.0
+    B = batch.surface_x.shape[0]
+    flip = torch.rand(B) < p
+    if not flip.any():
+        return batch, 0.0
+    sign = torch.where(flip, -1.0, 1.0).to(batch.surface_x.dtype)
+    sign_col = sign[:, None]
+    surface_x = batch.surface_x.clone()
+    surface_x[..., 1] = surface_x[..., 1] * sign_col
+    surface_x[..., 4] = surface_x[..., 4] * sign_col
+    surface_y = batch.surface_y.clone()
+    surface_y[..., 2] = surface_y[..., 2] * sign_col
+    volume_x = batch.volume_x.clone()
+    volume_x[..., 1] = volume_x[..., 1] * sign_col
+    return SurfaceBatch(
+        case_ids=batch.case_ids,
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=batch.metadata,
+    ), float(flip.float().mean().item())
+
+
+def resolve_resume_checkpoint(config: "Config", is_main: bool) -> str:
+    """Resolve --resume-from-wandb to a local checkpoint path on rank 0.
+
+    Returns the resolved path, or the original --checkpoint-path if no wandb
+    resume was requested. Other ranks block until rank 0 has the file ready.
+    """
+    if not config.resume_from_wandb:
+        return config.checkpoint_path
+    # Defer wandb import / network call to rank 0.
+    if is_main:
+        api_run_path = config.resume_from_wandb
+        # Allow either bare run id ("yw2a5dyl") or full "entity/project/runid".
+        if "/" not in api_run_path:
+            entity = os.environ.get("WANDB_ENTITY", "wandb-applied-ai-team")
+            project = os.environ.get("WANDB_PROJECT", "senpai-v1-drivaerml-ddp8")
+            api_run_path = f"{entity}/{project}/{api_run_path}"
+        api = wandb.Api()
+        run = api.run(api_run_path)
+        # Find the (single) model artifact logged by the run.
+        model_arts = [a for a in run.logged_artifacts() if a.type == "model"]
+        if not model_arts:
+            raise RuntimeError(f"No model artifact found on W&B run {api_run_path}")
+        # If multiple, pick the one matching --resume-alias.
+        chosen = None
+        for art in model_arts:
+            if config.resume_alias in art.aliases:
+                chosen = art
+                break
+        if chosen is None:
+            chosen = model_arts[0]
+            print(
+                f"Warning: alias '{config.resume_alias}' not found on artifacts; "
+                f"falling back to first model artifact ({chosen.name})."
+            )
+        download_dir = Path(config.output_dir) / "resume_ckpt"
+        download_dir.mkdir(parents=True, exist_ok=True)
+        chosen.download(root=str(download_dir))
+        ckpt_path = str(download_dir / "checkpoint.pt")
+        print(f"Resumed checkpoint downloaded to {ckpt_path}")
+    else:
+        ckpt_path = str(Path(config.output_dir) / "resume_ckpt" / "checkpoint.pt")
+    return ckpt_path
+
+
+def load_checkpoint_into_model(
+    ckpt_path: str,
+    model: nn.Module,
+    ema: "EMA | None",
+    is_main: bool,
+) -> int:
+    """Load a checkpoint .pt file into both the live model and the EMA shadow.
+
+    Returns the source epoch number recorded in the checkpoint, or 0 if missing.
+    """
+    ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state_dict = ck["model"]
+    state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+    # Strip any torch.compile "_orig_mod." prefix.
+    state_dict = {k.removeprefix("_orig_mod."): v for k, v in state_dict.items()}
+    target = unwrap_model(model)
+    missing, unexpected = target.load_state_dict(state_dict, strict=False)
+    if is_main:
+        print(
+            f"Loaded checkpoint from {ckpt_path} "
+            f"epoch={ck.get('epoch')} source={ck.get('checkpoint_source')}: "
+            f"missing={len(missing)} unexpected={len(unexpected)}"
+        )
+        if missing:
+            print(f"  missing[:5]={missing[:5]}")
+        if unexpected:
+            print(f"  unexpected[:5]={unexpected[:5]}")
+    if ema is not None:
+        # Re-seed EMA from the loaded weights so the continuation EMA tracks the
+        # same parameters that produced the source checkpoint.
+        for name, param in target.named_parameters():
+            if param.requires_grad and name in ema.shadow:
+                ema.shadow[name].data.copy_(param.detach().data)
+    return int(ck.get("epoch") or 0)
 
 
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
@@ -733,8 +900,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
         if vol_points_schedule:
+            initial_vol_epoch = max(0, int(config.epochs_already_done))
             initial_vol_points = vol_points_for_epoch(
-                vol_points_schedule, 0, config.train_volume_points
+                vol_points_schedule, initial_vol_epoch, config.train_volume_points
             )
             if config.debug:
                 initial_vol_points = min(initial_vol_points, 8_192)
@@ -743,6 +911,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(
                     "Volume-points curriculum: "
                     + ", ".join(f"ep{e}->{p}" for e, p in vol_points_schedule)
+                    + (
+                        f" (starting at ep{initial_vol_epoch}={initial_vol_points})"
+                        if initial_vol_epoch > 0
+                        else ""
+                    )
                 )
         current_train_vol_points = config.train_volume_points
 
@@ -793,6 +966,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+
+        # Resume from checkpoint: download (rank 0) -> barrier -> all ranks load.
+        resume_ckpt_path = resolve_resume_checkpoint(config, state.is_main)
+        distributed_barrier(state)
+        if resume_ckpt_path:
+            source_epoch = load_checkpoint_into_model(
+                resume_ckpt_path, model, ema, state.is_main
+            )
+            if state.is_main:
+                print(
+                    f"Resume: source checkpoint epoch={source_epoch}; "
+                    f"epochs_already_done={config.epochs_already_done}; "
+                    f"will train epochs {config.epochs_already_done + 1}..{max_epochs}."
+                )
+        else:
+            source_epoch = 0
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
@@ -914,7 +1103,17 @@ def main(argv: Iterable[str] | None = None) -> None:
         timeout_hit = False
         train_start = time.time()
 
-        for epoch in range(max_epochs):
+        start_epoch = max(0, int(config.epochs_already_done))
+        if start_epoch >= max_epochs:
+            raise ValueError(
+                f"--epochs-already-done={start_epoch} must be < --epochs={max_epochs}"
+            )
+        # Advance the scheduler so cosine schedules pick up where the source
+        # run left off. ConstantLR is a no-op under scheduler.step() anyway.
+        for _ in range(start_epoch):
+            scheduler.step()
+
+        for epoch in range(start_epoch, max_epochs):
             if vol_points_schedule:
                 desired_vol_points = vol_points_for_epoch(
                     vol_points_schedule, epoch, config.train_volume_points
@@ -958,6 +1157,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                mirror_flip_fraction = 0.0
+                if config.mirror_augment_p > 0.0:
+                    batch, mirror_flip_fraction = apply_mirror_augmentation(
+                        batch, config.mirror_augment_p
+                    )
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1078,6 +1282,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/mirror_flip_fraction": mirror_flip_fraction,
+                    "train/mirror_augment_p": config.mirror_augment_p,
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
@@ -1315,6 +1521,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
                         },
                         model_path,
+                    )
+                if config.save_every_epoch_checkpoint:
+                    ep_path = output_dir / f"checkpoint_ep{epoch + 1}.pt"
+                    torch.save(
+                        {
+                            "model": base_model.state_dict(),
+                            "config": asdict(config),
+                            "epoch": epoch + 1,
+                            "val_metrics": val_metrics,
+                            "checkpoint_source": best_checkpoint_source,
+                            "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                        },
+                        ep_path,
                     )
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
