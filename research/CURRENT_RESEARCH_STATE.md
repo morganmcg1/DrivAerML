@@ -1,18 +1,23 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 07:20Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4c: 8 sprints active (frieren/tanjiro re-spun; Findings Q@N=8 + Z banked)
+**Updated**: 2026-05-29 08:00Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4d: 7 active
 
 ---
 
-## Current SOTA (unchanged)
+## Current SOTA (UPDATED — H236 just merged)
 
 | Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP |
 |---|---:|---:|---:|---:|---:|
 | Prior SOTA H112 (PR #1283) | 6.1358% | 5.839% | 6.752% | 3.421% | 3.695% |
-| **SOTA H185+TTA (PR #1382)** | **5.9755%** | **5.8221%** | **6.7214%** | 3.4400% | 3.6806% |
+| SOTA H185+TTA (PR #1382) | 5.9755% | 5.8221% | 6.7214% | 3.4400% | 3.6806% |
+| **NEW SOTA H236 multi-res TTA (PR #1408)** | **5.9613%** | **5.8081%** | **6.7130%** | **3.4033%** | 3.6759% |
 | Transolver-3 target (Morgan) | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% |
 
-**Merge gate**: val_abupt < **5.9755%** AND test_abupt < **5.8221%**
+**Merge gate (updated)**: val_abupt < **5.9613%** AND test_abupt < **5.8081%**
+
+**Paper floors crossed**: test_VP 3.4033 ≤ 3.421 ✓ | test_WSS 6.7130 ≤ 6.727 ✓ | test_SP 3.6759 > 3.577 ✗
+
+**Method**: {49152, 65536, 81920} × {orig, mirror-y} = 6-pass TTA on H185 EP13 EMA. -14bp val, -14bp test over H209.
 
 ---
 
@@ -50,25 +55,40 @@
 | ~~#1405~~ | alphonse | H232: Intra-trajectory SWA | ABORTED — Finding X banked |
 | ~~#1407~~ | frieren | H235: TTA-mirror N≥6 | CLOSED — Finding Q UPGRADED to N=8, publication-grade |
 
-### Round 4c active fleet (8 PRs, 4 re-spins)
+### Round 4c CLOSED (multiple Findings banked)
+
+| PR | Student | Outcome |
+|---|---|---|
+| ~~#1404~~ | askeladd H231 | CLOSED — Finding AA: mesh-subsample TTA falsified (no point-density invariance) |
+| ~~#1406~~ | edward H233 | CLOSED — Finding BB: permutation invariant, null TTA gain |
+| **#1408** | **nezuko H236** | **MERGED NEW SOTA — multi-res TTA val 5.9613 / test 5.8081** |
+| ~~#1410~~ | thorfinn H239 | Running (mesh-subsample on H148, will confirm Finding AA at N=3) |
+| ~~#1411~~ | fern H240 | CLOSED — Finding AA confirmed on H183 at N=2 |
+
+### Round 4d active fleet (7 PRs)
 
 | PR | Student | Hypothesis | Mechanism |
 |---|---|---|---|
-| #1404 | askeladd | H231: Mesh-subsample TTA on H185 (80%, 4-pass) | input subset sampling |
-| #1406 | edward | H233: Point permutation TTA | attention perm invariance test |
-| #1408 | nezuko | H236: Multi-resolution TTA | resolution averaging |
-| #1409 | alphonse | H238: Weighted α-sweep on H185 EP13 | TTA α-tuning (uniform across channels) |
-| #1410 | thorfinn | H239: Mesh-subsample TTA on H148 EP13 (best-test-margin) | mesh subsample, new checkpoint |
-| #1411 | fern | H240: Mesh-subsample TTA on H183 EP13 (closest-to-val-gate, 13bp gap) | mesh subsample, new checkpoint |
-| #1412 | frieren | H241: Per-channel TTA α-sweep on H185 EP13 (exploit channel asymmetry) | TTA per-channel α-tuning |
-| #1413 | tanjiro | H242: Weight-space Gaussian-noise TTA on H185 EP13 (loss surface flatness probe) | weight-space perturbation |
+| #1409 | alphonse | H238: Weighted α-sweep on H185 EP13 | TTA α-tuning (vs new gate 5.9613) |
+| #1410 | thorfinn | H239: Mesh-subsample H148 (finding-confirm) | awaiting terminal |
+| #1412 | frieren | H241: Per-channel TTA α on H185 EP13 | per-channel α (vs new gate) |
+| #1413 | tanjiro | H242: Weight-space noise TTA on H185 | weight-space perturbation |
+| #1414 | askeladd | H243: Extended multi-res range {32k-98k}×{orig,mirror}=10-pass | eval-only ~25min |
+| #1415 | edward | H244: H185 EP14-16 cosine extension (TRAINING) | ~340min training + TTA |
+| #1416 | fern | H245: Multi-res TTA on H183 EP13 | eval-only ~20min |
 
-**Expected first result**: ~30min for new respins. Budget remaining: ~2.5h.
+**Budget remaining**: ~7.5h. edward H244 training sprint uses ~5.7h.
 
-**Coverage triangulation**:
-- **Mesh-subsample TTA**: askeladd (H185), thorfinn (H148), fern (H183) — same mechanism, 3 checkpoints
-- **α-blending on H185 EP13**: alphonse (uniform α), frieren (per-channel α) — same checkpoint, two tuning strategies
-- **Novel mechanisms**: edward (permutation), nezuko (multi-res), tanjiro (weight-space noise)
+**Findings banked (input-space TTA exhaustion map)**:
+| Mechanism | Result |
+|---|---|
+| Mirror-y | ✓ VALID (only valid input-space TTA) |
+| Rotation θ≥0.1° | ✗ FALSIFIED (changes physics) |
+| Coordinate scale ε=±2% | ✗ FALSIFIED (Reynolds regime change) |
+| Mesh-subsample 80-95% | ✗ FALSIFIED (no point-density invariance) |
+| Point permutation | NULL (invariant, no diversity) |
+| Gaussian input noise | ✗ FALSIFIED (no usable σ band) |
+| Multi-resolution | ✓ VALID — −14bp (H236 MERGED) |
 
 ---
 
@@ -128,6 +148,8 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | **X** | this cycle | **Intra-trajectory SWA blocked on yw2a5dyl — per-EP EMA never persisted by train.py (Finding X banked from alphonse H232 abort #1405)** |
 | **Z** | this cycle | **Gaussian-noise TTA infeasible — no usable σ band (banked from tanjiro H229 #1402). Sub-finding: WSS more noise-sensitive than VP/SP.** |
 | **Q@N=8** | this cycle | **TTA-mirror on mirror-aug-trained EP13 EMA: mean -4.42bp test, stdev 0.77 — 8/8 checkpoints improve. Publication-grade (frieren H235 #1407).** |
+| **AA** | this cycle | **Mesh-subsample TTA falsified at 80%+95% on H185 (H231) and H183 (H240). No point-density invariance. MC bias correction insufficient. N=2 checkpoints.** |
+| **BB** | this cycle | **Permutation TTA null — H185 slice-attention empirically permutation-invariant. Null signal, dilutes mirror weight (edward H233 #1406).** |
 
 ---
 

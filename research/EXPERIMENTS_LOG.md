@@ -1,3 +1,45 @@
+## 2026-05-29 08:00 — NEW SOTA MERGED (PR #1408 H236) + Round 4c closures + Round 4d launch
+
+### PR #1408 nezuko H236 — MERGED NEW SOTA: multi-resolution TTA
+
+**val 5.9613 / test 5.8081 / test_WSS 6.7130 / test_VP 3.4033**
+
+- **Method**: {49152, 65536, 81920} × {orig, mirror-y} = 6-pass TTA on H185 EP13 EMA (yw2a5dyl)
+- **Gain vs H209**: -14bp val, -14bp test. test_VP crosses paper floor (3.4033 ≤ 3.421 ✓)
+- **W&B run**: `faa8ymsy` (group h236-nezuko-multi-res-tta)
+- **Key insight**: multi-res averaging reduces volume-context sampling variance (different VP gain path vs mirror's y-symmetry exploitation). Mechanisms orthogonal → constructive compound.
+- **VP benefit**: +0.037pp over H209 — volume pressure benefits most from resolution-stride variance averaging
+
+### PR #1404 askeladd H231 — CLOSED, Finding AA banked
+
+- Best result: mirror+subsample_mc val 5.9832 / test 5.8289 — fails both gates
+- Mechanism: surface_preds *= surface_mask zeros subsampled-out points → architecture-induced bias; MC correction restores calibration but underlying degradation from OOD density
+- At 95% keep: subsample_only_mc adds ~2bp, but mirror+subsample still 10bp worse than mirror alone
+- **Finding AA (banked)**: Mesh-point subsampling TTA falsified — model has no point-density invariance. Slice attention implicitly memorizes full-density profiles.
+
+### PR #1406 edward H233 — CLOSED, Finding BB banked
+
+- permute_only: +0.0022pp improvement (bf16 noise floor only)
+- mirror_permute: val 5.9841/test 5.8302 — worse than mirror alone (dilution effect)
+- **Finding BB (banked)**: H185 slice-attention empirically permutation-invariant. Positive theoretical confirmation. Null TTA signal.
+
+### PR #1411 fern H240 — CLOSED, Finding AA confirmed N=2
+
+- mirror×subsample_mc val 6.0021 vs mirror_only 5.9885 — strictly worse
+- Same mechanism as askeladd H231 on H185 → cross-checkpoint consistency
+
+### Round 4d new assignments
+
+| PR | Student | Hypothesis | Type |
+|---|---|---|---|
+| #1414 | askeladd | H243: Extended multi-res {32k-98k}×{orig,mirror}=10-pass on H185 | eval ~25min |
+| #1415 | edward | H244: H185 EP14-16 cosine extension (training from EP13 yw2a5dyl) | ~340min training |
+| #1416 | fern | H245: Multi-res TTA on H183 EP13 (same H236 method, different checkpoint) | eval ~20min |
+
+Still running: thorfinn #1410 (mesh-subsample H148 — Finding AA confirmation); alphonse #1409, frieren #1412, tanjiro #1413 (α-sweeps and weight-noise).
+
+---
+
 ## 2026-05-29 07:20 — Round 4c TERMINATIONS: PR #1407 frieren + PR #1402 tanjiro closed; H241/H242 respins
 
 ### PR #1407 frieren H235 — TTA-mirror cross-checkpoint sweep N≥6 — CLOSED, Finding Q upgraded to N=8
