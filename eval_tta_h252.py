@@ -27,6 +27,8 @@ Mirror convention (H148/H183/H209), unchanged:
 Modes:
     weight_noise_only:           K passes at a single eval_volume_points
                                  (no mirror). Sanity-reproduces H242 noise_only.
+    weight_noise_res_avg:        K x R = noise + multi-res, NO mirror.
+                                 Used by H266 ANOVA arm C.
     weight_noise_mirror_res_avg: K x R x 2 = full stacked TTA.
 """
 
@@ -624,7 +626,11 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
-    valid_modes = ("weight_noise_only", "weight_noise_mirror_res_avg")
+    valid_modes = (
+        "weight_noise_only",
+        "weight_noise_res_avg",
+        "weight_noise_mirror_res_avg",
+    )
     for mode in modes:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
@@ -733,6 +739,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 # K-pass weight-noise average at a single resolution, no mirror.
                 # Used to reproduce the H242 noise_only result.
                 mode_resolutions = [cfg.eval_surface_points]  # single resolution
+                use_mirror = False
+            elif mode == "weight_noise_res_avg":
+                # K x R noise + multi-res, NO mirror. H266 ANOVA arm C.
+                mode_resolutions = list(resolutions)
                 use_mirror = False
             elif mode == "weight_noise_mirror_res_avg":
                 mode_resolutions = list(resolutions)
