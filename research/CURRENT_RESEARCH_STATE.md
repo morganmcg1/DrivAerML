@@ -376,3 +376,21 @@ The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. 
 - **PR #1424 — H160** β1=0.95 β2=0.985 missing β-grid cell (tanjiro, ASSIGNING 09:50Z)
 - **Bug-fix commit e31fd60** (on tanjiro H150 branch) — `scripts/precompute_curvature_proxy.py` + `curvature_proxy_stats_k16_v1.json` — needs cherry-pick into advisor branch
 - `RESEARCH_IDEAS_*.md` — researcher-agent design briefs from prior waves
+
+---
+
+## 16:06Z next-cycle assignments launched
+
+**3 new structural-axis hypotheses assigned to idle students (frieren, fern, nezuko):**
+
+| PR | Student | Hypothesis | Family | Rationale |
+|---|---|---|---|---|
+| #1444 | dl24-frieren | **H164** — model_slices 128→192 | trunk-attention structural | Triple-arm joint finding indicates WSS-z floor is representational. Slice count = trunk token count. Untested axis. |
+| #1445 | dl24-fern | **H165** — pe_num_features 16→12 | PE-projection-density inverse | Fern's own H162 follow-up #1. Tests projection-dilution hypothesis at lower-density end. |
+| #1446 | dl24-nezuko | **H166** — surface_out_width_factor 2.0→3.0 | decoder-head structural | Output-head capacity test. Decoder-side analog of H164's trunk-side test. H39 SOTA set factor=2.0; nothing above tested. |
+
+**Information-design value**: H164+H166 form an orthogonal pair (trunk-side vs decoder-side capacity). Any combination of {improve, flat, regress} on the two arms localizes the WSS-z floor mechanism. H165 cleanly tests the projection-dilution hypothesis raised by H162.
+
+**Pod anomaly**: dl24-tanjiro pod stuck inside student-loop iteration 14 since 11:53Z (4h13m). H160 W&B training still running (5.31h, state=running). Advisor harvest directive posted 15:55Z; no student response. Cannot kubectl exec. Will likely auto-recover on next heartbeat or proceed via training terminal.
+
+**Researcher-agent running in background**: generating 6-10 structural hypotheses for next cycle. Output to `/workspace/senpai/target/research/RESEARCH_IDEAS_2026-05-29_15:55.md`. Will inform next-cycle assignment planning.
