@@ -1,22 +1,30 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 10:30Z._
+_Last updated: 2026-05-29 10:45Z._
 
 **CRITICAL — BASELINE.md correction (commit ea99dda was wrong):** nezuko discovered in PR #1360 that the 2026-05-28 H147 SOTA section copy-pasted H39's `yym5oa8x` test_VP/test_SP into the H147 row. Verified by W&B query of `k6q4c3on`. Correct H147 metrics: **test_VP=3.4014%** (clears 3.643% floor by 0.242pp) and **test_SP=3.5634%** (clears 3.577% floor by 0.014pp). **H147 actually CLEARS all 4 floors**, not 3-of-4. Patched in BASELINE.md this session.
 
 **Consequence — β-decoupling finding I banked from H150 is RETRACTED.** Under the corrected H147 baseline, H150 (β1=0.97/β2=0.985) regressed on ALL 4 metrics (WSS +0.024pp, VP +0.10pp, SP +0.045pp and crosses the 3.577% cap by +0.032pp, ABUPT +0.054pp). The "pressure heads prefer β2↑" mechanism is FALSE. Simpler truth: **β1=0.95, β2=0.98 is the joint optimum on every test metric.** Wave 41 β-grid closure remains the wave's finding but is now stronger (single optimum, not a head-axis tradeoff). Corrigendum posted on closed PR #1359.
 
-**Session events 09:50Z → 10:30Z:**
+**RETRACTION — H157b is NOT the leading candidate (per fern's 10:35Z report):** my 09:55Z "EP9.28 val_WSS=6.5085%" heartbeat was a W&B chart-axis misread of a step that does not exist in `ew63yb7p` `scan_history`. The actual H157b trajectory had only 7 val passes (EP1-EP7) then **diverged at EP7→EP8**: calm EP7 train (grad_norm ≤ 0.06) → grad spike at step 83584 (80.9) → nonfinite gradients at step 85113 → 201-skip auto-abort at step 86363. Fern is harvesting EP6 EMA-best (val_WSS=6.921%, val_ABUPT=6.078%) for test eval. Projected test_WSS ~6.85-6.90% — **non-merge expected**.
+
+**NEW FINDING — high-β Lion + Charbonnier-aux compound instability:**
+- H150 (β=0.97/0.985, NO Charbonnier) ran 30 EP stable.
+- H147 (β=0.95/0.98 + Charbonnier 0.1) ran 30 EP stable.
+- **H157b (β=0.97/0.985 + Charbonnier 0.1) blew up at EP7.87.** The compound is the failure mode — high-β Lion momentum carries through Charbonnier's sharp-near-eps gradient into a divergent basin.
+- **Implication:** H159 (frieren, β=0.95 + VP-Charb 0.3) and H161 (nezuko, β=0.95 + WSS-Charb 0.3) are on safer H147-β. Both should ride the heavier weight without divergence — but H161 grad-norm watch past EP4 is prudent (3x H157b's weight).
+
+**Session events 09:50Z → 10:45Z:**
 - **H151 TERMINAL CLOSED PR #1360 (no merge):** test_WSS=6.5439% (+0.003pp — noise tie); regressed VP/SP/ABUPT; crossed SP cap by +0.035pp. Headline finding from nezuko: **best-val=EP25 in BOTH H151 (T_max=45) and H147 (T_max=30)** — H147 recipe at convergence ceiling under same recipe; "more epochs" axis is exhausted.
 - **H150 TERMINAL CLOSED PR #1359 (no merge):** verdict unchanged but reasoning corrected (see retraction above).
-- **H158 ABORTED EP1 PR #1420 CLOSED:** advisor error stripped 4 H147 SOTA defaults; corrected stack used for H159+H160.
-- **H159 (vol_p_charbonnier=0.3 on CORRECTED H147 stack)** assigned to frieren PR #1423 — tests heavier VP regularization to free GradNorm head-weight for WSS. 8-EP T_max=8.
-- **H160 (β1=0.95, β2=0.985 — last untested β-grid cell)** assigned to tanjiro PR #1424 — isolates β2-only mover. Under corrected baseline, H160 closes the β-grid cleanly in all 3 outcomes.
-- **H161 (cosine restart / 2-cycle on H147 stack)** to be assigned to nezuko next — natural follow-up to her own convergence-ceiling finding.
-- **H157b EP9.28=6.5085% val_WSS** running on fern PR #1385 — descent rate -0.103pp/EP; below H147 final val by 0.08pp; projected test_WSS 6.41-6.46% — **leading current merge candidate**. EP15 realistic terminal ~14:46Z. Watch test_SP (H150-β stack may push SP over 3.577% cap, like H150 did).
+- **H158 ABORTED EP1 PR #1420 CLOSED:** advisor error stripped 4 H147 SOTA defaults; corrected stack used for H159+H160+H161.
+- **H157b DIVERGED EP7.87 PR #1385:** fern harvesting EP6 EMA-best for test eval; closure expected ~11:30Z; non-merge expected; finding = high-β × Charbonnier compound instability (see above).
+- **H159 (vol_p_charbonnier=0.3 on CORRECTED H147 stack)** **launched** on frieren PR #1423 — 8 DDP ranks at step ~6193 (rt 0.40h, EP~0.5).
+- **H160 (β1=0.95, β2=0.985 — last untested β-grid cell)** assigned to tanjiro PR #1424 — **not yet launched on W&B** as of 10:42Z; tanjiro pod iteration 10 in progress. Will follow up at 10:50Z if no smoke run visible.
+- **H161 (wss_charbonnier=0.3 axes=z on CORRECTED H147 stack — WSS-axis analog of H159)** assigned to nezuko PR #1427 at 10:37Z; nezuko's next poll cycle (~10:46Z) will pick it up.
 - **Bug-fix commit e31fd60** (precompute_curvature_proxy.py + curvature_proxy_stats_k16_v1.json) — cherry-pick pending; needed for any future advisor pulling the H147 stack from cold env.
 
-**HUMAN DEADLINE 15:45Z (5h15m remaining)** — H157b EP15 terminal ~14:46Z; H159 8-EP terminal ~15:25Z; H160 8-EP terminal ~15:30Z; H161 8-EP terminal ~15:30Z.
+**HUMAN DEADLINE 15:45Z (5h0m remaining)** — H157b EP6 EMA eval ~11:30Z; H159 8-EP terminal ~15:25Z; H160 8-EP terminal ~15:30Z (if launched by 11:00Z); H161 8-EP terminal ~15:30Z.
 
 ---
 
@@ -58,14 +66,14 @@ _Last updated: 2026-05-29 10:30Z._
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-29 10:30Z)
+### Fleet status (2026-05-29 10:45Z)
 
 | Run ID | Student | H# | Epoch | val_WSS | val_ABUPT | State | vs H147 |
 |---|---|---|---:|---:|---:|---|---|
-| ew63yb7p | fern (dl24) | **H157b** (wss_charbonnier=0.1 axes=z on H150-β stack) | **9.28** | **6.5085%** | (last 6.078% EP6.91) | **🏆 LEADING — running** | val_WSS already below H147 final val by 0.08pp; descent rate -0.103pp/EP; projected test_WSS 6.41-6.46% (beats H147 by 0.08-0.13pp); EP15 terminal ~14:46Z; **WATCH test_SP** (H150-β stack may cross 3.577% cap like H150 did) |
-| (launching) | frieren (dl24) | **H159** (vol_p_charbonnier=0.3 on CORRECTED H147 stack) | — | — | — | PR #1423 | 8-EP T_max=8; tests heavier VP reg to free GradNorm head-weight for WSS; deadline 15:25Z |
-| (launching) | tanjiro (dl24) | **H160** (β1=0.95, β2=0.985 — last untested β-grid cell) | — | — | — | PR #1424 | 8-EP T_max=8; isolates β2-only mover; under corrected baseline, β-grid fully closes regardless of outcome |
-| (assigning) | nezuko (dl24) | **H161** (cosine 2-cycle restart on H147 stack) | — | — | — | PR pending | natural follow-up to nezuko's own convergence-ceiling finding from H151; 8-EP restart at EP4; deadline ~15:30Z |
+| ew63yb7p + q00o0xqk (eval) | fern (dl24) | **H157b** (wss_charbonnier=0.1 axes=z on H150-β stack) | **DIVERGED EP7.87** — EP6 EMA-best harvest | 6.921% (EP6 EMA) | 6.078% (EP6 EMA) | **CLOSURE — non-merge expected** PR #1385 | Train run aborted by 201-skip rule after grad nonfinite at step 85113. Test eval `q00o0xqk` running on EP6 EMA-best ckpt. Projected test_WSS ~6.85-6.90% — regresses H147 6.5409%. **Finding banked: β=0.97/0.985 + Charbonnier=0.1 is unstable past EP7**; H150-β alone or H147-β + Charb alone are both stable. |
+| ze0shldj+7 ranks (DDP8) | frieren (dl24) | **H159** (vol_p_charbonnier=0.3 on CORRECTED H147 stack) | ~0.5 (step 6193, rt 0.40h) | — | — | **RUNNING** PR #1423 | 8-EP T_max=8; tests heavier VP reg to free GradNorm head-weight for WSS. EP1 read ~11:00Z, terminal ~15:25Z |
+| (not yet launched) | tanjiro (dl24) | **H160** (β1=0.95, β2=0.985 — last untested β-grid cell) | — | — | — | PR #1424 | Assigned 09:56Z; tanjiro pod iteration 10 in progress at 10:41Z but no smoke run visible on W&B at 10:42Z. Nudge if not launched by 11:00Z. 8-EP T_max=8. |
+| (assigning, polling) | nezuko (dl24) | **H161** (wss_charbonnier=0.3 axes=z on CORRECTED H147 stack — WSS analog of H159) | — | — | — | PR #1427 | Assigned 10:37Z; nezuko polls at ~10:46Z. 8-EP T_max=8; hypothesis-test metric = test_WSS_z (H147 8.4882%). Cross-validates with H159 on Charbonnier-axis upweighting. |
 | d20sf8th | nezuko (dl24) | H151 (extended 45EP canonical) | 31 (truncated by wall-clock) | 6.5894% (EP33 final visible) | 7.27% (terminal) | **CLOSED PR #1360 10:30Z** | ⛔ test_WSS=6.5439% (+0.003pp noise tie); regresses VP/SP/ABUPT, crosses SP cap by +0.035pp; **best-val=EP25 in BOTH H151 and H147 = recipe at convergence ceiling** |
 | 5bgp2ryq + (eval) | (tanjiro prev) | H150 (β1=0.97/β2=0.985) | 30 (terminal, EMA EP20) | 6.6223% (val EMA) | 5.8831% (val EMA) | **CLOSED PR #1359 09:50Z (β-decoupling retracted 10:30Z)** | ⛔ test_WSS=6.5650% (+0.024pp); ⛔ test_VP=3.5016% (+0.10pp vs corrected H147 3.4014%); ⛔ test_SP=3.6088% (over 3.577% cap by +0.032pp); H150 regressed ALL 4 metrics |
 | wyf77dqa | (frieren prev) | H158 (vol_p_charbonnier=0.1, stripped stack) | 2 (aborted) | 16.11% (EP1) | 14.32% (EP1) | **CLOSED PR #1420 09:50Z** | ⛔ ADVISOR ERROR: missing 4 H147 SOTA flags |
