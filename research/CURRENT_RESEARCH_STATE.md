@@ -1,24 +1,28 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 13:50Z._
+_Last updated: 2026-05-29 14:10Z._
 
-**13:50Z EP4 trajectory check — fleet status snapshot:**
+**14:10Z EP5 trajectory check — fleet status snapshot:**
 
-| Hyp | Run | rt | EP1 | EP2 | EP3 | EP4 | vs H147 EP4 (~6.85%) |
-|-----|-----|----|------|------|------|------|------|
-| H147 SOTA | k6q4c3on | — | 12.82 | 7.26 | 6.98 | (interp 6.85) | reference |
-| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7 | 3.58h | 12.85 | 7.30 | 6.98 | **6.85 ★** | TIED to H147 — strongest arm |
-| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 3.11h | 12.87 | 7.28 | 7.00 | 6.90 | +0.05pp (marginal) |
-| **H161** wss_charb=0.3 z (nezuko) | y9xrfk5t | 3.05h | 12.75 | 7.36 | 7.13 | 7.05 | **+0.20pp (kill-watch)** |
-| **H162** pe_features=24 (fern) | 7vdb5zwz | 2.38h | 12.80 | 7.35 | 7.03 | EP3 only | EP3 +0.05pp behind |
+| Hyp | Run | rt | EP1 | EP2 | EP3 | EP4 | EP5 | vs H147 EP5 (6.75%) |
+|-----|-----|----|------|------|------|------|------|------|
+| H147 SOTA | k6q4c3on | — | 12.82 | 7.26 | 6.98 | (interp 6.85) | **6.75** | reference |
+| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7 | 3.85h | 12.85 | 7.30 | 6.98 | 6.85 | **6.787 ★** | +0.037pp (TIED — strongest) |
+| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 3.39h | 12.87 | 7.28 | 7.00 | 6.90 | EP4 only | EP5 expected ~14:30Z |
+| **H161** wss_charb=0.3 z (nezuko) | y9xrfk5t | 3.33h | 12.75 | 7.36 | 7.13 | 7.05 | EP4 only | kill-watch on EP5>6.95% |
+| **H162** pe_features=24 (fern) | 7vdb5zwz | 2.65h | 12.80 | 7.35 | 7.03 | EP3 only | — | tightest budget — terminal ~5-15min past deadline |
 
-**Key 13:50Z reads:**
-- H159 (vol_p_charbonnier=0.3) is **tracking H147 trajectory exactly through EP4**. WSS=6.85%, VP=3.92% (no regression risk). Strongest candidate.
-- H161 (wss_charbonnier=0.3 z) **WSS-Charbonnier is hurting WSS, not helping** — gap to H147 widens monotonically EP1→EP4 (Δ -0.07, +0.10, +0.15, +0.20). Useful negative evidence about wss vs vol_p Charbonnier asymmetry. Kill watch on EP5 ≥ 6.95%.
-- H160 β2=0.985 axis is stable but marginally worse than β2=0.98 (consistent with H147 being β-grid optimum).
-- H162 pe_features=24 EP3 is +0.05pp behind H147 EP3 — within noise, not a clean win signal yet.
+**Key 14:10Z reads:**
+- **H159 EP5 = 6.787%** vs H147 EP5 = 6.75% — Δ +0.037pp = noise tie. Tracking H147 cleanly through 5 epochs. VP/SP/ABUPT all healthy. **Strongest candidate**, continue.
+- H161 (wss_charbonnier=0.3 z) gap grew monotonically EP1→EP4 (Δ -0.07, +0.10, +0.15, +0.20). Kill-watch ACTIVE for EP5 reading. **Useful negative finding**: WSS-axis Charbonnier hurts WSS while VP-axis Charbonnier (H159) tracks H147 cleanly — confirms Charbonnier mechanism is target-asymmetric.
+- H160 β2=0.985 axis still stable +0.02-0.05pp behind H147 — within noise. EP5 imminent.
+- H162 pe_features=24 EP3 +0.05pp behind H147 — slowest run, will only hit EP5 5-15min past deadline.
 
-**Deadline:** 15:45Z = 1h55m remaining. H160/H162 will likely finish 5-23 min past deadline; consider aborting at EP7 for test harvest.
+**Deadline:** 15:45Z = 1h35m remaining. At observed ~50min/EP rate:
+- H159: EP7 by deadline (best-val checkpoint to submit)
+- H160: EP6 by deadline
+- H161: EP6 by deadline (or kill earlier if EP5 > 6.95%)
+- H162: EP5 ~15:35Z, terminal 5-15min past deadline
 
 **CRITICAL — BASELINE.md correction (commit ea99dda was wrong):** nezuko discovered in PR #1360 that the 2026-05-28 H147 SOTA section copy-pasted H39's `yym5oa8x` test_VP/test_SP into the H147 row. Verified by W&B query of `k6q4c3on`. Correct H147 metrics: **test_VP=3.4014%** (clears 3.643% floor by 0.242pp) and **test_SP=3.5634%** (clears 3.577% floor by 0.014pp). **H147 actually CLEARS all 4 floors**, not 3-of-4. Patched in BASELINE.md this session.
 
