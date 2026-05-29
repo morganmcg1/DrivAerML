@@ -1,3 +1,42 @@
+## 2026-05-29 14:50 — PR #1437 askeladd H261 CLOSED Finding HH-H188; H244 edward MERGED as new SOTA
+
+### PR #1437 askeladd H261 — CLOSED: Finding HH-H188 (H188 EP13 not competitive with H185 EP13)
+
+- **Branch**: askeladd/h261-h188-6res-mirror
+- **W&B runs**: `8g0hmk9s` (sanity orig+mirror at 65k), `jr1nn07o` (6-res mirror_res_avg)
+
+| Mode | val_abupt | test_abupt | vs H244 gate |
+|---|---:|---:|---|
+| H188 sanity (orig, 65k) | 6.162% | — | far miss |
+| H188 sanity (mirror, 65k) | 6.120% | 5.956% | far miss |
+| H188 6-res mirror_res_avg | 6.126% | 5.909% | far miss (gate: 5.9452/5.7896) |
+
+**Finding HH-H188 (NEGATIVE portability)**: H188 EP13 single-res baseline ~6.12-6.16% val, approximately 14-16bp worse than H185 EP13 (6.017%). While 6-res TTA provides modest variance reduction (−3.6bp val), the absolute result is far from the merge gate. **H188 family is not viable for TTA-only SOTA approaches** — requires checkpoint retraining.
+
+**Clarification on Finding HH N=4**: Finding HH N=4 (nezuko H251) reported +12-15bp TTA portability across H185/H183/H188. That portability finding was correctly stated — the gain *relative to the base checkpoint's TTA-less baseline* is consistent. But H188's absolute baseline is worse (6.12% vs 6.017%), so the absolute SOTA from H188+TTA is worse than H185+TTA.
+
+**Lesson**: When evaluating TTA portability, always compare absolute performance vs the current global gate, not relative gain vs same-checkpoint baseline.
+
+### PR #1415 edward H244 — MERGED as NEW SOTA (val 5.9452 / test 5.7896)
+
+See merge-winner output for BASELINE.md update. Key metrics:
+
+| Split | abupt | SP | VP | WSS | WSS_x | WSS_y | WSS_z |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| val | **5.9452** | 3.9301 | 3.4697 | 6.7415 | 5.8971 | 7.3141 | 9.1151 |
+| test | **5.7896** | **3.6595** | **3.3882** | **6.6947** | 5.9438 | 7.2661 | 8.6901 |
+
+**EP-extension insight**: EP15 vs EP13 single-res: −9.3bp val_orig (6.0079 vs 6.0172). Combined with 6-res TTA: −10.0bp val / −7.9bp test over H243. TTA gains compose nearly additively in the late-cosine flat basin (prediction was val ~5.945, actual 5.9452 — within 0.03bp).
+
+### New assignments (H262-H268 batch)
+- **H262 tanjiro**: K-noise saturation sweep (K=10/20 noise_only, ~36 min) — fast, before deadline
+- **H263 frieren**: Multi-EP EMA avg(EP14,EP15) + 6-res mirror (~70 min)
+- **H264 fern**: EP16 + 6-res mirror TTA (~65 min) — EP-chain continuation
+- **H265 edward**: EP14 + 6-res mirror TTA (~60 min) — fills EP14 slot in chain
+- **H268 askeladd**: Anti-thetic noise pairs (K=3 pairs, ~32 min) — novel mechanism probe
+
+---
+
 ## 2026-05-29 14:15 — PR #1435 tanjiro H259 CLOSED Finding LL-noise; PR #1436 frieren H260 CLOSED Finding EE-volume; edward H244 Arm 1 SOTA candidate
 
 ### PR #1435 tanjiro H259 — CLOSED: Finding LL-noise (σ basin edge)
