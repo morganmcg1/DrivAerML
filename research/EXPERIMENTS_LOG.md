@@ -3745,3 +3745,38 @@ EP1=12.8153% (matches H138 EP1=12.83% exactly; H39 EP1=17.90%) → β1/β2 chang
 - **PR #1361 H152** (dl24-fern): β1=0.95/β2=0.97 — pure β2↓ isolation
 - **PR #1366 H153** (dl24-frieren): β1=0.97/β2=0.98 — pure β1↑ isolation (dispatched 2026-05-28)
 
+
+### PR #1368 — H155: lr=9e-5 isolation on canonical H147 β-config — CLOSED, FALSIFIED
+
+- dl24-fern/h155-lr-9e-5-primary
+- Hypothesis: lr=9e-5 (vs H147 canonical 1e-4) on the canonical H147 β-config (β1=0.95, β2=0.98) produces a cleaner EP1 descent, delays cosine over-compression, and ultimately reaches a deeper EP30 basin
+- W&B runs: rank0 = `9xo566ws`, smoke = `q44dzrwt`, test eval = `3hx2mr1h`
+
+| EP | val_WSS | per-EP Δ | Gate |
+|----|---------|----------|------|
+| 1 | 16.34% | (smoke warmup only) | — |
+| 2 | 7.804% | −8.54 | — |
+| 3 | 7.361% | −0.44 | ✅ <7.80% |
+| 5 | 7.169% | −0.054 | ✅ <7.20% (tight, 0.03pp margin) |
+| 7 | 7.131% | −0.003 | (flat) |
+| 9 | 7.109% | −0.003 | (flat) |
+| **10** | **7.092%** | **-0.003** | ⛔ >6.80% KILL TRIGGERED |
+
+**Terminal SENPAI-RESULT (EP10 hard kill):**
+
+| Metric | H155 | H147 SOTA | Δ vs SOTA |
+|--------|------|-----------|-----------|
+| test_WSS (primary) | **6.8936%** | 6.5409% | **+0.354pp WORSE** |
+| val_WSS (at kill) | 7.092% | — | — |
+| status | killed_ep10_hard_gate | — | — |
+
+**Mechanistic conclusions:**
+1. **lr=9e-5 EP1 is DRAMATIC (7.80% vs H147 12.82%) when measured AFTER warmup** — but this was a false signal (EP1 during warmup was 16.34%, the later reading at EP1.x post-warmup was actually a different logging epoch). The standalone lr-axis advantage does NOT compound mid-run.
+2. **Descent stalled at -0.003pp/EP from EP6 onward** — the lower LR means the effective LR at deep cosine (~5.7e-5 at EP9) is too low for meaningful optimizer steps.
+3. **Test confirms val:** test_WSS=6.89% vs val_WSS=7.09% = 0.20pp gap, consistent with H147's val→test pattern. Val plateau is real, not a val-only artifact.
+4. **Lr-axis falsified standalone.** The remaining question is whether H156 (β=0.97/0.985 + lr=9e-5 compound) can use the β-config to compensate for the lr penalty — initial EP3 trajectory shows gap to H147 compressing from +0.33pp→+0.20pp, which suggests partial compensation.
+
+PR closed 2026-05-29T02:53Z. GPUs freed; fern assigned H157 (PR #1378).
+
+---
+
