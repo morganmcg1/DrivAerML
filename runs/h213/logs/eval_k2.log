@@ -1,0 +1,52 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_040618-5ragl8wb
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run tanjiro/h213-splice-k2
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/5ragl8wb
+Loaded splice ckpt splice_k2.pt: splice_k=2, epoch=13, source=splice, n_keys=137
+Loading data from /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+Model built (17.41M params)
+
+=== Running val eval ===
+val_abupt=65.1448 val_SP=54.4553 val_WSS=68.4573 val_WSS_x=59.1488 val_VP=46.9378 (480.6s)
+
+=== Running test eval ===
+wandb: updating run metadata
+wandb: 
+wandb: Run history:
+wandb:      full_val/val_surface/abupt_axis_mean_rel_l2 ▁
+wandb:  full_val/val_surface/abupt_axis_mean_rel_l2_pct ▁
+wandb:                       full_val/val_surface/cases ▁
+wandb:                        full_val/val_surface/loss ▁
+wandb:               full_val/val_surface/surface_cases ▁
+wandb:                full_val/val_surface/surface_loss ▁
+wandb:        full_val/val_surface/surface_pressure_mae ▁
+wandb:     full_val/val_surface/surface_pressure_rel_l2 ▁
+wandb: full_val/val_surface/surface_pressure_rel_l2_pct ▁
+wandb:                full_val/val_surface/volume_cases ▁
+wandb:                                             +109 ...
+wandb: 
+wandb: Run summary:
+wandb:      full_val/val_surface/abupt_axis_mean_rel_l2 0.65145
+wandb:  full_val/val_surface/abupt_axis_mean_rel_l2_pct 65.14476
+wandb:                       full_val/val_surface/cases 34
+wandb:                        full_val/val_surface/loss 0.51564
+wandb:               full_val/val_surface/surface_cases 34
+wandb:                full_val/val_surface/surface_loss 0.58173
+wandb:        full_val/val_surface/surface_pressure_mae 0.17659
+wandb:     full_val/val_surface/surface_pressure_rel_l2 0.54455
+wandb: full_val/val_surface/surface_pressure_rel_l2_pct 54.45531
+wandb:                full_val/val_surface/volume_cases 34
+wandb:                                             +177 ...
+wandb: 
+wandb: 🚀 View run tanjiro/h213-splice-k2 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/5ragl8wb
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_040618-5ragl8wb/logs
+test_abupt=65.1724 test_SP=54.3825 test_WSS=68.8360 test_WSS_x=59.4756 test_VP=47.1774 (730.4s)
+slope WSS_x=+0.3267pp abupt=+0.0277pp
+Wrote /workspace/senpai/target/runs/h213/results/tanjiro_h213-splice-k2.json
