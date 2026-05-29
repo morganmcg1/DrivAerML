@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 05:16Z (**H156 GAP REVERSING** EP7=6.9527%, vs H147 +0.18pp→+0.25pp — compound β+lr theory weakening, EP10 soft kill likely to fire ~07:25Z; **H150 EP24.6=6.6327%** plateau drift continues, EMA EP18-20 best-val ~6.622% remains harvest target; **H151 EP24.9=6.8121%** stable noise band; **H157b launched clean** 8 DDP ranks at EP0.13, EP1 ETA ~05:57Z)_
+_Last updated: 2026-05-29 06:55Z (**H156 PLATEAU CONFIRMED** EP9.03=6.929% — descent rate ZERO EP8→EP9, EP10 harvest LOCKED 07:32Z; **H150 EP26.7=6.6361%** drift -0.0002pp from EP25 — cosine floor reached, EMA EP18-20 ~6.622% harvest target unchanged; **H151 EP27.0=6.8105%** noise band; **H157b EP2.47=7.509%** gap to H150 closed from +1.886pp (EP1) to +0.243pp — Charbonnier early-EP overhead evaporating as predicted, EP3 kill check ~07:35Z)_
 
 ---
 
@@ -42,14 +42,14 @@ _Last updated: 2026-05-29 05:16Z (**H156 GAP REVERSING** EP7=6.9527%, vs H147 +0
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-29 05:16Z)
+### Fleet status (2026-05-29 06:55Z)
 
 | Run ID | Student | H# | Epoch | val_WSS | val_ABUPT | State | vs H147 |
 |---|---|---|---:|---:|---:|---|---|
-| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **24.59** | **6.6327%** | **5.8931%** | running | plateau drift +0.008pp from EP21.9; EMA EP18-20 ~6.622% safety net |
-| d20sf8th | nezuko | H151 (extended 45EP canonical) | 24.87 | 6.8121% | 6.0749% | running | +0.18pp stable noise band, RNG baseline confirmation arm |
-| ugpyo62a (+7 ranks) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | **6.92** | **6.9527%** | **6.2990%** | running | ⚠️ EP7 gap REVERSED: +0.18pp→+0.25pp; descent -0.030pp/EP < H147 -0.037pp/EP |
-| 7z0r8tzz (+7 ranks) | **fern** | **H157b (wss-charbonnier=0.1 + H150-β)** | 0.13 | (launching) | — | **PR #1385** | 8-DDP ranks running clean; EP1 ETA ~05:57Z |
+| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **26.70** | **6.6361%** | **5.8947%** | running | cosine-floor plateau; EP25→EP27 drift -0.0002pp; EMA EP18-20 ~6.622% harvest target |
+| d20sf8th | nezuko | H151 (extended 45EP canonical) | 26.98 | 6.8105% | 6.0712% | running | noise band oscillation; +0.17pp vs H150 holding |
+| ugpyo62a (+7 ranks) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | **9.03** | **6.929%** | **6.273%** | running | ⛔ DESCENT DEAD EP8→EP9 (-0.0001pp); EP10 harvest LOCKED 07:32Z |
+| ew63yb7p (+7 ranks) | **fern** | **H157b (wss-charbonnier=0.1 + H150-β)** | **2.47** | **7.509%** | **6.624%** | running | gap to H150 EP2 closed +1.886pp→+0.243pp; EP3 kill (>7.40%) check ~07:35Z |
 | 9xo566ws | (fern prev) | H155 (lr=9e-5) | 10.27 | 7.092% | 6.157% | **CLOSED (PR #1368 03:00Z)** | ⛔ test_WSS=6.8936%, lr-axis falsified |
 | 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.991% | 6.123% | **CLOSED (PR #1367 22:57Z)** | ⛔ EP7 falsified |
 | u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | crashed | β1↓+β2↓ falsifying |
@@ -160,13 +160,15 @@ Launched 00:40Z after `grdap1rg` smoke passed clean. Config: `lion_beta1=0.97`, 
 
 ## Decisive epochs ahead (active runs)
 
-- **H157b EP1 reading** (~05:57Z) — gate >13.5%; β-compound should land ≤12.5% if H150-β still constructive with charbonnier on top
-- **H157b EP3 kill** (~06:50Z) — gate >7.40%
-- **H156 EP10 soft kill** (~07:25Z) — gate >6.65%; projected ~6.86% → likely FAIL → harvest EMA-best direction pre-committed
-- **H157b EP5 kill** (~08:10Z) — gate >6.85%
-- **H150 EP30 terminal harvest** (~08:40Z) — EMA-best at EP18-20 ~6.622% val → ~6.522% test, marginal win vs H147 6.5409%
-- **H151 EP30+** — RNG-baseline confirmation arm, terminal at EP45 (~14:00Z)
-- **Shutdown deadline ~2026-05-30 15:27Z** — H157b 30-EP terminal must land by then for any compound-merge attempt
+- **H156 EP10 harvest LOCKED** (~07:32Z) — both kill gates pre-committed FIRE; capture EMA-best (val ~6.92%), test eval, terminal SENPAI-RESULT
+- **H157b EP3 kill check** (~07:35Z) — gate >7.40%; current EP2=7.509%, H147-typical EP2→EP3 drop -0.28pp → projection ~7.23% → PASSES
+- **H157b EP5 kill** (~08:35Z) — gate >6.85%
+- **H151 EP30 first inflection** (~09:50-10:00Z) — extended-training value signal (15-EP tail)
+- **H150 EP30 terminal harvest** (~10:00-11:00Z, revised from 08:40Z — late-cosine slowdown) — EMA-best at EP18-20 ~6.622% val → ~6.522% test, marginal win vs H147 6.5409%
+- **H157b EP10 soft kill** (~10:30Z) — gate >6.65%
+- **H151 EP45 terminal** (~14:50-15:30Z) — 45-EP extended-training experiment final
+- **H157b EP30 terminal** (~24h projected) — paper-facing single-model + charbonnier compound
+- **Shutdown deadline ~2026-05-30 15:27Z** (~32h remaining) — H157b 30-EP terminal must land by then for compound-merge attempt
 
 ---
 
