@@ -97,7 +97,7 @@ class DistributedState:
         return self.rank == 0
 
 
-def init_distributed() -> DistributedState:
+def init_distributed(timeout: timedelta | None = None) -> DistributedState:
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -114,18 +114,10 @@ def init_distributed() -> DistributedState:
         if not dist.is_available():
             raise RuntimeError("torch.distributed is not available, but WORLD_SIZE > 1")
         backend = "nccl" if device.type == "cuda" else "gloo"
-        # Long collective timeout (default is 10min for NCCL). Heavy TTA eval
-        # workloads can have ~15-20min gaps between the fastest and slowest
-        # rank hitting the all_gather barrier when case distribution is uneven
-        # (e.g. 50 test cases / 8 ranks = 6 vs 7 cases × ~15min/case → ~15min
-        # gap). The default 10-minute timeout fires before the slowest rank
-        # arrives and kills the process group mid-eval. Override via
-        # ``SENPAI_NCCL_TIMEOUT_MINUTES`` if a workload needs even longer.
-        timeout_minutes = float(os.environ.get("SENPAI_NCCL_TIMEOUT_MINUTES", "120"))
-        dist.init_process_group(
-            backend=backend,
-            timeout=timedelta(minutes=timeout_minutes),
-        )
+        init_kwargs: dict = {"backend": backend}
+        if timeout is not None:
+            init_kwargs["timeout"] = timeout
+        dist.init_process_group(**init_kwargs)
     return DistributedState(
         enabled=enabled,
         rank=rank,

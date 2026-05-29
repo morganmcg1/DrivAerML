@@ -1,32 +1,26 @@
 # SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-PackageName: senpai
-"""H236/H253: Multi-resolution TTA — eval at varied volume point counts and average.
+"""H236: Multi-resolution TTA — eval at varied volume point counts and average.
 
 For each case, accumulates per-point predictions across multiple
-``eval_volume_points`` resolutions (optionally combined with mirror TTA and
-weight-space noise TTA), averages them per-point in real space, and reports
-the standard relL2/MAE metrics against the unchanged ground truth.
+``eval_volume_points`` resolutions (optionally combined with mirror TTA),
+averages them per-point in real space, and reports the standard relL2/MAE
+metrics against the unchanged ground truth.
 
 Cases are sharded across DDP ranks (case_ids[rank::world_size]); each rank
 processes its assigned cases sequentially with single-case loaders. Per-case
 scratch buffers live on CPU (~200MB per case).
 
 Modes:
-    res_avg:                    average over N resolutions, no mirror
-    mirror_res_avg:             2N-pass = orig + mirror at each of N resolutions
-    mirror_res_weight_noise_avg: K*2N-pass = K weight-noise passes wrapping mirror_res_avg
+    res_avg:        average over N resolutions, no mirror
+    mirror_res_avg: 2N-pass = orig + mirror at each of N resolutions
 
 Mirror convention (H148/H183/H209):
     surface_x [x, y, z, nx, ny, nz, area] -> negate y(1) and ny(4)
     volume_x  [x, y, z, sdf]              -> negate y(1)
     surface_y predictions [cp, tau_x, tau_y, tau_z] -> un-mirror by negating tau_y(2)
     volume_y predictions [volume_pressure] -> invariant
-
-Weight-noise convention (H242/H253):
-    Relative Gaussian noise: perturbed = w + sigma * |w| * eps, eps ~ N(0, 1).
-    CPU generator with deterministic per-parameter seed -> identical noise
-    on all DDP ranks, so each rank's perturbed model matches the others.
 """
 
 from __future__ import annotations
@@ -80,14 +74,9 @@ class EvalConfig:
 
     # Multi-resolution TTA configuration
     resolutions: str = "49152,65536,81920"
-    # comma-separated: res_avg, mirror_res_avg, mirror_res_weight_noise_avg
-    eval_modes: str = "res_avg,mirror_res_avg"
+    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
     # Surface resolution stays fixed; only volume is varied.
     eval_surface_points: int = 65536
-
-    # H253: weight-space noise TTA (used by mirror_res_weight_noise_avg)
-    weight_noise_sigma: float = 5e-4
-    n_weight_noise_passes: int = 5
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -256,7 +245,7 @@ def chunk_global_indices(view_index: int, view_count: int, n_full: int) -> torch
 
 
 @torch.no_grad()
-def _accumulate_multires_mirror(
+def process_case_multires(
     *,
     case_id: str,
     model: nn.Module,
@@ -266,20 +255,24 @@ def _accumulate_multires_mirror(
     cfg: EvalConfig,
     resolutions: list[int],
     use_mirror: bool,
-    n_surf: int,
-    n_vol: int,
-    surf_sum: torch.Tensor,
-    surf_cnt: torch.Tensor,
-    vol_sum: torch.Tensor,
-    vol_cnt: torch.Tensor,
-    timing: dict,
-) -> None:
-    """Run a single (resolutions × {orig, mirror}) accumulation pass into provided buffers.
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    """Run multi-res TTA passes for one case and return per-point averaged predictions.
 
-    Shared by ``process_case_multires`` (single noise pass) and
-    ``process_case_multires_weight_noise`` (K noise passes, same buffer reused).
+    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
+             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
+    Predictions are in **real units** (already denormalized).
     """
+    counts = store.case_point_counts(case_id)
+    n_surf = counts["n_surface"]
+    n_vol = counts["n_volume"]
+
+    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
+    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
+    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
+    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
+
     eval_module = unwrap_model(model)
+    timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
 
     for K in resolutions:
         dataset = DrivAerMLSurfaceDataset(
@@ -369,54 +362,6 @@ def _accumulate_multires_mirror(
                             )
                 timing["io_seconds"] += time.time() - t1
 
-
-@torch.no_grad()
-def process_case_multires(
-    *,
-    case_id: str,
-    model: nn.Module,
-    transform: TargetTransform,
-    device: torch.device,
-    store: DrivAerMLCaseStore,
-    cfg: EvalConfig,
-    resolutions: list[int],
-    use_mirror: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
-    """Run multi-res TTA passes for one case and return per-point averaged predictions.
-
-    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
-             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
-    Predictions are in **real units** (already denormalized).
-    """
-    counts = store.case_point_counts(case_id)
-    n_surf = counts["n_surface"]
-    n_vol = counts["n_volume"]
-
-    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
-    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
-    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
-    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
-
-    timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
-
-    _accumulate_multires_mirror(
-        case_id=case_id,
-        model=model,
-        transform=transform,
-        device=device,
-        store=store,
-        cfg=cfg,
-        resolutions=resolutions,
-        use_mirror=use_mirror,
-        n_surf=n_surf,
-        n_vol=n_vol,
-        surf_sum=surf_sum,
-        surf_cnt=surf_cnt,
-        vol_sum=vol_sum,
-        vol_cnt=vol_cnt,
-        timing=timing,
-    )
-
     if int(surf_cnt.min()) == 0:
         raise RuntimeError(
             f"surface coverage incomplete for case {case_id}: "
@@ -437,259 +382,6 @@ def process_case_multires(
     vol_y = case.volume_y.float()
 
     n_passes = len(resolutions) * (2 if use_mirror else 1)
-    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
-
-
-def _compute_perturbed_state_dicts(
-    *,
-    clean_state_cpu: dict[str, torch.Tensor],
-    device: torch.device,
-    sigma: float,
-    n_noise_passes: int,
-) -> list[dict[str, torch.Tensor]]:
-    """Pre-compute K perturbed state-dicts on GPU once per case.
-
-    Uses deterministic CPU generator per (noise_idx, param_idx) so the noise
-    pattern is identical across DDP ranks. Returns K GPU-resident state dicts
-    suitable for ``load_state_dict``. Floating-point params are perturbed with
-    relative noise ``sigma * |w| * eps``; non-float buffers are passed through.
-    """
-    perturbed_states: list[dict[str, torch.Tensor]] = []
-    for noise_idx in range(n_noise_passes):
-        state: dict[str, torch.Tensor] = {}
-        for param_idx, (k, v) in enumerate(clean_state_cpu.items()):
-            if v.dtype.is_floating_point:
-                seed = (noise_idx * 100003 + param_idx * 1009) % (2 ** 31)
-                g = torch.Generator()
-                g.manual_seed(seed)
-                noise = torch.empty_like(v).normal_(generator=g)
-                state[k] = (v + sigma * v.abs() * noise).to(device)
-            else:
-                state[k] = v.to(device)
-        perturbed_states.append(state)
-    return perturbed_states
-
-
-@torch.no_grad()
-def process_case_multires_weight_noise(
-    *,
-    case_id: str,
-    model: nn.Module,
-    transform: TargetTransform,
-    device: torch.device,
-    store: DrivAerMLCaseStore,
-    cfg: EvalConfig,
-    resolutions: list[int],
-    sigma: float,
-    n_noise_passes: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
-    """Stack weight-space noise TTA on top of mirror×multires TTA.
-
-    K weight-noise passes × N resolutions × 2 mirror states = K*N*2 total
-    predictions per point, averaged per-point in real units.
-
-    **Noise-INNER batch-reuse layout** to fit the SENPAI runtime budget:
-    each (resolution, batch, mirror) tuple loads data once, then we swap
-    between K pre-computed GPU-resident perturbed state-dicts and run K
-    forward passes back-to-back. The K predictions are summed on GPU and
-    accumulated into the per-point CPU buffer **as a single K-averaged
-    contribution** per (batch, mirror). The mathematical result is identical
-    to averaging K*N*2 individual predictions per point, but I/O is paid once
-    per (resolution, batch) instead of K times, and CPU accumulation runs
-    N*2 times instead of K*N*2 times.
-
-    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
-             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
-    """
-    counts = store.case_point_counts(case_id)
-    n_surf = counts["n_surface"]
-    n_vol = counts["n_volume"]
-
-    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
-    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
-    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
-    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
-
-    timing: dict[str, float] = {
-        "forward_seconds": 0.0,
-        "io_seconds": 0.0,
-        "n_forwards": 0,
-        "perturb_seconds": 0.0,
-        "state_swap_seconds": 0.0,
-    }
-
-    eval_module = unwrap_model(model)
-    clean_state_cpu = {
-        k: v.detach().cpu().clone() for k, v in eval_module.state_dict().items()
-    }
-
-    t_perturb = time.time()
-    perturbed_states_gpu = _compute_perturbed_state_dicts(
-        clean_state_cpu=clean_state_cpu,
-        device=device,
-        sigma=sigma,
-        n_noise_passes=n_noise_passes,
-    )
-    timing["perturb_seconds"] += time.time() - t_perturb
-
-    try:
-        # Start with the first perturbed state loaded so we are never running
-        # on the clean weights inside the main loop.
-        t0 = time.time()
-        eval_module.load_state_dict(perturbed_states_gpu[0])
-        current_K_idx = 0
-        timing["state_swap_seconds"] += time.time() - t0
-
-        for K in resolutions:
-            dataset = DrivAerMLSurfaceDataset(
-                case_ids=[case_id],
-                store=store,
-                max_surface_points=cfg.eval_surface_points,
-                max_volume_points=K,
-                sampling_mode="eval_chunk",
-            )
-            loader_iter = torch.utils.data.DataLoader(
-                dataset,
-                batch_size=cfg.batch_size,
-                shuffle=False,
-                num_workers=cfg.num_workers,
-                pin_memory=cfg.pin_memory,
-                collate_fn=pad_collate,
-                persistent_workers=False,
-                prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
-            )
-
-            for batch in loader_iter:
-                batch = batch.to(device)
-                metas_cached = list(batch.metadata)
-
-                for mirror in (False, True):
-                    model_input = mirror_inputs(batch) if mirror else batch
-
-                    sum_pred_surf: torch.Tensor | None = None
-                    sum_pred_vol: torch.Tensor | None = None
-                    for K_idx in range(n_noise_passes):
-                        if K_idx != current_K_idx:
-                            t_swap = time.time()
-                            eval_module.load_state_dict(perturbed_states_gpu[K_idx])
-                            current_K_idx = K_idx
-                            timing["state_swap_seconds"] += time.time() - t_swap
-
-                        t0 = time.time()
-                        with autocast_context(device, cfg.amp_mode):
-                            out = eval_module(
-                                surface_x=model_input.surface_x,
-                                surface_mask=model_input.surface_mask,
-                                volume_x=model_input.volume_x,
-                                volume_mask=model_input.volume_mask,
-                            )
-                        surface_pred_real = transform.invert_surface(
-                            out["surface_preds"].float()
-                        )
-                        volume_pred_real = transform.invert_volume(
-                            out["volume_preds"].float()
-                        )
-                        if mirror:
-                            surface_pred_real = unmirror_surface_real(surface_pred_real)
-                        timing["forward_seconds"] += time.time() - t0
-                        timing["n_forwards"] += int(batch.surface_x.shape[0])
-
-                        if sum_pred_surf is None:
-                            sum_pred_surf = surface_pred_real
-                            sum_pred_vol = volume_pred_real
-                        else:
-                            sum_pred_surf = sum_pred_surf + surface_pred_real
-                            sum_pred_vol = sum_pred_vol + volume_pred_real
-
-                    # K-average on GPU so the CPU accumulator below pays the
-                    # transfer + index_add_ cost ONCE per (batch, mirror), not K
-                    # times.
-                    inv_K = 1.0 / float(n_noise_passes)
-                    avg_pred_surf = sum_pred_surf * inv_K
-                    avg_pred_vol = sum_pred_vol * inv_K
-
-                    t1 = time.time()
-                    surface_pred_real_cpu = avg_pred_surf.detach().cpu()
-                    volume_pred_real_cpu = avg_pred_vol.detach().cpu()
-                    surface_mask_cpu = batch.surface_mask.detach().cpu()
-                    volume_mask_cpu = batch.volume_mask.detach().cpu()
-                    for i in range(len(batch.case_ids)):
-                        meta = metas_cached[i]
-                        s_view_idx = int(meta["surface_view_index"])
-                        s_view_count = int(meta["surface_view_count"])
-                        v_view_idx = int(meta["volume_view_index"])
-                        v_view_count = int(meta["volume_view_count"])
-
-                        if s_view_idx < s_view_count:
-                            s_global = chunk_global_indices(
-                                s_view_idx, s_view_count, n_surf
-                            )
-                            s_mask_i = surface_mask_cpu[i].bool()
-                            s_chunk = surface_pred_real_cpu[i][s_mask_i]
-                            if s_global.shape[0] != s_chunk.shape[0]:
-                                raise RuntimeError(
-                                    f"surface global-index mismatch case={case_id} "
-                                    f"K={K} view_idx={s_view_idx}/{s_view_count}: "
-                                    f"global={s_global.shape[0]} vs "
-                                    f"chunk={s_chunk.shape[0]}"
-                                )
-                            if s_global.numel() > 0:
-                                surf_sum.index_add_(0, s_global, s_chunk)
-                                surf_cnt.index_add_(
-                                    0,
-                                    s_global,
-                                    torch.ones_like(s_global, dtype=torch.int32),
-                                )
-
-                        if v_view_idx < v_view_count:
-                            v_global = chunk_global_indices(
-                                v_view_idx, v_view_count, n_vol
-                            )
-                            v_mask_i = volume_mask_cpu[i].bool()
-                            v_chunk = volume_pred_real_cpu[i][v_mask_i]
-                            if v_global.shape[0] != v_chunk.shape[0]:
-                                raise RuntimeError(
-                                    f"volume global-index mismatch case={case_id} "
-                                    f"K={K} view_idx={v_view_idx}/{v_view_count}: "
-                                    f"global={v_global.shape[0]} vs "
-                                    f"chunk={v_chunk.shape[0]}"
-                                )
-                            if v_global.numel() > 0:
-                                vol_sum.index_add_(0, v_global, v_chunk)
-                                vol_cnt.index_add_(
-                                    0,
-                                    v_global,
-                                    torch.ones_like(v_global, dtype=torch.int32),
-                                )
-                    timing["io_seconds"] += time.time() - t1
-    finally:
-        # Always restore clean weights so subsequent cases start from the
-        # unperturbed model. Also drop the K perturbed GPU state-dicts so they
-        # don't survive past this case.
-        eval_module.load_state_dict(
-            {k: v.to(device) for k, v in clean_state_cpu.items()}
-        )
-        del perturbed_states_gpu
-
-    if int(surf_cnt.min()) == 0:
-        raise RuntimeError(
-            f"surface coverage incomplete for case {case_id}: "
-            f"{int((surf_cnt == 0).sum())} points have zero contributing chunks"
-        )
-    if int(vol_cnt.min()) == 0:
-        raise RuntimeError(
-            f"volume coverage incomplete for case {case_id}: "
-            f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
-        )
-
-    surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
-    vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
-
-    case = store.load_case(case_id)
-    surf_y = case.surface_y.float()
-    vol_y = case.volume_y.float()
-
-    n_passes = n_noise_passes * len(resolutions) * 2
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -784,7 +476,7 @@ def evaluate_split_multires(
     store: DrivAerMLCaseStore,
     cfg: EvalConfig,
     resolutions: list[int],
-    mode: str,
+    use_mirror: bool,
     distributed_state,
 ) -> dict[str, float]:
     """Distribute cases across ranks, run multi-res TTA per case, return finalized metrics."""
@@ -796,43 +488,23 @@ def evaluate_split_multires(
     )
     my_cases = case_ids[rank::world_size]
 
-    use_mirror = mode in ("mirror_res_avg", "mirror_res_weight_noise_avg")
-    use_weight_noise = mode == "mirror_res_weight_noise_avg"
-
     acc = EvalAccumulator()
     total_t0 = time.time()
     total_forward = 0.0
     total_io = 0.0
-    total_perturb = 0.0
-    total_swap = 0.0
     total_forwards = 0
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        if use_weight_noise:
-            surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = (
-                process_case_multires_weight_noise(
-                    case_id=case_id,
-                    model=model,
-                    transform=transform,
-                    device=device,
-                    store=store,
-                    cfg=cfg,
-                    resolutions=resolutions,
-                    sigma=cfg.weight_noise_sigma,
-                    n_noise_passes=cfg.n_weight_noise_passes,
-                )
-            )
-        else:
-            surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires(
-                case_id=case_id,
-                model=model,
-                transform=transform,
-                device=device,
-                store=store,
-                cfg=cfg,
-                resolutions=resolutions,
-                use_mirror=use_mirror,
-            )
+        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires(
+            case_id=case_id,
+            model=model,
+            transform=transform,
+            device=device,
+            store=store,
+            cfg=cfg,
+            resolutions=resolutions,
+            use_mirror=use_mirror,
+        )
         add_case_to_accumulator(
             acc,
             case_id=case_id,
@@ -844,35 +516,20 @@ def evaluate_split_multires(
         )
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
-        total_perturb += timing.get("perturb_seconds", 0.0)
-        total_swap += timing.get("state_swap_seconds", 0.0)
         total_forwards += timing["n_forwards"]
         dt = time.time() - t0
-        extra_parts = []
-        if "perturb_seconds" in timing:
-            extra_parts.append(f"perturb={timing['perturb_seconds']:.1f}s")
-        if "state_swap_seconds" in timing:
-            extra_parts.append(f"swap={timing['state_swap_seconds']:.1f}s")
-        extra = (" " + " ".join(extra_parts)) if extra_parts else ""
         print(
             f"  [rank {rank}] {split_name} {case_id} ({case_idx + 1}/{len(my_cases)}): "
             f"n_passes={n_passes} forwards={timing['n_forwards']} "
-            f"forward={timing['forward_seconds']:.1f}s io={timing['io_seconds']:.1f}s"
-            f"{extra} total={dt:.1f}s",
+            f"forward={timing['forward_seconds']:.1f}s io={timing['io_seconds']:.1f}s "
+            f"total={dt:.1f}s",
             flush=True,
         )
 
-    extra_total_parts = []
-    if total_perturb > 0:
-        extra_total_parts.append(f"perturb={total_perturb:.1f}s")
-    if total_swap > 0:
-        extra_total_parts.append(f"swap={total_swap:.1f}s")
-    extra_total = (" " + " ".join(extra_total_parts)) if extra_total_parts else ""
     print(
         f"[rank {rank}] {split_name} complete: {len(my_cases)} cases in "
         f"{time.time() - total_t0:.1f}s "
-        f"(forward={total_forward:.1f}s io={total_io:.1f}s{extra_total} "
-        f"n_forwards={total_forwards})",
+        f"(forward={total_forward:.1f}s io={total_io:.1f}s n_forwards={total_forwards})",
         flush=True,
     )
 
@@ -896,10 +553,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
-    valid_modes = ("res_avg", "mirror_res_avg", "mirror_res_weight_noise_avg")
     for mode in modes:
-        if mode not in valid_modes:
-            raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
+        if mode not in ("res_avg", "mirror_res_avg"):
+            raise ValueError(f"Unknown eval mode: {mode!r}")
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
@@ -1012,17 +668,11 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode in ("mirror_res_avg", "mirror_res_weight_noise_avg")
-            use_weight_noise = mode == "mirror_res_weight_noise_avg"
+            use_mirror = mode == "mirror_res_avg"
             if state.is_main:
-                wn_suffix = (
-                    f" K={cfg.n_weight_noise_passes} sigma={cfg.weight_noise_sigma}"
-                    if use_weight_noise
-                    else ""
-                )
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror}{wn_suffix} ===",
+                    f"resolutions={resolutions} mirror={use_mirror} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -1035,7 +685,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 store=store,
                 cfg=cfg,
                 resolutions=resolutions,
-                mode=mode,
+                use_mirror=use_mirror,
                 distributed_state=state,
             )
             dt = time.time() - t0
