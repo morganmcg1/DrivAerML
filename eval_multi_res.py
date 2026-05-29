@@ -1,31 +1,38 @@
 # SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-PackageName: senpai
-"""H236: Multi-resolution TTA — eval at varied volume point counts and average.
+"""H236/H248: Multi-resolution + jitter TTA — eval at varied volume point counts and average.
 
 For each case, accumulates per-point predictions across multiple
-``eval_volume_points`` resolutions (optionally combined with mirror TTA),
-averages them per-point in real space, and reports the standard relL2/MAE
-metrics against the unchanged ground truth.
+``eval_volume_points`` resolutions (optionally combined with mirror TTA and/or
+small Gaussian position jitter), averages them per-point in real space, and
+reports the standard relL2/MAE metrics against the unchanged ground truth.
 
 Cases are sharded across DDP ranks (case_ids[rank::world_size]); each rank
 processes its assigned cases sequentially with single-case loaders. Per-case
 scratch buffers live on CPU (~200MB per case).
 
 Modes:
-    res_avg:        average over N resolutions, no mirror
-    mirror_res_avg: 2N-pass = orig + mirror at each of N resolutions
+    res_avg:               average over N resolutions, no mirror
+    mirror_res_avg:        2N-pass = orig + mirror at each of N resolutions
+    mirror_res_jitter_avg: 2N*J-pass = orig + mirror, each with J jitter draws
 
 Mirror convention (H148/H183/H209):
     surface_x [x, y, z, nx, ny, nz, area] -> negate y(1) and ny(4)
     volume_x  [x, y, z, sdf]              -> negate y(1)
     surface_y predictions [cp, tau_x, tau_y, tau_z] -> un-mirror by negating tau_y(2)
     volume_y predictions [volume_pressure] -> invariant
+
+Jitter convention (H248): Gaussian noise on the xyz columns only (idx 0,1,2)
+of surface_x and volume_x. Normals (idx 3-5), area (idx 6), and SDF (idx 3 in
+volume_x) are left unchanged so the geometric encoding stays self-consistent
+at small ε. Deterministic per (case_id, jitter_idx, pass_idx) seed.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import os
 import time
@@ -70,9 +77,14 @@ class EvalConfig:
 
     # Multi-resolution TTA configuration
     resolutions: str = "49152,65536,81920"
-    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
+    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg, mirror_res_jitter_avg
     # Surface resolution stays fixed; only volume is varied.
     eval_surface_points: int = 65536
+
+    # H248: jitter TTA configuration
+    jitter_eps: float = 0.001  # normalized-coordinate units
+    n_jitter_passes: int = 2  # number of jitter draws per (res, mirror) tuple
+    jitter_base_seed: int = 12345  # deterministic per (case, jitter_idx, pass_idx)
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -227,6 +239,65 @@ def unmirror_surface_real(pred: torch.Tensor) -> torch.Tensor:
     return out
 
 
+# --- jitter helpers (H248) ---
+
+
+def _case_seed(case_id: str, base_seed: int) -> int:
+    """Stable hash of case_id mixed with base_seed. Independent of PYTHONHASHSEED."""
+    h = hashlib.blake2b(case_id.encode("utf-8"), digest_size=8).digest()
+    return (base_seed + int.from_bytes(h, "big")) & 0x7FFF_FFFF
+
+
+def jitter_inputs(
+    batch: SurfaceBatch,
+    *,
+    eps: float,
+    case_seed: int,
+    pass_idx: int,
+    jitter_idx: int,
+) -> SurfaceBatch:
+    """Add Gaussian jitter to xyz columns of surface_x and volume_x.
+
+    Deterministic seed = case_seed + 1009 * jitter_idx + 7 * pass_idx, split
+    into two sub-seeds so surface and volume jitter are independent draws.
+    Normals (idx 3-5), area (idx 6), and SDF (idx 3 of volume_x) are
+    untouched — small ε keeps the geometric encoding self-consistent.
+    """
+    base = (case_seed + 1009 * jitter_idx + 7 * pass_idx) & 0x7FFF_FFFF
+    device = batch.surface_x.device
+
+    surface_x = batch.surface_x.clone()
+    g_surf = torch.Generator(device=device).manual_seed(int(base))
+    surf_noise = torch.randn(
+        surface_x[..., :3].shape,
+        generator=g_surf,
+        device=device,
+        dtype=surface_x.dtype,
+    )
+    surface_x[..., :3].add_(surf_noise, alpha=eps)
+
+    volume_x = batch.volume_x.clone()
+    g_vol = torch.Generator(device=device).manual_seed(int((base + 1) & 0x7FFF_FFFF))
+    vol_noise = torch.randn(
+        volume_x[..., :3].shape,
+        generator=g_vol,
+        device=device,
+        dtype=volume_x.dtype,
+    )
+    volume_x[..., :3].add_(vol_noise, alpha=eps)
+
+    return SurfaceBatch(
+        case_ids=batch.case_ids,
+        surface_x=surface_x,
+        surface_y=batch.surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=batch.metadata,
+    )
+
+
 # --- global indices for a chunk in eval_chunk mode ---
 
 
@@ -251,8 +322,11 @@ def process_case_multires(
     cfg: EvalConfig,
     resolutions: list[int],
     use_mirror: bool,
+    use_jitter: bool = False,
+    n_jitter_passes: int = 1,
+    jitter_eps: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
-    """Run multi-res TTA passes for one case and return per-point averaged predictions.
+    """Run multi-res (+ optional mirror, jitter) TTA passes for one case.
 
     Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
              surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
@@ -270,7 +344,10 @@ def process_case_multires(
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
 
-    for K in resolutions:
+    case_seed = _case_seed(case_id, cfg.jitter_base_seed) if use_jitter else 0
+    j_passes = n_jitter_passes if use_jitter else 1
+
+    for res_idx, K in enumerate(resolutions):
         dataset = DrivAerMLSurfaceDataset(
             case_ids=[case_id],
             store=store,
@@ -293,70 +370,82 @@ def process_case_multires(
         for batch in loader_iter:
             batch = batch.to(device)
             metas_cached = list(batch.metadata)
-            for mirror in mirror_flags:
-                t0 = time.time()
-                model_input = mirror_inputs(batch) if mirror else batch
+            for mirror_idx, mirror in enumerate(mirror_flags):
+                base_input = mirror_inputs(batch) if mirror else batch
+                pass_idx = res_idx * 2 + mirror_idx
+                for jitter_idx in range(j_passes):
+                    t0 = time.time()
+                    if use_jitter:
+                        model_input = jitter_inputs(
+                            base_input,
+                            eps=jitter_eps,
+                            case_seed=case_seed,
+                            pass_idx=pass_idx,
+                            jitter_idx=jitter_idx,
+                        )
+                    else:
+                        model_input = base_input
 
-                with autocast_context(device, cfg.amp_mode):
-                    out = eval_module(
-                        surface_x=model_input.surface_x,
-                        surface_mask=model_input.surface_mask,
-                        volume_x=model_input.volume_x,
-                        volume_mask=model_input.volume_mask,
-                    )
-                surface_pred_real = transform.invert_surface(out["surface_preds"].float())
-                volume_pred_real = transform.invert_volume(out["volume_preds"].float())
-                if mirror:
-                    surface_pred_real = unmirror_surface_real(surface_pred_real)
-                    # volume_pressure is scalar and invariant under y-mirror.
+                    with autocast_context(device, cfg.amp_mode):
+                        out = eval_module(
+                            surface_x=model_input.surface_x,
+                            surface_mask=model_input.surface_mask,
+                            volume_x=model_input.volume_x,
+                            volume_mask=model_input.volume_mask,
+                        )
+                    surface_pred_real = transform.invert_surface(out["surface_preds"].float())
+                    volume_pred_real = transform.invert_volume(out["volume_preds"].float())
+                    if mirror:
+                        surface_pred_real = unmirror_surface_real(surface_pred_real)
+                        # volume_pressure is scalar and invariant under y-mirror.
 
-                timing["forward_seconds"] += time.time() - t0
-                timing["n_forwards"] += int(batch.surface_x.shape[0])
+                    timing["forward_seconds"] += time.time() - t0
+                    timing["n_forwards"] += int(batch.surface_x.shape[0])
 
-                t1 = time.time()
-                surface_pred_real_cpu = surface_pred_real.detach().cpu()
-                volume_pred_real_cpu = volume_pred_real.detach().cpu()
-                surface_mask_cpu = batch.surface_mask.detach().cpu()
-                volume_mask_cpu = batch.volume_mask.detach().cpu()
-                for i in range(len(batch.case_ids)):
-                    meta = metas_cached[i]
-                    s_view_idx = int(meta["surface_view_index"])
-                    s_view_count = int(meta["surface_view_count"])
-                    v_view_idx = int(meta["volume_view_index"])
-                    v_view_count = int(meta["volume_view_count"])
+                    t1 = time.time()
+                    surface_pred_real_cpu = surface_pred_real.detach().cpu()
+                    volume_pred_real_cpu = volume_pred_real.detach().cpu()
+                    surface_mask_cpu = batch.surface_mask.detach().cpu()
+                    volume_mask_cpu = batch.volume_mask.detach().cpu()
+                    for i in range(len(batch.case_ids)):
+                        meta = metas_cached[i]
+                        s_view_idx = int(meta["surface_view_index"])
+                        s_view_count = int(meta["surface_view_count"])
+                        v_view_idx = int(meta["volume_view_index"])
+                        v_view_count = int(meta["volume_view_count"])
 
-                    if s_view_idx < s_view_count:
-                        s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf)
-                        s_mask_i = surface_mask_cpu[i].bool()
-                        s_chunk = surface_pred_real_cpu[i][s_mask_i]
-                        if s_global.shape[0] != s_chunk.shape[0]:
-                            raise RuntimeError(
-                                f"surface global-index mismatch case={case_id} K={K} "
-                                f"view_idx={s_view_idx}/{s_view_count}: "
-                                f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
-                            )
-                        if s_global.numel() > 0:
-                            surf_sum.index_add_(0, s_global, s_chunk)
-                            surf_cnt.index_add_(
-                                0, s_global, torch.ones_like(s_global, dtype=torch.int32)
-                            )
+                        if s_view_idx < s_view_count:
+                            s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf)
+                            s_mask_i = surface_mask_cpu[i].bool()
+                            s_chunk = surface_pred_real_cpu[i][s_mask_i]
+                            if s_global.shape[0] != s_chunk.shape[0]:
+                                raise RuntimeError(
+                                    f"surface global-index mismatch case={case_id} K={K} "
+                                    f"view_idx={s_view_idx}/{s_view_count}: "
+                                    f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
+                                )
+                            if s_global.numel() > 0:
+                                surf_sum.index_add_(0, s_global, s_chunk)
+                                surf_cnt.index_add_(
+                                    0, s_global, torch.ones_like(s_global, dtype=torch.int32)
+                                )
 
-                    if v_view_idx < v_view_count:
-                        v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
-                        v_mask_i = volume_mask_cpu[i].bool()
-                        v_chunk = volume_pred_real_cpu[i][v_mask_i]
-                        if v_global.shape[0] != v_chunk.shape[0]:
-                            raise RuntimeError(
-                                f"volume global-index mismatch case={case_id} K={K} "
-                                f"view_idx={v_view_idx}/{v_view_count}: "
-                                f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
-                            )
-                        if v_global.numel() > 0:
-                            vol_sum.index_add_(0, v_global, v_chunk)
-                            vol_cnt.index_add_(
-                                0, v_global, torch.ones_like(v_global, dtype=torch.int32)
-                            )
-                timing["io_seconds"] += time.time() - t1
+                        if v_view_idx < v_view_count:
+                            v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
+                            v_mask_i = volume_mask_cpu[i].bool()
+                            v_chunk = volume_pred_real_cpu[i][v_mask_i]
+                            if v_global.shape[0] != v_chunk.shape[0]:
+                                raise RuntimeError(
+                                    f"volume global-index mismatch case={case_id} K={K} "
+                                    f"view_idx={v_view_idx}/{v_view_count}: "
+                                    f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
+                                )
+                            if v_global.numel() > 0:
+                                vol_sum.index_add_(0, v_global, v_chunk)
+                                vol_cnt.index_add_(
+                                    0, v_global, torch.ones_like(v_global, dtype=torch.int32)
+                                )
+                    timing["io_seconds"] += time.time() - t1
 
     if int(surf_cnt.min()) == 0:
         raise RuntimeError(
@@ -377,7 +466,7 @@ def process_case_multires(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    n_passes = len(resolutions) * (2 if use_mirror else 1)
+    n_passes = len(resolutions) * (2 if use_mirror else 1) * j_passes
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -473,6 +562,7 @@ def evaluate_split_multires(
     cfg: EvalConfig,
     resolutions: list[int],
     use_mirror: bool,
+    use_jitter: bool,
     distributed_state,
 ) -> dict[str, float]:
     """Distribute cases across ranks, run multi-res TTA per case, return finalized metrics."""
@@ -500,6 +590,9 @@ def evaluate_split_multires(
             cfg=cfg,
             resolutions=resolutions,
             use_mirror=use_mirror,
+            use_jitter=use_jitter,
+            n_jitter_passes=cfg.n_jitter_passes,
+            jitter_eps=cfg.jitter_eps,
         )
         add_case_to_accumulator(
             acc,
@@ -549,9 +642,15 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
+    valid_modes = ("res_avg", "mirror_res_avg", "mirror_res_jitter_avg")
     for mode in modes:
-        if mode not in ("res_avg", "mirror_res_avg"):
-            raise ValueError(f"Unknown eval mode: {mode!r}")
+        if mode not in valid_modes:
+            raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
+    if "mirror_res_jitter_avg" in modes:
+        if cfg.jitter_eps <= 0:
+            raise ValueError("mirror_res_jitter_avg requires --jitter-eps > 0")
+        if cfg.n_jitter_passes < 1:
+            raise ValueError("mirror_res_jitter_avg requires --n-jitter-passes >= 1")
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
@@ -657,11 +756,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode == "mirror_res_avg"
+            use_mirror = mode in ("mirror_res_avg", "mirror_res_jitter_avg")
+            use_jitter = mode == "mirror_res_jitter_avg"
             if state.is_main:
+                extra = (
+                    f" jitter_eps={cfg.jitter_eps} n_jitter={cfg.n_jitter_passes}"
+                    if use_jitter
+                    else ""
+                )
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror} ===",
+                    f"resolutions={resolutions} mirror={use_mirror}{extra} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -675,6 +780,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 cfg=cfg,
                 resolutions=resolutions,
                 use_mirror=use_mirror,
+                use_jitter=use_jitter,
                 distributed_state=state,
             )
             dt = time.time() - t0
