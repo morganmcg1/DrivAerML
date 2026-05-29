@@ -1,0 +1,65 @@
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+Device: cuda:0
+DDP world_size=8
+Loaded checkpoint epoch=13 source=ema params=17.41M
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+
+
+
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run wu0avbzr
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_035456-wu0avbzr
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run edward/h212-h148-mirror-profile
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/wu0avbzr
+
+=== Evaluating test (11091 views) ===
+test_original  loss=0.00423 abupt_axis_rel_l2_pct=5.8508 surface_p_mae=0.01062 volume_p_mae=6.85920 wall_shear_mae=0.05766 cases=50
+  test_original -> abupt=5.8508% | SP=3.6955% | WSS=6.7750% | VP=3.4164% | WSS_x=6.0191% | WSS_y=7.3891% | WSS_z=8.7337%
+test_mirrored  loss=0.00422 abupt_axis_rel_l2_pct=5.8497 surface_p_mae=0.01063 volume_p_mae=6.85073 wall_shear_mae=0.05764 cases=50
+  test_mirrored -> abupt=5.8497% | SP=3.6970% | WSS=6.7731% | VP=3.4152% | WSS_x=6.0173% | WSS_y=7.3865% | WSS_z=8.7322%
+  runtime=198.7s n_batches=347
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+wandb: updating run metadata
+wandb: 
+wandb: Run history:
+wandb:      test_mirrored/abupt_axis_mean_rel_l2 ▁
+wandb:  test_mirrored/abupt_axis_mean_rel_l2_pct ▁
+wandb:                       test_mirrored/cases ▁
+wandb:                        test_mirrored/loss ▁
+wandb:               test_mirrored/surface_cases ▁
+wandb:                test_mirrored/surface_loss ▁
+wandb:        test_mirrored/surface_pressure_mae ▁
+wandb:     test_mirrored/surface_pressure_rel_l2 ▁
+wandb: test_mirrored/surface_pressure_rel_l2_pct ▁
+wandb:                test_mirrored/volume_cases ▁
+wandb:                                       +64 ...
+wandb: 
+wandb: Run summary:
+wandb:                            model/n_params 17413721
+wandb:      test_mirrored/abupt_axis_mean_rel_l2 0.0585
+wandb:  test_mirrored/abupt_axis_mean_rel_l2_pct 5.84965
+wandb:                       test_mirrored/cases 50
+wandb:                        test_mirrored/loss 0.00422
+wandb:               test_mirrored/surface_cases 50
+wandb:                test_mirrored/surface_loss 0.00516
+wandb:        test_mirrored/surface_pressure_mae 0.01063
+wandb:     test_mirrored/surface_pressure_rel_l2 0.03697
+wandb: test_mirrored/surface_pressure_rel_l2_pct 3.697
+wandb:                                       +65 ...
+wandb: 
+wandb: 🚀 View run edward/h212-h148-mirror-profile at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/wu0avbzr
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_035456-wu0avbzr/logs
