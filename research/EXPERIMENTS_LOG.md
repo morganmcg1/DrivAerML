@@ -1,3 +1,32 @@
+## 2026-05-29 20:45Z — PR #1447 edward H267 MERGED: Finding QQ — EP15 stacks with full recipe
+
+### PR #1447 edward H267 — MERGED as NEW SOTA (val 5.9367 / test 5.7825)
+
+- **Branch**: edward/h267-ep15-full-stack-relaunch
+- **W&B run**: `snouz8zi`
+- **Hypothesis**: EP15 EMA + K=5 weight-noise (σ=5e-4) × 6-res × mirror full stack. Both EP15 advantage and H253 stacking compound.
+
+| Split | abupt | SP | VP | WSS | WSS_x | WSS_y | WSS_z |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| val | **5.9367** | 3.9206 | 3.4673 | 6.7341 | — | — | — |
+| test | **5.7825** | **3.6505** | **3.3850** | **6.6898** | — | — | — |
+
+**vs prior SOTA H253 (EP13+stack):** val −5.1bp / test −2.2bp. vs H244 (EP15 only): val −8.5bp / test −7.1bp.
+
+**Finding QQ-EP15-stack-compound**: EP15 advantage (−9.3bp single-res) stacks with H253 full recipe at ~55% additive rate → net −5.1bp on top of H253. Sub-additivity expected from Finding JJ partial orthogonality but still substantial gain. Validates compounding strategy: EP15+stack > EP13+stack.
+
+**Paper floor progress**: test_SP 3.6505 → 3.577 floor still 7.35bp gap (SP improved 8.7bp vs H253, which is the best SP-channel progress in recent rounds).
+
+**Operational note**: PR #1447 merge reverted BASELINE.md to H244 state (PR base was from pre-H253 era). Fixed in commit 0d49a83 (re-applied both H253 and H267 SOTA entries).
+
+---
+
+## 2026-05-29 18:52Z — 3 PRs closed: H266/H256/H268
+
+*(See prior log entries from this session for details — H266 Finding PP, H256 Finding HH-H183, H268 Finding NN-antithetic)*
+
+---
+
 ## 2026-05-29 15:20 — PR #1440 fern H264 CLOSED: Finding LL-EPchain (EP15 is cosine optimum)
 
 ### PR #1440 fern H264 — CLOSED: Finding LL-EPchain
