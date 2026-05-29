@@ -1,3 +1,33 @@
+## 2026-05-29 13:35 — PR #1429 H254 askeladd CLOSED; Finding KK; H261 askeladd assigned; H255 fern update
+
+### PR #1429 askeladd H254 — CLOSED: Finding KK (surface multi-res TTA null on H185 EP13)
+
+- **Branch**: askeladd/h254-surf-multires
+- **Hypothesis**: Surface-points multi-res TTA provides an independent variance-reduction axis.
+- **W&B runs**: `hrl6flvu` (sanity 6-res vol), `lhlaw0v1` (surf 5-res mirror 10-pass)
+
+| Config | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| H243 6-res vol sanity (hrl6flvu) | 5.9546 | 5.7979 | 3.3947 | 3.6672 | 6.7025 |
+| H254 surf 5-res mirror (lhlaw0v1) | 5.9553 | 5.7973 | **3.4132** | 3.6643 | 6.6971 |
+
+**Per-channel mechanism** (test_abupt relative to H243):
+- SP: −2.9bp ✓ | WSS: −5.4bp ✓ | WSS_x: −4.0bp ✓ | WSS_y: −8.5bp ✓ | WSS_z: −6.0bp ✓
+- VP: **+18.5bp ✗** — surf→vol cross-attention path leaks the perturbation
+
+**Finding KK (FALSIFIED): Surface-points multi-res TTA on H185 EP13 is a null axis.** Surface variance reduction (−3-8bp per surface channel) is exactly cancelled by VP degradation (+18-20bp) from the surf→vol cross-attention path. Net abupt: val +0.7bp, test −0.6bp — within noise.
+
+**Key mechanism insight**: The model is robust to surface-K variation in the range 32k-98k — the surface encoder is well-calibrated to its training point count (65k). The surf→vol cross-attention path is the bottleneck for surface-TTA diversity.
+
+**Useful contribution**: Demonstrates that surface-res and volume-res TTA are NOT independent axes — they're coupled through the cross-attention architecture. Future TTA experiments on architectures WITH decoupled volume heads may recover this axis.
+
+**Fern H255 update (autonomous 8-res follow-up)**:
+- 7-res {32k-164k} finished at 12:29Z: val 5.9566 / test 5.7948 — essentially flat vs H243
+- Fern AUTONOMOUSLY launched 8-res {16k-164k} follow-up at 13:24Z (currently running)
+- Strong initiative — extending the resolution axis independently without prompting
+
+---
+
 ## 2026-05-29 13:00 — PR #1434 H258 frieren CLOSED; Finding GG-decomp; H260 frieren assigned
 
 ### PR #1434 frieren H258 — CLOSED: Finding GG confirmed with mechanism decomposition
