@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 19:00Z | Branch: `tay` | **SOTA: H253 EP13+K=5+6-res+mirror (PR #1428 merged 17:15Z)** | Round 4k: 8 active | **H267 edward EP15+full stack highest EV (test phase imminent ~19:30-20:30Z); H272 nezuko Hutchinson highest EV new**
+**Updated**: 2026-05-29 15:35Z | Branch: `tay` | **SOTA: H244 EP15+6-res (PR #1415 merged 14:57Z)** | Round 4j: 8 active | **H253 val 5.9418 clears gate; H264 closed (LL-EPchain)**
 
 ---
 
@@ -9,118 +9,77 @@
 | Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP |
 |---|---:|---:|---:|---:|---:|
 | SOTA H185+TTA (PR #1382) | 5.9755% | 5.8221% | 6.7214% | 3.4400% | 3.6806% |
+| H236 3-res mirror TTA (PR #1408) | 5.9613% | 5.8081% | 6.7130% | 3.4033% | 3.6759% |
 | H243 6-res mirror TTA (PR #1414) | 5.9546% | 5.7979% | 6.7025% | 3.3947% | 3.6672% |
-| H244 EP15+6-res mirror TTA (PR #1415) | 5.9452% | 5.7896% | 6.6947% | 3.3882% | 3.6595% |
-| **H253 EP13+K=5+6-res+mirror stack (PR #1428, merged 17:15Z)** | **5.9418%** | **5.7847%** | **6.6895%** | **3.3891%** | **3.6592%** |
+| H252 stacked TTA: noise×3-res×mirror (PR #1413) | 5.9492% | 5.7975% | 6.7030% | 3.3996% | 3.6662% |
+| **H244 EP15+6-res mirror TTA (PR #1415, merged 14:57Z)** | **5.9452%** | **5.7896%** | **6.6947%** | **3.3882%** | **3.6595%** |
 | Transolver-3 target (Morgan) | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% |
 
-**Merge gate**: val_abupt < **5.9418%** AND test_abupt < **5.7847%**
-**Paper floors**: test_VP 3.3891 ≤ 3.421 ✓ | test_WSS 6.6895 ≤ 6.727 ✓ | test_SP 3.6592 > 3.577 ✗
+**Merge gate**: val_abupt < **5.9452%** AND test_abupt < **5.7896%**
+**Paper floors**: test_VP 3.3882 ≤ 3.421 ✓ | test_WSS 6.6947 ≤ 6.727 ✓ | test_SP 3.6595 > 3.577 ✗
 
 ---
 
-## Active Fleet (Round 4k, as of 19:00Z)
+## Active Fleet (Round 4j, as of 15:20Z)
 
 | PR | Student | Hypothesis | Status | ETA |
 |---|---|---|---|---|
-| **#1447** | **edward** | **H267: EP15 + K=5 full stack** — HIGHEST EV, predicted val ~5.932 | 🟢 running since 17:10Z (relaunch w/NCCL fix); test phase imminent | ~19:30-20:30Z |
-| **#1448** | **alphonse** | **H269: K=10 noise stacked (EP13+6-res+mirror)** — predicted val ~5.937 | 🟢 launched 17:43Z, run `pkkr5g2u` | ~23:23Z |
-| **#1449** | **tanjiro** | **H270: σ ∈ {3e-4, 2e-4} stacked** — tests if smaller σ optimal | 🟢 launched | ~22:00Z |
-| **#1433** | **thorfinn** | **H257: σ=1e-4 stacked** — σ=2e-4 cancelled (tanjiro covers) | 🟢 σ=1e-4 running, run `b421o7n5` | ~20:33Z |
-| **#1451** | **frieren** | **H271: Sobol QMC weight perturbation** — low-discrepancy noise, attacks K-plateau | 🆕 assigned 18:15Z | ~21:15Z |
-| **#1452** | **nezuko** | **H272: Hutchinson curvature-inverse noise** — per-param σ by diag Hessian, HIGHEST EV new | 🆕 assigned 18:15Z | ~21:45Z |
-| **#1453** | **askeladd** | **H273: Taylor 2nd-order correction** — λ-swept quadratic bias subtraction | 🆕 assigned 18:15Z | ~21:15Z Arm A |
-| **#1454** | **fern** | **H274: Anti-thetic K=3 noise in full H253 6-res×mirror stack** — tests NN-antithetic composability | 🆕 assigned 18:52Z | ~22:00Z |
-| ~~#1443~~ | ~~fern~~ | ~~H266: TTA ANOVA — Finding PP banked~~ | 🔴 closed 18:52Z | — |
-| ~~#1442~~ | ~~askeladd~~ | ~~H268: Anti-thetic noise — Finding NN-antithetic confirmed~~ | 🔴 closed 17:58Z | — |
-| ~~#1439~~ | ~~frieren~~ | ~~H263: avg(EP14,EP15) SWA — Finding LL-SWA-null~~ | 🔴 closed 17:58Z | — |
-| ~~#1432~~ | ~~nezuko~~ | ~~H256: H183 stack portability — Finding HH-H183-6res-asymmetry~~ | 🔴 closed 17:58Z | — |
-| ~~#1428~~ | ~~alphonse~~ | ~~H253: MERGED NEW SOTA val 5.9418 / test 5.7847~~ | 🏆 merged 17:15Z | — |
-
-**Zero idle students** — 8 active experiments.
-
-**Advisor-action required**:
-- #1447 (edward H267): rebase needed when ready to merge (tay advanced via H253)
-- #1433 (thorfinn H257): rebase needed when ready to merge
-
-Neither blocks the active experiments — they need rebase only before the PR can be merged. Address at result-submission time.
+| **#1428** | **alphonse** | **H253: noise σ=5e-4 + 6-res stack EP13 (val 5.9418 ✓ clears gate)** | 🟢 test arm pending | ~17:00Z |
+| **#1432** | **nezuko** | **H256: H183 + 6-res + noise stack (portability)** | 🟢 running (crash fixed) | ~16:00Z |
+| **#1433** | **thorfinn** | **H257: σ-sweep on 6-res+noise stack** | 🟢 running (σ=1e-3 arm) | ~16:30Z |
+| **#1438** | **tanjiro** | **H262: K-noise saturation K=10/20 noise_only** (run dev5yglv) | 🟢 running, step=0 only | ~16:00Z |
+| **#1439** | **frieren** | **H263: avg(EP14,EP15) EMA + 6-res mirror TTA** | 🟡 EP15 in W&B; waiting on edward EP14 upload | TBD |
+| ~~#1440~~ | ~~fern~~ | ~~H264 CLOSED: Finding LL-EPchain — EP15 is cosine optimum~~ | 🔴 closed | — |
+| **#1441** | **edward** | **H265: EP14 + 6-res mirror TTA + upload EP14 artifact** | 🟡 instructed to upload EP14 first | ~16:30Z+ |
+| **#1443** | **fern** | **H266: TTA ANOVA decomposition — mirror×res×noise 2³ design** | 🟡 just assigned | ~17:00Z |
+| **#1442** | **askeladd** | **H268: Anti-thetic noise pairs ±δ** (run n2j8u2lo) | 🟢 running, no metrics yet | ~16:00Z |
+| (background) | edward | Arm 2: EP15+full stack h1ae7x1j | 🟢 running | ~16:39Z |
 
 ---
 
-## Strategic Focus (Round 4k)
+## Strategic Focus (Round 4j)
 
-### After H253 merge — what we know
+### Critical insight after H244 merge
 
-The H253 stack (EP13 + K=5 noise + 6-res + mirror = 60 passes) is the new SOTA. Eight compounding/orthogonal experiments now in flight, attacking five different dimensions:
+The EP15 checkpoint is the key differentiator. EP15 single-res val_orig 6.0079 (vs EP13 6.0172, −9.3bp) — this gain stacks additively with TTA. The research direction should now systematically explore:
 
-**Hyperparameter axis (in flight)**:
-1. **EP15 full stack** (H267 edward): EP15 advantage (−9.3bp single-res) should carry through full stack. Predicted val ~5.932-5.935. Highest EV.
-2. **K=10 stacked** (H269 alphonse): K-saturation finding says K=5→10 adds +0.53bp in stacked context. Predicted val ~5.937.
-3. **Smaller σ stacked** (H270 tanjiro {3e-4, 2e-4} + H257 thorfinn σ=1e-4): Smaller σ may be optimal in stacked context. Coverage: {1e-4, 2e-4, 3e-4, 5e-4 SOTA, 1e-3 falsified}.
-
-**Sampling-geometry axis (new generation, in flight)**:
-4. **Sobol QMC** (H271 frieren #1451): Low-discrepancy weight-noise coverage.
-5. **Hutchinson curvature-inverse σ** (H272 nezuko #1452): Per-parameter σ scaled by diagonal Hessian.
-6. **Taylor 2nd-order correction** (H273 askeladd #1453): Subtract quadratic bias from anti-thetic mean.
-
-**Composability axis (in flight)**:
-7. **Anti-thetic stacked** (H274 fern #1454): Anti-thetic K=3 in full M×R stack — tests if NN-antithetic composes with M×R.
-
-Composition scenario (if H267 confirms EP15 stacks + H269 confirms K=10 stacks): EP15 + K=10 + 6-res + mirror → val ~5.926 theoretical maximum in this TTA paradigm. Layering Hutchinson or Sobol or anti-thetic on top would push further.
+1. **EP-extension chain**: Is EP16 > EP15? EP17? Or is EP15 the cosine floor?
+2. **Multi-EP averaging**: Does avg(EP14,EP15) generalize better than either alone?
+3. **Full stack on EP15**: EP15 + K=5 noise + 6-res + mirror (edward Arm 2, h1ae7x1j) — predicted val ~5.938-5.942
+4. **K-optimum for noise**: Is K=5 the saturation point? (tanjiro H262, fast probe)
 
 ### Next SOTA candidates (ranked by EV)
 
-1. **Edward H267** (PR #1447): EP15 + K=5 full stack → predicted val ~5.932-5.935 ← HIGHEST EV
-2. **Nezuko H272** (PR #1452): Hutchinson curvature-inverse σ → 5.928-5.942
-3. **Alphonse H269** (PR #1448): K=10 noise stacked on EP13 → 5.937
-4. **Fern H274** (PR #1454): Anti-thetic K=3 stacked → 5.932-5.940 (if NN composes)
-5. **Frieren H271** (PR #1451): Sobol QMC → 5.929-5.941
-6. **Tanjiro H270** (PR #1449): σ=3e-4 stacked — possible gate hit if basin narrow
-7. **Askeladd H273** (PR #1453): Taylor 2nd-order — exploratory
-8. **Thorfinn H257** σ=1e-4 (PR #1433): low probability
+1. **Alphonse H253** (`qytjlv97`): val_stacked **5.9418** ✓ clears val gate. EP13 + noise × 6-res × mirror. Test arm pending ~17:00Z. **If test_stacked < 5.7896 → IMMEDIATE SOTA merge.**
+2. **Edward Arm 2 (h1ae7x1j)**: EP15 + full H252 stack = EP15 × noise × 6-res × mirror. Predicted val ~5.935-5.940 (compounds H253 stack with EP15 advantage). ETA ~16:39Z.
+3. **Frieren H263** (BLOCKED): avg(EP14,EP15) + 6-res mirror. Pending edward W&B artifact upload.
+4. **Fern H264** (BLOCKED): EP16 + 6-res mirror. Pending edward W&B artifact upload.
 
-### Findings banked this cycle (4 new)
+### Checkpoint accessibility (RESOLVED for EP15, EP14 pending)
 
-- **LL-SWA-null** (H263 closed): Adjacent late-cosine EMA SWA fails. Future SWA must use materially different LR regions.
-- **HH-H183-6res-asymmetry** (H256 closed): H183 6-res TTA HURTS test (+70bp). Multi-res portability is checkpoint-specific.
-- **NN-antithetic confirmed** (H268 closed): Anti-thetic K=3 beats random K=5 by +1.3bp; variance reduction concentrates on highest-variance channels.
-- **PP — TTA axis structure** (H266 closed): 2³ ANOVA — TTA axes NOT independent. Mirror×Noise interaction largest (−1.68bp). Res orthogonal. Mirror dominates SP/WSS; Res dominates VP. New TTA axes must escape M×N cluster or use fundamentally different noise mechanisms.
-
-### Cosine extension chain — COMPLETE (Finding LL-EPchain confirmed)
-
-| EP | single-res val_orig 65k | Δ vs EP15 | Source |
-|---|---:|---:|---|
-| EP13 | 6.0172 | +9.3bp | baseline H185 |
-| EP14 | 6.0169 | +9.0bp | H265 edward |
-| **EP15** | **6.0079** | **(best)** | H244/H253 basis |
-| EP16 | 6.0118 | +3.9bp regression | H264 fern (training-time history) |
-
-**Insight**: EP15 is a sharp single-epoch dip. EP16 escapes the basin. SWA on EP14+EP15 also fails to find a wider basin (LL-SWA-null).
+- W&B artifact `model-edward-h244-h185-ep16-cosine-ext-0gjfv45i:v0` (alias `epoch-15`/`best`) = EP15 EMA. Frieren can pull this directly.
+- EP14 still needs edward to upload. Instructed (PR #1441). ETA ~15 min.
+- EP16 DEAD — Finding LL-EPchain. No upload needed.
+- **Lesson**: For `--save-every-epoch` training PRs, upload all epoch checkpoints as W&B artifacts so downstream eval hypotheses don't block on pod-local files.
 
 ---
 
-## Findings Banked This Round (18 total — 4 new this cycle)
+## Findings Banked This Round (12 total)
 
 | Finding | Source | Summary |
 |---|---|---|
 | LL | H249 fern | Tight-range multi-res WORSE; wider is better |
-| LL-noise | H259 tanjiro | σ=5e-4 optimal standalone; basin edge 5e-4→1e-3 |
+| LL-noise | H259 tanjiro | σ=5e-4 optimal; basin edge 5e-4→1e-3 |
 | LL-extend | H255 fern | Resolution saturates at 6-res for H185 EP13 EMA |
-| LL-EPchain | H264 fern + H265 edward | EP13→EP14(flat)→EP15(sharp dip −9.3bp)→EP16(regression). EP15 is single-epoch basin. |
-| **LL-SWA-null** | **H263 frieren** | **avg(EP14,EP15) regresses +6bp uniformly. Adjacent late-cosine SWA fails — no basin-width gain.** |
+| **LL-EPchain** | **H264 fern** | **EP-extension chain: EP13(6.0172)→EP14(6.0168)→EP15(6.0079)→EP16(6.0118). EP15 is cosine optimum; EP16 regresses +3.9bp. Do NOT extend past EP15.** |
 | HH N=4 | H251 nezuko | Multi-res +12-15bp portable H185/H183/H188 |
-| HH-H188 | H261 askeladd | H188 EP13 not competitive with H185 EP13 (14-16bp worse) |
-| **HH-H183-6res-asymmetry** | **H256 nezuko** | **H183 6-res HURTS test +70bp. Multi-res portability is checkpoint-specific; stack must be re-validated per base.** |
+| **HH-H188** | **H261 askeladd** | **H188 EP13 not competitive with H185 EP13 (14-16bp worse absolute baseline)** |
 | FF generalized | H252 thorfinn | H148 flat basin; noise_only σ=5e-4 gives −39bp test |
 | DD-ext3 | H250 frieren | Frequency-weighted multi-res monotonically worse |
 | Stacking orthogonality | H252 tanjiro | Weight-space + input-space TTA super-additive (+4bp excess) |
 | GG-decomp | H258 frieren | H148 multi-res gain 14× smaller than H185 |
 | KK | H254 askeladd | Surface multi-res null: surf→vol cross-attn coupling cancels all gain |
-| EE-volume | H260 frieren | Vol-point jitter catastrophic all scales |
-| JJ | H253 alphonse | Weight-space + input-space TTA partially orthogonal: noise ~39% as effective in stacked context (~80% variance already captured by multi-res) |
-| KK-noise-saturation | H262 tanjiro | K≈10 variance-reduction plateau: K=5→10 = +1.36bp; K=10→20 = only +0.42bp. Standardize on K=10. |
-| **NN-antithetic** | **H268 askeladd** | **Anti-thetic K=3 (6 passes) beats random K=5 (5 passes) by +1.3bp. Linear gradient cancelled. Diminishing returns at K=5 anti.** |
-| **PP** | **H266 fern** | **2³ ANOVA: TTA axes NOT independent. Mirror×Noise interact negatively (−1.68bp, same error type). Res most orthogonal. Mirror dominates SP/WSS; Res uniquely dominates VP (3-4× margin). Full stack required for gate.** |
+| EE-volume | H260 frieren | Vol-point jitter catastrophic all scales — closes point-position-jitter axis |
 
 ---
 
@@ -129,32 +88,23 @@ Composition scenario (if H267 confirms EP15 stacks + H269 confirms K=10 stacks):
 | Mechanism | Result |
 |---|---|
 | Mirror-y | ✓ VALID — +5bp |
-| Multi-res vol 6-res {32k-131k} | ✓ VALID — +21bp (H243), OPTIMAL range for H185 |
+| Multi-res vol 6-res {32k-131k} | ✓ VALID — +21bp (H243), OPTIMAL range |
 | Multi-res vol 7-res / 8-res | ✗ MARGINAL (LL-extend): 7-res val regresses; 8-res test only |
-| Multi-res TTA on H183 | ✗ 3-res helps val/test, **6-res HARMS test** (HH-H183-6res-asymmetry) |
 | EP-extension (EP15) | ✓ VALID — −9.3bp single-res → additive with 6-res TTA |
-| EP14 extension | ✗ FLAT (H265 edward): EP14 val_orig 6.0169 ≈ EP13 6.0172 |
-| EP16 extension | ✗ CLOSED (Finding LL-EPchain): EP16 val_orig 6.0118 > EP15 6.0079 |
-| **EP15 + full stack (EP15 × noise × 6-res × mirror)** | **🟢 UNKNOWN — H267 edward running (~19:30-20:30Z)** |
-| Adjacent multi-EP SWA (avg EP14, EP15) | ✗ FALSIFIED (LL-SWA-null): regresses +6bp uniformly. No basin-width gain. |
+| EP14 extension | UNKNOWN — H265 edward testing (after EP14 upload) |
+| EP16 extension | ✗ CLOSED (Finding LL-EPchain): EP16 val_orig 6.0118 > EP15 6.0079; regression +3.9bp. EP15 is cosine optimum. |
+| Multi-EP EMA averaging | UNKNOWN — H263 frieren testing |
 | Weight-space noise σ=5e-4 K=5 | ✓ VALID — +8bp standalone |
 | Noise + 3-res×mirror stacked | ✓ VALID — H252 +30bp super-additive |
-| **Noise + 6-res×mirror stacked (K=5)** | **✓ VALID — H253 +1.28bp; partial orthogonality (Finding JJ)** |
-| Noise + H183 6-res×mirror stacked | ✗ FALSIFIED (H256): val −85bp but test +60bp due to H183 6-res asymmetry |
-| K=10 noise stacked | 🟢 UNKNOWN — H269 alphonse testing (~23:23Z) |
-| Anti-thetic K=3 noise stacked | 🟢 UNKNOWN — H274 fern testing (~22:00Z) |
-| σ ∈ {1e-4, 2e-4, 3e-4} in stacked context | 🟢 UNKNOWN — H270 tanjiro + H257 thorfinn σ=1e-4 running |
-| σ=1e-3 in stacked context | ✗ FALSIFIED — H257 thorfinn val 5.9626 (worse than σ=5e-4 by 21bp) |
-| Sobol QMC weight perturbation | 🟢 UNKNOWN — H271 frieren testing (~21:15Z) |
-| Hutchinson curvature-inverse σ | 🟢 UNKNOWN — H272 nezuko testing (~21:45Z) |
-| Taylor 2nd-order bias correction | 🟢 UNKNOWN — H273 askeladd testing (~21:15Z Arm A) |
-| K-noise saturation (K>5) | ✓ K≈10 optimum (Finding KK-noise-saturation): K=5→10 +1.36bp, K=10→20 only +0.42bp |
-| Anti-thetic noise pairs ±δ (standalone) | ✓ VALID: anti-K=3 beats random K=5 by +1.3bp (Finding NN-antithetic) |
-| σ optimal for noise (standalone) | ✓ CONFIRMED σ=5e-4 (Finding LL-noise) |
+| Noise + 6-res×mirror stacked | UNKNOWN — H253 alphonse testing (HIGHEST EV) |
+| Noise + H183 6-res×mirror stacked | UNKNOWN — H256 nezuko testing |
+| EP15 + 6-res×mirror+noise stacked | UNKNOWN — edward Arm 2 h1ae7x1j testing |
+| K-noise saturation (K>5) | UNKNOWN — H262 tanjiro testing |
+| Anti-thetic noise pairs ±δ | UNKNOWN — H268 askeladd testing |
+| σ optimal for noise | ✓ CONFIRMED σ=5e-4 (Finding LL-noise) |
 | Surface multi-res | ✗ NULL — Finding KK |
 | Vol-point jitter | ✗ FALSIFIED all scales — Finding EE-volume |
 | H188 family TTA | ✗ NOT VIABLE — H188 baseline 14-16bp worse than H185 |
-| H183 family TTA (deep extension) | ✗ TEST-HARMFUL — Finding HH-H183-6res-asymmetry |
 | Tight-range multi-res | ✗ WORSE (Finding LL) |
 | Frequency-weighted multi-res | ✗ MONOTONICALLY WORSE (Finding DD-ext3) |
 | Per-channel/per-res α blending | ✗ ALL FALSIFIED |
