@@ -1,33 +1,46 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 15:55Z._
+_Last updated: 2026-05-29 17:15Z._
 
-**15:55Z fleet update — H159+H162 CLOSED non-merge, H161 already closed, H160 deadline-harvest in progress:**
+**17:15Z fleet update — Wave 41 single-knob axis CLOSED. Structural perturbation wave (H164–H167) in flight:**
 
 | Hyp | Run | rt | Terminal test_WSS | vs H147 SOTA 6.5409% | State |
 |-----|-----|----|------|------|------|
 | H147 SOTA | k6q4c3on | — | **6.5409** | reference | merged baseline |
-| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7+juxadtjh | 5.13h+eval | **6.6678** | **+0.127** | **CLOSED PR #1423 15:51Z** — NON-MERGE |
-| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 5.11h running | TBD | TBD | **RUNNING past deadline** — advisor directed harvest NOW (15:55Z) |
-| **H161** wss_charb=0.3 z (nezuko) | kvfaya2j+5ttbfh4o | terminal | 6.7402 | +0.199 | CLOSED PR #1427 15:23Z |
-| **H162** pe_features=24 (fern) | 7vdb5zwz+0jfesb3w | 3.78h+eval | **6.7070** | **+0.166** | **CLOSED PR #1430 15:52Z** — NON-MERGE |
+| H159 vol_p_charb=0.3 (frieren prev) | z6ybgmx7+juxadtjh | 5.13h+eval | 6.6678 | +0.127 | CLOSED PR #1423 15:51Z — NON-MERGE |
+| **H160 β=0.95/0.985 (tanjiro)** | **7a14s7uo** | **6.1h terminal+eval** | **6.6247** | **+0.084** | **CLOSED PR #1424 17:15Z — NON-MERGE** |
+| H161 wss_charb=0.3 z (nezuko prev) | kvfaya2j+5ttbfh4o | terminal | 6.7402 | +0.199 | CLOSED PR #1427 15:23Z |
+| H162 pe_features=24 (fern prev) | 7vdb5zwz+0jfesb3w | 3.78h+eval | 6.7070 | +0.166 | CLOSED PR #1430 15:52Z — NON-MERGE |
+| **H164 slices 128→192 (frieren)** | (launching) | — | TBD | TBD | **ASSIGNED PR #1444** — structural axis: trunk-token-count |
+| **H165 pe_features 16→12 (fern)** | (launching) | — | TBD | TBD | **ASSIGNED PR #1445** — structural axis: spectral-density inverse |
+| **H166 surf_out_width 2.0→3.0 (nezuko)** | (launching) | — | TBD | TBD | **ASSIGNED PR #1446** — structural axis: decoder-head-width |
+| **H167 heads 4→8 (tanjiro)** | (assigning) | — | TBD | TBD | **TO ASSIGN PR #1447** — structural axis: attention-subspace-count |
 
-**Key 15:55Z reads:**
-- **H159 NON-MERGE (frieren — closed 15:51Z):** test_WSS=6.6678% (+0.127pp), test_VP=3.6092% ✓ (under cap), test_SP=3.6496% ❌ over cap by 0.073pp (same shortfall as H147), test_ABUPT=5.815% ✓ (under cap). Per-axis test_WSS_z=8.6709% ≈ tied H147 8.4882%. Trajectory tracked H147 within ±0.04pp through EP5 then plateaued. EP7 EMA-best harvested at deadline.
-- **H162 NON-MERGE (fern — closed 15:52Z):** test_WSS=6.7070% (+0.166pp), test_VP=3.7871% over cap by 0.144pp, test_SP=3.7292% over cap by 0.152pp, test_ABUPT=5.8859% over cap by 0.042pp. EP5 EMA-best harvest after disciplined kill.
-- **H160 RUNNING PAST DEADLINE (tanjiro):** W&B `7a14s7uo` state=running at runtime=5.11h step=76830 — 10 min past 15:45Z. Advisor directed harvest NOW via PR #1424 comment 15:55Z. Last reading val_WSS=6.795% at EP6.
+**Key 17:15Z reads:**
+- **H160 NON-MERGE (tanjiro — closed 17:15Z):** test_WSS=6.6247% (+0.084pp); test_VP=3.5659% ✓ clears 3.643%; test_SP=3.6542% ❌ misses 3.577% floor by 0.077pp; test_ABUPT=5.7827% ✓ clears 5.844%; test_WSS_z=8.6665% +0.178pp vs H147. **3 of 4 caps regress; test_SP missed.** Trajectory tracked H147 within ±0.09pp at every EP1-EP8 checkpoint — β2=0.985 axis is mildly forgiving (no destabilization, unlike β1↑), but does not open new test ceiling.
+- **β-grid is CLOSED.** All five grid cells around H147 (0.95, 0.98) explored. Every perturbation off the central point loses. H147 is the joint optimum on every test metric. β1 dominates early WSS dynamics; β2 is a late-phase pressure-smoothing axis that doesn't cross test ceiling. Decoupled-β per-head optimizer is the last untested β lever; banked for future wave.
 
-**MAJOR FINDING — Charbonnier-by-GradNorm-state asymmetry PARTIALLY FALSIFIED on TEST:**
-- **Mechanism observable in GradNorm dynamics** (H159 confirmed): w_vol_p clamps at 0.15 floor; r_vol_p=3.5; w_tau_z peaks at 1.46 (vs H147 final ~1.27). Heavier VP Charbonnier DID shift gradient mass to tau_z as predicted.
-- **But the gradient reallocation does NOT translate to test_WSS gain**: H159 test_WSS_z=8.6709% essentially tied with H147 8.4882%. WSS-z does NOT appear gradient-budget-limited under H147 — it has a representational/architectural floor that loss-weight knobs cannot crack.
-- **The val_VP overfit motivating H159 was an artifact** of the unstable H156 (compound β+lr) stack — on H147, val/test VP ratio is 1.0 (3.6372/3.6092). The Charbonnier intervention had no overfit to suppress.
-- **Triple-arm joint conclusion (H159+H161+H162)**: three orthogonal single-knob amplifications on H147 — heavier VP Charbonnier (H159), heavier WSS Charbonnier (H161), richer PE features (H162) — all regress test_WSS by +0.127 to +0.199pp. The H147 stack sits at a **tight LOCAL TEST optimum**. Val trajectory does not predict test (H159 descended val past H147 EP5 SOTA but regressed test by +0.127pp).
+**MAJOR FINDING — Quadruple-arm joint conclusion (H159+H161+H162+H160):**
+
+Four orthogonal single-knob perturbations on the H147 stack:
+
+| Hypothesis | Axis | Δ test_WSS |
+|---|---|---:|
+| H161 (nezuko) | WSS-Charbonnier 0.1 → 0.3 axes=z | +0.199 |
+| H162 (fern) | pe_num_features 16 → 24 | +0.166 |
+| H159 (frieren) | vol_p-Charbonnier 0.1 → 0.3 | +0.127 |
+| **H160 (tanjiro)** | **β2 0.98 → 0.985** | **+0.084** |
+
+Compounded with H149/H150/H152/H153 (other β-grid cells) and H155 (lr=9e-5) and H154 (tau_z=1.3) — **every single-knob perturbation off H147 regresses test_WSS**. The H147 stack sits at a tight local test optimum across loss-density, Charbonnier-axis, PE-spectral, β-grid, lr, and per-axis weight axes simultaneously. **Single-knob perturbation channel is closed.** Next gain must come from structural changes to the architecture (heads, slices, decoder width, PE band, geometry features).
 
 **Implications for next-wave hypothesis design:**
-- **KILLED candidates**: "raise GradNorm w_tau_z floor explicitly" (H163, queued) — the saturated VP→tau_z reallocation in H159 is the direct version and produced no test gain. Drop.
-- **KILLED candidates**: any further single-knob amplification on the H147 loss/PE/Charbonnier surface (3 negative arms in 3 directions is enough).
-- **PROMISING directions**: structural perturbations rather than knob amplifications. WSS-z bottleneck likely needs: more slices (>128), different hidden_dim/projection, multi-resolution surface mesh, curvature-conditioned attention bias, or a representational fix.
-- **OPEN candidates** from human directive priority families: STRING-family validation (multi-sigma STRING, volume-point curriculum, per-axis output scaling), mild tau_y/z weights (9mm3sz7x y=1.2/z=1.3 lr=9e-5), extended cosine 5o7jc7wi.
+- **KILLED candidates**: every direction of single-knob amplification on the H147 loss/PE/Charbonnier/β/lr/per-axis surface. The bordering region is sealed.
+- **STRUCTURAL WAVE in flight (4 orthogonal axes)**:
+  - H164 — model_slices 128→192 (trunk-token-count; PR #1444 frieren)
+  - H165 — pe_num_features 16→12 (spectral-density inverse; PR #1445 fern; tests if H162's null was overprovisioning)
+  - H166 — surface_out_width_factor 2.0→3.0 (decoder-head-width; PR #1446 nezuko)
+  - **H167 — model_heads 4→8 (attention-subspace-count; PR #1447 tanjiro; this assignment)**
+- **OPEN candidates** for next wave (if structural wave produces no win): GradNorm-α grid, conditional slices+Charbonnier combined, decoupled-β per-head optimizer, test_SP-as-primary architectural surgery, depth ablation (6→8 layers).
 
 **CRITICAL — BASELINE.md correction (commit ea99dda was wrong):** nezuko discovered in PR #1360 that the 2026-05-28 H147 SOTA section copy-pasted H39's `yym5oa8x` test_VP/test_SP into the H147 row. Verified by W&B query of `k6q4c3on`. Correct H147 metrics: **test_VP=3.4014%** (clears 3.643% floor by 0.242pp) and **test_SP=3.5634%** (clears 3.577% floor by 0.014pp). **H147 actually CLEARS all 4 floors**, not 3-of-4. Patched in BASELINE.md this session.
 

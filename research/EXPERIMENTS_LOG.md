@@ -4246,3 +4246,85 @@ This kills any further single-knob amplification candidate on the H147 loss/PE/C
 4. **WSS-z geometric/loss-side mechanism** (tau-z-aware loss weighting, curvature-conditioned attention bias). Spectral knob exhausted.
 5. **Joint negative with H161 finding banked** — single-knob amplification on H147 stack does not improve on test.
 
+
+
+## 2026-05-29 17:15Z — PR #1424 (CLOSED non-merge): H160 — β1=0.95, β2=0.985 (tanjiro)
+
+**Hypothesis**: β2-axis isolation cell — fix β1=0.95 (H147-optimal for WSS), raise β2 0.98→0.985 (H150-optimal for pressure-head claim). Original motivation (pre-correction): "β2↑ helps pressure heads without WSS regression" via decoupled-β mechanism. **Mechanism retracted** at launch when corrected H147 baseline showed H150 regressed on all 4 metrics (β-decoupling claim falsified by BASELINE.md correction commit ea99dda → e80726c).
+
+The run proceeded anyway as a structural-completion of the β-grid: tests whether β2 axis is destabilizing (like β1↑) or merely flat (no benefit at the joint optimum).
+
+**W&B run**: train+eval inline `7a14s7uo` (6.1h to EP8 natural completion, test eval at EMA-best EP8 ran as part of training process).
+
+### Result table (test, EMA-EP8 best, selection=val_primary/abupt_axis_mean_rel_l2_pct)
+
+| Metric | H160 (β2=0.985) | H147 SOTA (β2=0.98) | Δ vs H147 | Cap | Cap status |
+|---|---:|---:|---:|---:|---|
+| **test_primary/wall_shear_rel_l2_pct** ⭐ | **6.6247%** | 6.5409% | **+0.084** | — | — |
+| **test_primary/wall_shear_z_rel_l2_pct** (target axis) | **8.6665%** | 8.4882% | **+0.178** | — | — |
+| test_primary/wall_shear_x_rel_l2_pct | 5.8630% | 5.8155% | +0.048 | — | — |
+| test_primary/wall_shear_y_rel_l2_pct | 7.1638% | 7.0556% | +0.108 | — | — |
+| test_primary/volume_pressure_rel_l2_pct | 3.5659% | 3.4014% | +0.165 | 3.643% | ✓ clears |
+| test_primary/surface_pressure_rel_l2_pct | 3.6542% | 3.5634% | +0.091 | 3.577% | ❌ misses by 0.077pp |
+| test_primary/abupt_axis_mean_rel_l2_pct | 5.7827% | 5.6648% | +0.118 | 5.844% | ✓ clears |
+
+3 of 4 caps regress vs corrected H147; test_SP misses floor; test_WSS does not beat SOTA. **NO MERGE.**
+
+### Trajectory (val_WSS by EP — T_max=8 schedule)
+
+| EP | H160 (β=0.95/0.985) | H147 (β=0.95/0.98) | Δ |
+|---:|---:|---:|---:|
+| 1 | 12.869% | 12.82% | +0.05 |
+| 2 | 7.283% | 7.26% | +0.02 |
+| 3 | 6.999% | 6.98% | +0.02 |
+| 4 | 6.898% | (interp 6.85) | +0.05 |
+| 5 | 6.838% | 6.75% | +0.09 |
+| 6 | 6.795% | — | — |
+| 7 | (descent) | — | — |
+| 8 | 6.774% (val_primary terminal) | ~6.68% interp | +0.09 |
+
+Kill gates all PASS (EP1 ≤13.0%, EP3 ≤7.20%, EP5 ≤6.85% marginal, EP7 dual-gate not triggered). Monotonic descent through EP7; no divergence event. **β2=0.985 axis is mildly forgiving** (no destabilization, unlike β1↑ which destabilized H153 EP1 immediately).
+
+### β-grid closure summary
+
+H160 fills the last untested β-grid cell. Five-cell exploration is complete:
+
+```
+        β1=0.93    β1=0.95    β1=0.97
+β2=0.97  H149⛔    H152⛔     —
+β2=0.98            H147⭐     H153⛔
+β2=0.985           H160⛔    H150⛔
+```
+
+| Direction | Outcome | Mechanism note |
+|-----------|---------|---|
+| β1↓ (H149) | aborted EP3 | first-moment-window too short → noise |
+| β2↓ (H152) | aborted EP5 | second-moment-window too short → variance |
+| β1↑ (H153) | aborted EP1 | first-moment too long → momentum carry into wrong basin |
+| β1↑+β2↑ (H150) | regressed all 4 caps | joint movement compounds errors |
+| **β2↑ alone (H160)** | **regressed 3 of 4 caps; β2 axis flat between 0.98-0.985** |
+
+**β1 dominates early WSS dynamics** (H160's β1=0.95 fixed produced H147-tracking EP1 val_WSS within +0.05pp; H150's β1=0.97 produced 11.19% EP1, 1.68pp below H147). **β2 is mildly forgiving in the 0.98→0.985 direction** but doesn't open new test ceiling. H147 (0.95, 0.98) is the joint optimum on every test metric.
+
+### Quadruple-arm joint finding (H159 + H161 + H162 + H160)
+
+Four orthogonal single-knob perturbations of the H147 stack — all regress test_WSS:
+
+| Hypothesis | Single-knob perturbation | Δ test_WSS |
+|---|---|---:|
+| H161 (nezuko) | WSS-Charbonnier 0.1 → 0.3 axes=z | +0.199 |
+| H162 (fern) | pe_num_features 16 → 24 | +0.166 |
+| H159 (frieren) | vol_p-Charbonnier 0.1 → 0.3 | +0.127 |
+| **H160 (tanjiro)** | **β2 0.98 → 0.985** | **+0.084** |
+
+Five-dimensional confirmation that H147 is at a tight local test optimum across loss-density (H159, H161), spectral-density (H162), and β-grid (H149/H150/H152/H153/H160) axes. **Single-knob perturbation channel is closed.** Next gain must come from structural changes (attention heads, slice count, decoder head capacity, PE frequency band, geometry features).
+
+### Note on hypothesis framing (tanjiro's writeup)
+
+The PR was authored against pre-correction H147 baseline numbers. Advisor commit `e80726c` (10:30Z) corrected H147 VP/SP after PR was assigned but before launch. tanjiro proceeded with the run as written — the 2×2 outcome table at the end of the PR body still resolves cleanly to row 3 regardless of which H147 baseline is used. Terminal harvest used the still-running run since training completed naturally at 16:55Z (advisor's 15:55Z "kill and harvest" directive was satisfied by natural completion rather than manual abort).
+
+### Suggested follow-ups (tanjiro in SENPAI-RESULT writeup)
+
+1. **Decoupled-β per-head optimizer** (custom optimizer state per param group: β=(0.95, 0.98) on WSS head + shared trunk, β2=0.985 only on VP/SP heads). Last untested β-axis lever; moderate complexity; banked for future wave.
+2. **test_SP floor as primary objective** — corrected H147 clears 3.577% by 0.014pp; H160 misses by 0.077pp. Three runs cluster in 3.56–3.66% with no clear levers. Worth dedicated research pass on SP-specific architecture (dedicated decoder, smooth-L1).
+3. **T_max=30 retest of β=0.95/0.985** — would rule out the compressed-cosine artifact hypothesis. Not pursuing: deadline pressure + structural-perturbation wave takes precedence.
