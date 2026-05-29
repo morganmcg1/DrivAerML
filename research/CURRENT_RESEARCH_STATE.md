@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 09:20Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4f: 9 active | **HIGH-EV stacking PR #1413 extended**
+**Updated**: 2026-05-29 09:50Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4g: 9 active | **STACKING ARM active (#1413 tanjiro — highest EV)**
 
 ---
 
@@ -86,8 +86,12 @@
 | **#1419** | **alphonse** | **H248: Mirror × multi-res × point-jitter TTA on H185 EP13** | third orthogonal TTA axis |
 | ~~#1416~~ | ~~fern~~ | ~~H245: Multi-res on H183~~ | CLOSED — Finding EE(N=2): +14bp checkpoint-agnostic |
 | ~~#1412~~ | ~~frieren~~ | ~~H241: Per-channel TTA α H185~~ | CLOSED — Finding DD-extension: per-channel α also collapses to 0.5 |
+| ~~#1417~~ | ~~thorfinn~~ | ~~H246: H148 multi-res TTA~~ | CLOSED — Finding GG: val +76bp/test −6bp on H148 (density-robust outlier) |
+| ~~#1418~~ | ~~nezuko~~ | ~~H247: Per-channel α multi-res TTA~~ | CLOSED — Finding DD-extension to multi-res: uniform is local optimum |
 | **#1421** | **fern** | **H249: Tight-range multi-res TTA on H185 {57k,65k,73k}** | resolution spacing sensitivity |
 | **#1422** | **frieren** | **H250: Frequency-weighted multi-res TTA — heavy K=65536** | resolution weighting by training-frequency bias |
+| **#1425** | **nezuko** | **H251: Multi-res TTA on H188 EP13 — Finding GG N=4** | checkpoint portability probe |
+| **#1426** | **thorfinn** | **H252: Weight-noise TTA on H148 EP13 — flat-basin probe** | Finding FF generalization to density-robust checkpoint |
 
 **Budget remaining**: ~7.0h. edward H244 training sprint uses ~5.7h.
 
@@ -167,6 +171,8 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | **EE (prelim N=2)** | this cycle | **Multi-res TTA bonus is CHECKPOINT-INVARIANT at ~14bp. H185 (8bp mirror) +14bp; H183 (50bp mirror) +14bp. Mirror and multi-res mechanisms are independent — bonus does NOT scale with mirror sensitivity. N=3 pending (thorfinn H246).** |
 | **DD-extension** | this cycle | **Per-channel α-sweep on same-checkpoint TTA ALSO collapses to 0.5 per channel (frieren H241). H235 Δ measures prediction disagreement, NOT bias asymmetry. α-tuning is futile at both global and per-channel levels for same-checkpoint mirror TTA.** |
 | **FF (prelim)** | this cycle | **Weight-space noise σ ∈ [1e-5, 5e-4] gives MONOTONIC improvement on H185 EP13 (tanjiro H242 #1413). σ=5e-4: noise_only val 5.9845 (vs orig 6.0172, −33bp); +mirror→val 5.9674 (8bp better than H209). H185 sits in wide flat basin. Mechanism ORTHOGONAL to mirror+multi-res — stacked version (H242 extension) is highest-EV SOTA push.** |
+| **GG** | this cycle | **Multi-res TTA portability is checkpoint-specific. H148: val +76bp WORSE / test −6bp (val-test sign flip). H185/H183: both +~14bp. H148 density robustness (Finding CC) already encodes cross-res signal → multi-res adds noise on val. H246 thorfinn #1417.** |
+| **DD-ext2 (multi-res α)** | this cycle | **Per-channel α blending of multi-res vs single-res also sits at α=1.0 optimum (= H236 uniform). Surface channels benefit from multi-res too (just less than VP), so any pull-back of α_surface degrades aggregate. Nezuko H247 #1418.** |
 
 ---
 

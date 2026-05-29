@@ -1,3 +1,41 @@
+## 2026-05-29 09:50 — H246/H247 close; H251/H252 assigned; Findings GG + DD-ext2
+
+### PR #1417 thorfinn H246 — CLOSED: Finding GG banked (multi-res TTA portability checkpoint-specific)
+
+- **W&B runs**: `vny8h1zh`, `htigng2x` (group `h246-thorfinn-multi-res-h148`)
+
+| Mode | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| H148 + mirror_only (H230 ref) | 6.0824 | 5.7995 | — | — | — |
+| H148 + res_avg | 6.2017 | 5.8349 | 3.3826 | 3.6882 | 6.7638 |
+| **H148 + mirror_res_avg** | **6.1582** | **5.7934** | 3.3652 | 3.6626 | 6.7173 |
+
+- **Outcome**: FAILS PRIMARY gate (val 6.1582 > 5.9613 by 197bp). test 5.7934 is BEST single-model test_abupt seen (beats H236 by 15bp) but val regression is decisive. test_VP=3.3652 ✓ paper floor. Val-test SIGN FLIP — every val channel worsens, every test channel improves.
+- **Finding GG**: Multi-res TTA portability is checkpoint-specific. H185 +14bp val/test; H183 +14bp val/test; H148 +76bp val (WORSE) / −6bp test (better). H148's density robustness (Finding CC) means it already encodes cross-res signal at single resolution. H236 mechanism is checkpoint-specific to density-fragile backbones.
+
+### PR #1418 nezuko H247 — CLOSED: Finding DD-ext2 (per-channel α on multi-res)
+
+- **W&B runs**: `nkvnoq3f` (uniform sanity), `q2wjn9hq` (α_surf=0.5), `5jumrcri` (0.3), `7ii1r87p` (0.1) — group `h247-nezuko-per-channel-alpha`
+
+| Config | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| Uniform H236 sanity | **5.9613** | **5.8081** | 3.4033 | 3.6759 | 6.7130 |
+| α_VP=1.0, α_surf=0.5 | 5.9631 | 5.8101 | 3.4033 | 3.6773 | 6.7156 |
+| α_VP=1.0, α_surf=0.3 | 5.9646 | 5.8116 | 3.4033 | 3.6784 | 6.7174 |
+| α_VP=1.0, α_surf=0.1 | 5.9664 | 5.8135 | 3.4033 | 3.6798 | 6.7197 |
+
+- **Outcome**: ALL variants strictly degrade vs uniform (linear monotonic). FAILS gate — H236 sanity is optimal.
+- **Finding DD-ext2**: Per-channel α at multi-res boundary (multi-res vs single-res) also sits at α=1.0 optimum. Surface channels (SP, WSS) DO benefit from multi-res (both in same direction as VP), so pulling back surface α degrades aggregate. Together with DD (mirror α=0.5) and DD-extension (per-channel mirror α=0.5), the convex-blend family is EXHAUSTED: uniform is always at the local optimum for same-model, same-distribution TTA blends.
+
+### New assignments
+
+| PR | Student | Hypothesis |
+|---|---|---|
+| #1425 | nezuko | H251: Multi-res TTA on H188 EP13 — Finding GG N=4 data point |
+| #1426 | thorfinn | H252: Weight-noise σ=5e-4 TTA on H148 EP13 — flat-basin generalization probe |
+
+---
+
 ## 2026-05-29 09:20 — H242 tanjiro SEND-BACK with stacking arm + Finding FF (preliminary)
 
 ### PR #1413 tanjiro H242 — SENT BACK: weight-noise TTA beats OLD gate, fails NEW, but ORTHOGONAL → stacking opportunity
