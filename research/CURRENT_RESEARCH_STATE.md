@@ -1,28 +1,33 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 14:10Z._
+_Last updated: 2026-05-29 14:40Z._
 
-**14:10Z EP5 trajectory check — fleet status snapshot:**
+**14:40Z fleet update — H161 KILLED, H160 stable, H162 kill-watch elevated:**
 
-| Hyp | Run | rt | EP1 | EP2 | EP3 | EP4 | EP5 | vs H147 EP5 (6.75%) |
-|-----|-----|----|------|------|------|------|------|------|
-| H147 SOTA | k6q4c3on | — | 12.82 | 7.26 | 6.98 | (interp 6.85) | **6.75** | reference |
-| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7 | 3.85h | 12.85 | 7.30 | 6.98 | 6.85 | **6.787 ★** | +0.037pp (TIED — strongest) |
-| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 3.39h | 12.87 | 7.28 | 7.00 | 6.90 | EP4 only | EP5 expected ~14:30Z |
-| **H161** wss_charb=0.3 z (nezuko) | y9xrfk5t | 3.33h | 12.75 | 7.36 | 7.13 | 7.05 | EP4 only | kill-watch on EP5>6.95% |
-| **H162** pe_features=24 (fern) | 7vdb5zwz | 2.65h | 12.80 | 7.35 | 7.03 | EP3 only | — | tightest budget — terminal ~5-15min past deadline |
+| Hyp | Run | rt | EP3 | EP4 | EP5 | vs H147 EP5 (6.75%) | State |
+|-----|-----|----|------|------|------|------|------|
+| H147 SOTA | k6q4c3on | — | 6.98 | (interp 6.85) | **6.75** | reference | merged baseline |
+| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7 | 4.37h | 6.98 | 6.85 | **6.787 ★** | +0.037pp TIED | **RUNNING** EP5.6 |
+| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 3.91h | 7.00 | 6.90 | **6.838** | +0.09pp marginal | **RUNNING** EP5.0 |
+| **H161** wss_charb=0.3 z (nezuko) | y9xrfk5t | 3.82h | 7.13 | 7.05 | **6.977** | +0.227pp FAIL | **KILLED EP5 14:38Z** — test eval in flight |
+| **H162** pe_features=24 (fern) | 7vdb5zwz | 3.18h | 7.03 | **6.950** | — | EP4 +0.10pp behind | **RUNNING** EP4.0, kill-watch elevated |
 
-**Key 14:10Z reads:**
-- **H159 EP5 = 6.787%** vs H147 EP5 = 6.75% — Δ +0.037pp = noise tie. Tracking H147 cleanly through 5 epochs. VP/SP/ABUPT all healthy. **Strongest candidate**, continue.
-- H161 (wss_charbonnier=0.3 z) gap grew monotonically EP1→EP4 (Δ -0.07, +0.10, +0.15, +0.20). Kill-watch ACTIVE for EP5 reading. **Useful negative finding**: WSS-axis Charbonnier hurts WSS while VP-axis Charbonnier (H159) tracks H147 cleanly — confirms Charbonnier mechanism is target-asymmetric.
-- H160 β2=0.985 axis still stable +0.02-0.05pp behind H147 — within noise. EP5 imminent.
-- H162 pe_features=24 EP3 +0.05pp behind H147 — slowest run, will only hit EP5 5-15min past deadline.
+**Key 14:40Z reads:**
+- **H161 KILLED EP5 14:38Z (nezuko self-aborted)**: WSS EP5 = 6.977% crossed BOTH kill thresholds (PR body 6.85%, advisor watch 6.95%). Test eval launched at 14:41Z (~15:00Z ETA). EMA-EP5 checkpoint preserved. Zero stability incidents (refutes β=0.95/0.98 × Charbonnier compound divergence concern — divergence axis is β-grid only, not Charbonnier axis).
+- **H159 EP5 = 6.787%** still TIED to H147 (Δ +0.037pp). VP=3.772% is **better than H147 EP5 VP** — heavier VP Charbonnier actively helping VP axis. **Strongest in-flight candidate**, EP6/EP7 to land by deadline.
+- **H160 EP5 = 6.838%** stable +0.09pp marginal. β2=0.985 axis confirmed within noise of β2=0.98 (= H147). Tentative finding: β2 surface is flat 0.98→0.985 (unlike β1↑ which destabilizes EP1).
+- **H162 EP4 = 6.950%** mirrors H161's EP3→EP4 descent rate (-0.08pp/EP); same widening pattern. Kill-watch elevated: EP5 > 6.95% triggers kill.
 
-**Deadline:** 15:45Z = 1h35m remaining. At observed ~50min/EP rate:
-- H159: EP7 by deadline (best-val checkpoint to submit)
+**Emerging finding — Charbonnier-by-GradNorm-state asymmetry (pending H159 terminal + H161 test result):**
+- **GradNorm w_vol_p was clamped at 0.15 floor** during H147 training → VP axis was *under-served* → heavier VP Charbonnier (H159) closes a real gap = HELPFUL.
+- **GradNorm w_tau_x/y/z ran 0.4-1.4** during H147 training → WSS axes already *well-served* → heavier WSS Charbonnier (H161) *displaces effort* across tau components rather than closing tau_z floor = HURTFUL.
+- **Sharper than "Charbonnier 0.3 is too much"**: this reframes auxiliary-loss design — only under-served heads benefit from extra regularization. Publishable head-asymmetry finding.
+
+**Deadline:** 15:45Z = 1h05m. Terminal projections at current ~50min/EP:
+- H159: EP7 by deadline (best-val EMA checkpoint to submit)
 - H160: EP6 by deadline
-- H161: EP6 by deadline (or kill earlier if EP5 > 6.95%)
-- H162: EP5 ~15:35Z, terminal 5-15min past deadline
+- H161: test eval lands ~15:00Z → SENPAI-RESULT JSON
+- H162: EP5 ~15:15-15:25Z, terminal eval ~15:35-15:45Z (very tight)
 
 **CRITICAL — BASELINE.md correction (commit ea99dda was wrong):** nezuko discovered in PR #1360 that the 2026-05-28 H147 SOTA section copy-pasted H39's `yym5oa8x` test_VP/test_SP into the H147 row. Verified by W&B query of `k6q4c3on`. Correct H147 metrics: **test_VP=3.4014%** (clears 3.643% floor by 0.242pp) and **test_SP=3.5634%** (clears 3.577% floor by 0.014pp). **H147 actually CLEARS all 4 floors**, not 3-of-4. Patched in BASELINE.md this session.
 
