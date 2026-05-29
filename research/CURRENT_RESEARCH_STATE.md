@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 02:19Z (**H150 EP20 RE-ACCELERATION** val_WSS=6.6223% at -0.007/EP — 5x faster than EP18 rate, SOTA-beating projection restored; **H155 EP9=7.109% — EP10 KILL CONFIRMED** (descent stuck -0.003/EP since EP6, will fail 6.80% gate by 0.3pp); **H156 EP2=7.572%** tracks H147 with +0.30pp offset (ABUPT=7.15% concerning); H151 EP20.8 stable +0.190pp drift)_
+_Last updated: 2026-05-29 02:53Z (**H155 CLOSED** test_WSS=6.8936%, lr=9e-5 standalone falsified; **H157 ASSIGNED** to fern PR #1378 — wss-charbonnier-weight=0.1 on H150-β stack; **H150 EP21=6.6244%** — noise bump +0.002pp, conservative EP30 test proj=6.497% beats H147 by 0.04pp; **H156 EP3=7.182%** gap to H147 compressing; H151 EP21.6=6.815% slow grind)_
 
 ---
 
@@ -42,17 +42,18 @@ _Last updated: 2026-05-29 02:19Z (**H150 EP20 RE-ACCELERATION** val_WSS=6.6223% 
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-29 02:19Z)
+### Fleet status (2026-05-29 02:53Z)
 
-| Run ID | Student | H# | Epoch | val_WSS | val_VP | val_ABUPT | State | Δ vs H147 EP10=6.640% |
-|---|---|---|---:|---:|---:|---:|---|---|
-| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **20.56** | **6.6223%** | 3.555% | **5.883%** | running | 🏆 **-0.0177pp WSS vs H147 EP10; RE-ACCEL -0.007/EP** |
-| d20sf8th | nezuko | H151 (extended 45EP canonical) | 20.84 | 6.8215% | 3.703% | 6.081% | running | +0.190pp stable drift (RNG baseline confirmed) |
-| 9xo566ws | fern | H155 (lr=9e-5 primary) | **9.98** | **7.109%** | 3.488% | 6.176% | running | ⛔ **EP10 KILL TRIGGERED** — descent stuck -0.003/EP since EP6 |
-| ugpyo62a (+7 ranks) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | **2.85** | **7.572%** | — | — | **running primary** | EP1=13.15%, EP2=7.57% — tracks H147 +0.30pp offset |
-| 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.9906% | 3.379% | 6.123% | **CLOSED (PR #1367 22:57Z)** | ⛔ EP7 falsified; volume_p lever preserved |
-| u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | — | — | crashed (abort) | β1↓+β2↓ falsifying |
-| 2h8cddnz | (fern old) | H152 (β1=0.95/β2=0.97) | 5.4 | 7.113% | — | — | — | crashed (abort) | β2↓ falsifying |
+| Run ID | Student | H# | Epoch | val_WSS | val_ABUPT | State | vs H147 |
+|---|---|---|---:|---:|---:|---|---|
+| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **21.33** | **6.6244%** | **5.884%** | running | 🏆 **-0.016pp vs H147 EP10; EP30 test proj 6.50%** |
+| d20sf8th | nezuko | H151 (extended 45EP canonical) | 21.61 | 6.815% | 6.078% | running | +0.191pp stable (RNG baseline) |
+| ugpyo62a (+7 ranks) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | **3.62** | **7.182%** | **6.648%** | running | EP1=13.15%, EP3=7.18% — gap compressing from +0.33pp→+0.20pp |
+| (new) | **fern** | **H157 (wss-charbonnier=0.1 + H150-β)** | — | (launching) | — | **ASSIGNED PR #1378** | 🎯 compound: H150-β + charbonnier aux loss |
+| 9xo566ws | (fern prev) | H155 (lr=9e-5) | 10.27 | 7.092% | 6.157% | **CLOSED (PR #1368 03:00Z)** | ⛔ test_WSS=6.8936%, lr-axis falsified |
+| 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.991% | 6.123% | **CLOSED (PR #1367 22:57Z)** | ⛔ EP7 falsified |
+| u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | crashed | β1↓+β2↓ falsifying |
+| 2h8cddnz | (fern old) | H152 (β1=0.95/β2=0.97) | 5.4 | 7.113% | — | crashed | β2↓ falsifying |
 
 ### H147 SOTA trajectory reference
 
@@ -60,23 +61,23 @@ _Last updated: 2026-05-29 02:19Z (**H150 EP20 RE-ACCELERATION** val_WSS=6.6223% 
 |---:|---:|---:|---:|---:|---:|---:|
 | H147 val_WSS | 12.82% | 7.26% | 6.98% | 6.75% | 6.64% | **6.5409%** |
 
-### H150 per-epoch val trajectory (5bgp2ryq) — 🏆 RE-ACCELERATION CONFIRMED AT DEEP COSINE
+### H150 per-epoch val trajectory (5bgp2ryq) — 🏆 STAIR-STEP DESCENT, RIDING TO EP30
 
-| EP | 10 | 13 | 14 | 15 | 18 | **20** |
-|---:|---:|---:|---:|---:|---:|---:|
-| val_WSS | 6.694% | 6.6567% | 6.6453% | 6.6400% | 6.6363% | **6.6223%** |
-| val_VP | 3.608% | 3.562% | 3.5546% | 3.555% | ~3.555% | **~3.555%** |
-| val_ABUPT | 5.955% | 5.917% | 5.9071% | 5.9026% | 5.897% | **5.883%** |
-| Δ WSS vs H147 EP10=6.640% | +0.054pp | +0.017pp | -0.005pp | 0.000pp | -0.0037pp | **-0.0177pp** ✅✅ |
-| Δ WSS per-EP | — | -0.009 | -0.011 | -0.005 | -0.0012 | **-0.0070** (RE-ACCEL 5x) |
+| EP | 14 | 15 | 17 | 18 | 19 | 20 | **21** |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| val_WSS | 6.6453% | 6.6400% | 6.6316% | 6.6363% | 6.6246% | 6.6223% | **6.6244%** |
+| val_ABUPT | 5.907% | 5.903% | 5.892% | 5.897% | 5.886% | 5.883% | **5.884%** |
+| Δ WSS per-EP | -0.011 | -0.005 | -0.008 | +0.005 | -0.012 | -0.002 | **+0.002** |
 
-**Stair-step descent CONFIRMED.** Plateau at EP15-18 was transient; cosine deepening to ~30% of base (EP20) re-engaged optimization in a tighter basin. Decision to ride to EP21 paid off — now ride to EP30.
+**Oscillatory descent at deep cosine (EP21 LR ≈ 21% of base).** Small noise bumps at EP18 and EP21 (+0.005/+0.002pp) interrupted by larger drops at EP17, EP19. This is stair-step noise around a descending trend, not a plateau.
 
-| EP30 extrapolation | val | test (with H147 -0.10pp val→test gap) | Beats H147 6.5409%? |
+**Conservative EP30 projection (7-EP average -0.003/EP):**
+
+| Scenario | EP30 val | EP30 test | Beats H147 6.5409%? |
 |---|---:|---:|---:|
-| Sustained -0.007/EP | **6.552%** | **~6.45%** | ✅ wins by **0.09pp** |
-| Half-rate decay (-0.0035/EP) | 6.587% | ~6.49% | ✅ wins by 0.05pp |
-| Re-plateau immediately | 6.622% | ~6.52% | wins by 0.02pp (marginal) |
+| Conservative avg (-0.003/EP) | **6.597%** | **~6.497%** | ✅ wins by 0.04pp |
+| Moderate re-acceleration (-0.005/EP) | 6.570% | ~6.470% | ✅ wins by 0.07pp |
+| EP19-style burst recurs | 6.530% | ~6.430% | ✅ wins by 0.11pp |
 
 **EMA best-val checkpoint at EP18-20 is the safety net** — even at current plateau-rate, the EMA-best harvest should give a defensible single-model dl24 SOTA candidate. Other primary metrics (val_VP 3.555% / val_ABUPT 5.897%) already pass H147 EP10 floors.
 
@@ -125,7 +126,7 @@ Created 19:37:55Z. Config verified: `lr=9e-5`, `lion_beta1=0.95`, `lion_beta2=0.
 
 **Lr-axis falsified standalone:** lr=9e-5 on canonical H147 stack does NOT beat H147 at any epoch. The early-EP catch-up from EP1→EP5 reverses into plateau drift by EP6+.
 
-**Action triggered: kill request to fern (PR #1368 comment).** Awaiting terminal SENPAI-RESULT with EMA best-val test metrics, then close PR + assign H157.
+**CLOSED 03:00Z (PR #1368):** fern posted terminal SENPAI-RESULT 02:53Z — test_WSS=**6.8936%** (regression vs H147 6.5409% by +0.35pp). EMA best-val checkpoint EP10. W&B rank0=9xo566ws. Standalone lr=9e-5 axis **falsified**. H157 (wss-charbonnier compound) assigned to fern at PR #1378.
 
 ### H156 primary EP1-EP2 — β + lr compound TRACKING H147 +0.30pp (ugpyo62a)
 
@@ -151,15 +152,14 @@ Launched 00:40Z after `grdap1rg` smoke passed clean. Config: `lion_beta1=0.97`, 
 
 ## Decisive epochs ahead (active runs)
 
-- **H155 EP10 kill triggered** (02:19Z) — PR #1368 awaiting fern's terminal SENPAI-RESULT
-- **H156 EP3 kill check** (~03:00Z) — gate >7.50%; expected ~7.29% from +0.30pp H147 offset projection
-- **H150 EP21+ ride** (~04:30Z) — sustained -0.007/EP rate → EP30 val=6.55%, test=~6.45% (beats H147 by 0.09pp)
-- **H156 EP5 kill check** (~06:00Z) — gate >7.05%
-- **H156 EP6 ABUPT trajectory check** (~07:00Z) — kill if ABUPT plateau > H147 EP6 ABUPT + 0.50pp
+- **H157 smoke + EP1** (~04:00Z) — fern launching PR #1378; gate >13.5% (compounded β should produce EP1 ≤12.5%)
+- **H156 EP4 reading** (~03:45Z) — tracking gap compression (EP3=+0.20pp to H147); EP5 gate >7.05%
+- **H156 EP5 kill check** (~04:30Z) — gate >7.05%
+- **H150 EP22-30 ride** — conservative EP30 test proj 6.497%; ABUPT still descending (-0.001/EP)
 - **H156 EP10 soft kill** (~10:00Z) — gate >6.65% (must beat H147 EP10 floor)
-- **H150 EP30 terminal harvest** (~10:30Z 2026-05-29) — single-model SOTA candidate; test_WSS vs H147 6.5409%; safety net = EMA best-val checkpoint at EP18-22
-- **H151 EP25-30** — RNG-baseline confirmation; useful only as control
-- **H157 (fern, queued) EP1 kill check** — once fern's H155 terminal lands; gate >13.5%
+- **H150 EP30 terminal harvest** (~10:30Z 2026-05-29) — single-model SOTA candidate; test_WSS vs H147 6.5409%
+- **H157 EP1-10 trajectory** (~04-14:00Z) — wss-charbonnier on H150-β; kill gates EP1 >12.5%, EP3 >7.40%, EP5 >6.85%
+- **H151 EP25-45** — RNG-baseline confirmation arm; EP45 terminal useful for duration comparison
 
 ---
 
