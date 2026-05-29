@@ -11041,3 +11041,70 @@ Slope steepening on all 5 reported WSS channels (+0.036 to +0.075pp).
 
 **Key finding (Finding K)**: Surface:vol axis rebalancing has real per-channel signal (WSS_x channel −2pp on test — largest channel-level gain observed). WSS_y degrades enough to wipe the aggregate gain. Rebalancing alone insufficient without a mechanism to address per-channel tradeoffs.
 
+
+---
+
+## 2026-05-29 02:55Z — PR #1364: H190 mirror-aug p=0.25 (nezuko, **CLOSED — bimodal mirror regime finding banked**)
+
+- nezuko/h190-mirror-aug-prob-025
+- **Hypothesis**: Mirror-aug at p=0.25 (HALF of canonical p=0.5) reduces over-regularization while preserving slope-steepening mechanism. If H148's slope mechanism persists at p=0.25, canonical mirror-aug intensity shifts to 0.25 for all future compounds.
+- **W&B run**: `9f2jtrg2`
+
+### Terminal results (val SOTA-eligible but 3/4 test gates MISS)
+
+| Metric | H190 (p=0.25) | H112 baseline | Δ | Gate | Pass? |
+|---|---:|---:|---:|---:|:---:|
+| val_abupt | **6.0765** | 6.1358 | −0.0593 | <6.1358 | ✓ |
+| test_WSS | 6.8198 | 6.7523 | +0.0676 | ≤6.752 | ✗ |
+| test_VP | 3.4715 | 3.4213 | +0.0502 | ≤3.421 | ✗ |
+| test_SP | 3.7399 | 3.6947 | +0.0452 | ≤3.577 | ✗ |
+| WSS slope | **−0.085pp** | −0.215pp | +0.130pp FLATTER | — | — |
+| WSS_x slope | **+0.035pp INVERTED** | −0.093pp | +0.128pp disruption | — | — |
+
+**Decision: CLOSED — 3/4 test gates miss above noise floor.**
+
+### Mirror-aug strength sweep (3-point cohort summary)
+
+| PR | mirror | val_abupt | test_WSS | WSS slope | Mechanism |
+|---|:---:|---:|---:|---:|---|
+| H112 | off | 6.1358 | 6.7523 | −0.215 | baseline |
+| H148 | p=0.5 | 6.2186 | 6.7750 | −0.296 STEEPER | slope mechanism active; val cost |
+| **H190** | **p=0.25** | **6.0765** | **6.8198** | **−0.085 FLATTEST** | val gain; slope mechanism COLLAPSED |
+| H183 | p=0.5+tau_y=3 | 6.0388 | 6.8287 | −0.187 ~neutral | val SOTA; tau_y-driven; basin flip terminal |
+
+**Key program-permanent finding (Finding L)** — Mirror-aug operates in BIMODAL regime:
+1. p=0.25 is BELOW slope-mechanism threshold. Val gain is val-set-specific over-regularization.
+2. p=0.5 is the canonical operating point if slope-steepening is the goal.
+3. There is no intermediate p where BOTH val improves AND slope steepens.
+
+Retroactively explains H183: val SOTA was tau_y-driven (not slope-mechanism-driven) at p=0.5+tau_y=3.
+
+---
+
+## 2026-05-29 02:55Z — PR #1372: H204 alphonse pre-flip H183 mid-EP eval (alphonse, **CLOSED — INFRASTRUCTURE BLOCKER**)
+
+- alphonse/h204-prefllp-h183-mid-ep-eval
+
+**Decision: CLOSED — not executable, program-permanent infrastructure finding banked.**
+
+### Finding M — Pre-flip checkpoint recovery is BLOCKED by checkpoint persistence
+
+Standard `train.py` saves only single best EMA snapshot (overwritten on each val improvement). For monotone-improving val trajectories (H112, H164e, H183, H185, H188, H189, H190, H191), only EP13 "best" exists. W&B `model-*` artifact has aliases `['best', 'latest', 'epoch-13']` only — no per-EP versions. Shared PVC scan confirms no per-EP `*-ema.pt` files exist.
+
+**Same blocker applies to**: H205 (H185 mid-EP), H198 (cohort mid-EP search), H199 (H112 last-K SWA), H195 (per-channel best-of-K within run). All closed simultaneously and re-assigned to viable EP13-only sprints.
+
+**Future infrastructure work**: trainer should save per-EP EMA artifacts with W&B aliases `epoch-N` if pre-flip analysis is to be revisited. Outside the current ~9h compute window.
+
+### Viable EP13-only sprints assigned (02:55Z batch)
+
+| PR | Student | Hypothesis | Mechanism |
+|---|---|---|---|
+| #1379 | alphonse | H206: TTA mirror-aug on H183 EP13 | val-SOTA recovery via mirror invariance averaging |
+| #1380 | askeladd | H207: weight interp H112 EP13 ↔ H183 EP13 | parameter-manifold sweet spot |
+| #1381 | fern | H208: weight interp H112 EP13 ↔ H190 EP13 | parameter-manifold sweet spot |
+| #1382 | frieren | H209: TTA mirror-aug on H185 EP13 | val-SOTA recovery |
+| #1383 | tanjiro | H210: cross-recipe SWA over 5 EP13 best artifacts | consensus basin |
+| #1384 | nezuko | H211: TTA mirror-aug on H190 EP13 | own val recovery |
+
+Plus thorfinn H192 (TTA H112) and edward H200 (TTA H189) still running from 02:00Z batch.
+

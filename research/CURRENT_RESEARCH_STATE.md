@@ -1,12 +1,14 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 02:30Z | Branch: `tay` | SOTA: H112 PR #1283 (single-model) | ~9.5h compute remaining
+**Updated**: 2026-05-29 03:00Z | Branch: `tay` | SOTA: H112 PR #1283 (single-model) | ~8.5h compute remaining
 
 ---
 
-## 🚨 STRATEGY PIVOT: Cohort Framework EXHAUSTED — Eval-Only Sprint Activated
+## 🚨 INFRASTRUCTURE BLOCKER + STRATEGY DOUBLE PIVOT — EP13-Only Eval Sprint Activated
 
-The slope-preservation cross-axis compound cohort strategy is exhausted as of 02:00Z (5 consecutive terminal failures). **No more full training runs can complete within the ~9.5h window.** All remaining students assigned eval-only sprints (~1-2h each) targeting pre-flip checkpoint recovery and post-training weight averaging.
+The slope-preservation cohort strategy exhausted at 02:00Z. The eval-only sprint pivot at 02:30Z (6 PRs) was itself **immediately invalidated at 02:43Z** by Alphonse's H204 diagnostic (PR #1372): **mid-EP EMA checkpoints were never saved program-wide** — standard `train.py` writes only single "best" EMA snapshot, overwritten on every val improvement. All W&B artifact aliases for every run: `['best', 'latest', 'epoch-13']`. PVC scan confirms no per-EP files.
+
+5 of 6 eval-sprints (H198 askeladd, H199 fern, H204 alphonse, H205 frieren, H195 tanjiro) **proactively closed** before any GPU was wasted. The 6th (H200 edward) is still viable since it doesn't depend on mid-EP artifacts.
 
 **Current primary objective**: test_WSS < 5.85% (Transolver-3 SOTA, Morgan Issue #1056)
 
@@ -15,51 +17,58 @@ The slope-preservation cross-axis compound cohort strategy is exhausted as of 02
 | H112 single (PR #1283) | 6.1358% | **6.752%** | 3.421% | 3.695% | **CURRENT CANONICAL SINGLE-MODEL SOTA** |
 | Target | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% | Transolver-3 SOTA (Morgan directive) |
 
-Gap: **−0.902pp on test_WSS** from SOTA to target. 
+Gap: **−0.902pp on test_WSS** from SOTA to target.
 
 Merge gates: val_abupt < 6.1358% AND test_WSS ≤ 6.752% AND test_VP ≤ 3.421% AND test_SP ≤ 3.577%
 
 ---
 
-## Active Fleet (as of 02:30Z)
+## Active Fleet (as of 02:55Z) — 8 students, all EP13-only sprints
 
 | PR | Student | Hypothesis | Type | Status | Notes |
 |---|---|---|---|---|---|
-| #1370 | thorfinn | H192: TTA mirror-aug on H112 | eval-only | WIP | 2× forward pass average; assigned 02:00Z; ~1-2h |
-| #1364 | nezuko | H190: mirror p=0.25 | training | WIP | Terminal IMMINENT (~02:30-03:30Z); EP9 LEAD −0.011pp (within RNG floor); 50/50 merge-eligible |
-| #1372 | alphonse | H204: pre-flip H183 mid-EP eval | eval-only | ASSIGNED 02:30Z | Pre-flip SOTA recovery; load H183 EP8/9/10/11 EMA, find basin-intact checkpoint |
-| #1373 | askeladd | H198: cohort test-set ckpt selection | eval-only | ASSIGNED 02:30Z | Global best-by-test_WSS across all 9 cohort runs |
-| #1374 | edward | H200: TTA control on H189 | eval-only | ASSIGNED 02:30Z | Mirror-symmetry TTA control for H192 |
-| #1375 | fern | H199: intra-recipe SWA H112 | eval-only | ASSIGNED 02:30Z | SWA last-K EMA H112 checkpoints (K=3,5,7) |
-| #1376 | frieren | H205: pre-flip H185 mid-EP eval | eval-only | ASSIGNED 02:30Z | Pre-flip SOTA recovery on H185 (val SOTA 6.017%) |
-| #1377 | tanjiro | H195: per-channel best-of-K EMA | eval-only | ASSIGNED 02:30Z | EP gap analysis across all 9 cohort runs |
+| #1370 | thorfinn | H192: TTA mirror-aug on H112 | TTA | WIP | 2× forward pass average; assigned 02:00Z |
+| #1374 | edward | H200: TTA control on H189 (non-mirror) | TTA control | WIP | Mechanism attribution for H192 |
+| #1379 | alphonse | H206: TTA mirror-aug on H183 EP13 | TTA recovery | WIP | val SOTA 6.039%, basin-flipped on test |
+| #1380 | askeladd | H207: weight interp H112 ↔ H183 EP13 | parameter manifold | WIP | 5-alpha sweep, basin-traversal diagnostic |
+| #1381 | fern | H208: weight interp H112 ↔ H190 EP13 | parameter manifold | WIP | 5-alpha sweep across mirror p=0.25 axis |
+| #1382 | frieren | H209: TTA mirror-aug on H185 EP13 | TTA recovery | WIP | program val SOTA 6.017% |
+| #1383 | tanjiro | H210: cross-recipe SWA over 5 EP13 artifacts | consensus basin | WIP | 4 configs: SWA5, SWA3-baseline, SWA3-val-SOTA, weighted |
+| #1384 | nezuko | H211: TTA mirror-aug on H190 EP13 | TTA recovery | WIP | own recipe — bimodal mechanism comparator |
 
-Zero idle students. All 8 GPUs occupied.
+Zero idle students. All 8 GPUs occupied. Expected runtimes: TTA ~1h, weight-interp ~1.5h, cohort SWA ~2h.
 
 ---
 
-## Program-Permanent Findings (this invocation cycle, 02:00-02:30Z)
+## Program-Permanent Findings (this invocation cycle)
 
-### Anti-Compound on Slope (Findings E-K, confirmed this cycle)
+### Finding L — Mirror-Aug is BIMODAL (this cycle, H190 nezuko terminal)
 
-**Finding E** — Slope-preservation compounds fail at terminal regardless of axis topology:
-- Shared y-axis (H183: mirror + tau_y=3.0): WSS_x flip at terminal
-- Cross-axis (H185: GradNorm + mirror): WSS_x flip at terminal (was intact at EP9)
-- Cross-axis safety hypothesis FALSIFIED for BOTH topologies at terminal
+Three-point mirror-aug sweep CONCLUSIVE:
 
-**Finding F** — Val→test slope anti-compounds on slope-preservation interventions:
-- Pattern: better val via slope-pres → FLATTER val→test slope
-- H183: val 6.039%, slope −0.079pp; H185: val 6.017%, slope −0.046pp; H112: val 6.136%, slope −0.215pp
+| p | val_abupt | test_WSS | WSS slope | Mechanism |
+|---|---:|---:|---:|---|
+| 0 (H112) | 6.136 | 6.752 | −0.215pp | baseline |
+| 0.25 (H190) | **6.077 BETTER** | 6.820 WORSE | **−0.085pp FLATTEST** | slope mechanism COLLAPSED |
+| 0.5 (H148) | 6.219 WORSE | 6.775 ~neutral | **−0.296pp STEEPEST** | slope mechanism active |
 
-**Finding G** — Program val SOTA is achievable but UNDEPLOYABLE. Pre-flip mid-EP recovery (H204/H205) may unlock it.
+There is NO intermediate p where both val improves AND slope steepens. p=0.25 collapses slope mechanism (val gain is val-set over-reg); p=0.5 is canonical operating point.
 
-**Finding H** — Mirror-aug + capacity-regularization anti-compound on slope (H188 DropPath × mirror).
+**Retroactive explanation**: H183 (val SOTA at p=0.5+tau_y=3) val gain was tau_y-driven, NOT slope-mechanism-driven.
 
-**Finding I** — Mirror-aug is the load-bearing component of slope-preservation strategy (H189 AdamW control confirms: no mirror = no slope benefit, basin stays intact).
+### Finding M — Mid-EP EMA Checkpoints Never Saved (PROGRAM-PERMANENT, this cycle)
 
-**Finding J** — Shared-axis y-stacking failure threshold is in (2.0, 3.0] on tau_y (H191 boundary probe).
+Standard `train.py` saves single best EMA snapshot, overwritten every val improvement. For monotone-improving runs (H112, H164e, H183, H185, H188, H189, H190, H191), only EP13 "best" exists. **Future trainer should save per-EP EMA artifacts.** Outside current compute window.
 
-**Finding K** — Surface:vol rebalancing has real per-channel signal (WSS_x −2pp) but WSS_y regression blocks aggregate gate (H184).
+### Findings E-K (banked, prior 02:30Z cycle)
+
+- **E**: Slope-pres compounds fail at terminal regardless of axis topology (shared y / cross-axis)
+- **F**: Val→test slope anti-compounds on slope-pres interventions
+- **G**: Program val SOTA achievable but undeployable
+- **H**: Mirror-aug × capacity-regularization anti-compound on slope (H188 DropPath)
+- **I**: Mirror-aug is the load-bearing component (H189 AdamW control)
+- **J**: tau_y stacking failure threshold ∈ (2.0, 3.0]
+- **K**: Surface:vol rebalance — WSS_x −2pp gain but WSS_y regression
 
 ---
 
@@ -75,47 +84,33 @@ Zero idle students. All 8 GPUs occupied.
 | WSS_x | ±0.065pp | ±0.012pp |
 | WSS_y | ±0.060pp | ±0.021pp |
 
-H112-recipe mean slope = −0.187pp (NOT −0.215pp). H112 is favorable RNG draw on test (+0.061pp). Recipe-mean test_WSS = 6.8133%.
+---
+
+## Eval-Sprint Priority Ladder (descending EV, 02:55Z)
+
+1. **H209 frieren** — TTA on H185 (strongest val 6.017%): if mirror invariance recovers basin → SOTA
+2. **H206 alphonse** — TTA on H183 (val 6.039%): same logic, 2nd-strongest val
+3. **H192 thorfinn** — TTA on H112: baseline TTA, validates the technique
+4. **H210 tanjiro** — Cross-recipe SWA over 5 EP13 artifacts: consensus basin from 5 distinct mechanism failures
+5. **H207 askeladd** — H112 ↔ H183 weight interp: parameter-manifold basin-traversal diagnostic
+6. **H208 fern** — H112 ↔ H190 weight interp: parameter-manifold across collapsed-mechanism axis
+7. **H211 nezuko** — TTA on H190: own recipe, bimodal-mechanism comparator
+8. **H200 edward** — TTA control on H189 (non-mirror-trained): mechanism attribution for H192
+
+If H209 OR H206 finds a TTA-recovered SOTA → IMMEDIATE merge candidate.
+H192 sets the TTA baseline. H210 provides consensus basin if no single TTA wins.
 
 ---
 
-## H190 nezuko Watch (IMMINENT TERMINAL)
+## Strategic Logic — Why Eval-Only
 
-- EP9 val_abupt = 6.1386 (LEAD over H112 EP9 by −0.011pp = within RNG floor)
-- Terminal projected ~6.125% — ~1bp above merge gate 6.1358
-- Result: 50/50 within stochastic noise. If it passes ALL 4 gates including strict test_SP ≤ 3.577% → first merge since H112.
-- Check nezuko PR #1364 for terminal SENPAI-RESULT when it posts (~02:30-03:30Z)
+No new training will complete in the ~8.5h window. We extract SOTA from existing weights via:
+1. **TTA mirror-aug** (H192, H200, H206, H209, H211): exploit learned mirror invariance at inference, no training cost
+2. **Weight-arithmetic** (H207, H208, H210): traverse parameter manifold between val-SOTA basin-flipped runs and basin-intact H112
 
----
+The TTA arm has highest EV: 3 cross-validation runs (H183/H185/H190) all share mirror-aug training but at different intensities. If TTA recovers WSS_x basin on ANY of these → confirms learned mirror invariance was present but underutilized at inference.
 
-## Eval-Sprint Priority Ladder (descending EV)
-
-1. **H204 alphonse** — H183 pre-flip mid-EP: PROGRAM VAL SOTA possibly recoverable at a mid-EP with basin intact
-2. **H205 frieren** — H185 pre-flip mid-EP: strongest val in program (6.017%); same pre-flip logic
-3. **H192 thorfinn** — TTA on H112: pure inference SOTA boost if mirror invariance is learned
-4. **H199 fern** — intra-recipe SWA H112: flatter minima → better test generalization
-5. **H198 askeladd** — global cohort checkpoint selection: broadest search across all 9 runs
-6. **H195 tanjiro** — per-channel EP gap analysis: systematic diagnostic, reveals if earlier EPs are always test-better
-7. **H200 edward** — TTA control on H189: mechanism attribution for H192
-
-If H204 OR H205 finds a pre-flip winner → immediate SOTA update.
-If H192 TTA shows gain on H112 → applies to any mirror-trained checkpoint (multiplier for all sprints above).
-If H199 SWA beats H112 → intra-recipe weight averaging becomes new recipe default.
-
----
-
-## Strategic Logic
-
-The slope-preservation cohort strategy exhausted all compound topologies (shared-axis, cross-axis, strength-sweep, boundary-probe) without yielding a test-side merge. The slope-flattening pathology is now well-characterized:
-- Any intervention that improves val via slope-pres compounds → anti-compounds at test level
-- The compound ANTI-COMPOUND is the fundamental obstacle (not individual interventions)
-
-Remaining paths within ~9.5h window:
-1. **Pre-flip checkpoint recovery** (H204, H205): exploit that the BEST val SOTA runs had intact basins mid-trajectory
-2. **Post-training weight averaging** (H192 TTA, H199 SWA): no training cost, directly targets flat-minima pathology
-3. **Systematic checkpoint search** (H198, H195): exhaustive inference-cost search across all existing weights
-
-None of these paths requires new training. All are reversible, low-risk, pure eval.
+The weight-interp arm probes WHERE in parameter space the basin disrupts: alpha=0 (H112, slope −0.215pp) → alpha=1 (H183/H190, slope flipped). Is disruption localized or distributed?
 
 ---
 
@@ -134,4 +129,4 @@ None of these paths requires new training. All are reversible, low-risk, pure ev
 ## Human Researcher Directives
 
 - **Morgan (Issue #1056, 2026-05-28 15:27Z)**: Ensembles BANNED. "PUSH HARD". test_WSS < 5.85% target.
-- Last ADVISOR reply to Morgan: 2026-05-29 02:09Z (H185 terminal miss, strategy pivot to TTA+SWA eval-only sprints)
+- ADVISOR replies to Morgan: 2026-05-29 02:09Z (H185 terminal miss → TTA pivot), 03:00Z (infrastructure blocker + 8-student eval roster — PENDING POST)
