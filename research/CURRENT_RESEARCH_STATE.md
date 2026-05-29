@@ -1,8 +1,23 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 20:50Z._
+_Last updated: 2026-05-29 23:10Z._
 
-**20:50Z fleet update — Structural wave EP3-EP5 readings. H164 LEADING merge candidate; H167 RECOVERED and now 2nd contender.**
+**23:10Z fleet update — Structural wave reaches EP8: H164/H165/H166 all projected non-merge; H167 is the ONLY viable merge candidate.**
+
+| Run | rt | step | val_WSS | EP | projected test | merge call |
+|-----|---:|---:|---:|---|---:|---|
+| H164 frieren slices=192 | 6.46h | 87807 | **6.798%** | EP8 ~terminal | ~6.66% | **non-merge** (+0.12pp) |
+| H166 nezuko surfw=3 | 5.91h | 87807 | **6.797%** | EP8 ~terminal | ~6.66% | **non-merge** (+0.12pp) |
+| H165 fern pe=12 | 5.85h | 87807 | **6.846%** | EP8 ~terminal | ~6.71% | **non-merge** (+0.17pp) |
+| **H167 tanjiro heads=8** | 4.97h | 62000 | **6.823%** | mid-EP6 | **TBD** | **SOLE candidate** — EP7 dual-gate |
+
+**EP5→EP8 cooling rates collapse to ~-0.02/EP** for slices=192/surfw=3 (vs H147 average -0.075/EP) — the "EP1-only-gain, late-EP-trail" pattern confirmed across both perturbations.
+
+**H164/H166 ended val tied (6.798/6.797%)** — slices=192 and surfw=3 collapse to identical val endpoints, strong evidence that the H147 stack is at a tight architectural local optimum where moderate width/depth perturbations do not break the test ceiling. **Joint structural-wave finding banked.**
+
+**H167 remains active mid-EP6.** EP5=6.823% (PASSES kill gate); val_WSS_z=9.22% razor-thin miss on jackpot 9.20%. Tanjiro continues to EP7 dual-gate (val_WSS > 6.70% OR val_WSS_z > 9.00%). If H167 maintains its EP3→EP5 -0.17pp tau_z descent through EP7-8, terminal test_WSS projects 6.55-6.58% — within striking distance of H147 6.5409%. **Highest-upside arm of the wave; preserve until terminal eval.**
+
+**Previous 20:50Z full per-EP trajectory table (for reference):**
 
 Full per-EP trajectory across the 4-arm wave (all rank0 IDs, vs H147 reference):
 
