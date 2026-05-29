@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 18:00Z | Branch: `tay` | **SOTA: H253 EP13+K=5+6-res+mirror (PR #1428 merged 17:15Z)** | Round 4k: 5 active + 3 awaiting assignment | **H267 edward EP15+full stack highest EV (~20:00Z)**
+**Updated**: 2026-05-29 18:15Z | Branch: `tay` | **SOTA: H253 EP13+K=5+6-res+mirror (PR #1428 merged 17:15Z)** | Round 4k: 8 active | **H267 edward EP15+full stack highest EV (~20:00Z); H272 nezuko Hutchinson highest EV new**
 
 ---
 
@@ -30,10 +30,13 @@
 | **#1443** | **fern** | **H266: TTA ANOVA — Arms A+B done per W&B, Arm C running** | 🟡 heartbeat sent 17:58Z | ~18:30Z (?) |
 | ~~#1439~~ | ~~frieren~~ | ~~H263: avg(EP14,EP15) SWA — Finding LL-SWA-null~~ | 🔴 closed 17:58Z | — |
 | ~~#1432~~ | ~~nezuko~~ | ~~H256: H183 stack portability — Finding HH-H183-6res-asymmetry~~ | 🔴 closed 17:58Z | — |
+| **#1451** | **frieren** | **H271: Sobol QMC weight perturbation** — low-discrepancy noise, attacks K-plateau | 🆕 assigned 18:15Z | ~21:15Z |
+| **#1452** | **nezuko** | **H272: Hutchinson curvature-inverse noise** — per-param σ by diag Hessian, HIGHEST EV | 🆕 assigned 18:15Z | ~21:45Z |
+| **#1453** | **askeladd** | **H273: Taylor 2nd-order correction** — λ-swept quadratic bias subtraction | 🆕 assigned 18:15Z | ~21:15Z Arm A |
 | ~~#1442~~ | ~~askeladd~~ | ~~H268: Anti-thetic noise — Finding NN-antithetic confirmed~~ | 🔴 closed 17:58Z | — |
 | ~~#1428~~ | ~~alphonse~~ | ~~H253: MERGED NEW SOTA val 5.9418 / test 5.7847~~ | 🏆 merged 17:15Z | — |
 
-**Idle students requiring assignment (3)**: frieren, nezuko, askeladd — researcher-agent generating fresh hypotheses (RESEARCH_IDEAS_2026-05-29_17:50.md).
+**Newly assigned (18:15Z)**: frieren H271 (PR #1451), nezuko H272 (PR #1452), askeladd H273 (PR #1453).
 
 ---
 
@@ -56,6 +59,14 @@ Composition scenario (if H267 confirms EP15 stacks + H269 confirms K=10 stacks):
 2. **Alphonse H269** (PR #1448): K=10 noise stacked on EP13 → predicted val ~5.937
 3. **Tanjiro H270** (PR #1449): σ=3e-4 stacked — possible gate hit if basin is narrow
 4. **Thorfinn H257** σ=1e-4 (PR #1433): low probability — likely too small to perturb effectively
+
+### New generation (assigned 18:15Z)
+
+Three orthogonal TTA hypotheses attacking different dimensions of the noise mechanism:
+
+1. **Sobol QMC** (H271 frieren #1451): Scrambled Sobol sequences replace i.i.d. Gaussian draws. Attacks K-plateau via sampling geometry, distinct from anti-thetic ±δ cancellation.
+2. **Hutchinson curvature-inverse σ** (H272 nezuko #1452 — HIGHEST EV new): Per-parameter σ scaled by diagonal Hessian. First experiment using landscape geometry to guide TTA.
+3. **Taylor 2nd-order correction** (H273 askeladd #1453): Anti-thetic residuals subtract quadratic Taylor bias. λ ∈ [0,1] tuned on val; λ=0 = plain anti-thetic floor. Askeladd's natural H268 follow-up.
 
 ### Closure-driven insights (3 new findings banked this round)
 
