@@ -1,0 +1,86 @@
+W0529 03:05:16.351000 62451 torch/distributed/run.py:862] 
+W0529 03:05:16.351000 62451 torch/distributed/run.py:862] *****************************************
+W0529 03:05:16.351000 62451 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0529 03:05:16.351000 62451 torch/distributed/run.py:862] *****************************************
+Device: cuda:0
+DDP world_size=8
+Loaded checkpoint epoch=13 source=ema params=17.41M
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+
+
+
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run jsdf4oww
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_030521-jsdf4oww
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run edward/h200-h189-tta-mirror
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/jsdf4oww
+
+=== Evaluating val (7295 views) ===
+val_original   loss=0.00522 abupt_axis_rel_l2_pct=6.4478 surface_p_mae=0.01179 volume_p_mae=7.48990 wall_shear_mae=0.06343 cases=34
+  val_original -> abupt=6.4478% | SP=4.3073% | WSS=7.3110% | VP=3.7704% | WSS_x=6.4359% | WSS_y=7.8810% | WSS_z=9.8441%
+val_mirrored   loss=0.01625 abupt_axis_rel_l2_pct=11.3170 surface_p_mae=0.02583 volume_p_mae=18.24969 wall_shear_mae=0.09768 cases=34
+  val_mirrored -> abupt=11.3170% | SP=9.0569% | WSS=11.6372% | VP=8.7704% | WSS_x=10.0631% | WSS_y=13.2089% | WSS_z=15.4857%
+val_tta        loss=0.00773 abupt_axis_rel_l2_pct=7.8630 surface_p_mae=0.01703 volume_p_mae=11.60130 wall_shear_mae=0.07491 cases=34
+  val_tta -> abupt=7.8630% | SP=5.7905% | WSS=8.4775% | VP=5.3970% | WSS_x=7.4066% | WSS_y=9.3252% | WSS_z=11.3959%
+  runtime=133.2s n_batches=228
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+
+=== Evaluating test (11091 views) ===
+test_original  loss=0.00468 abupt_axis_rel_l2_pct=6.1654 surface_p_mae=0.01154 volume_p_mae=7.36770 wall_shear_mae=0.06131 cases=50
+  test_original -> abupt=6.1654% | SP=3.9489% | WSS=7.1196% | VP=3.6637% | WSS_x=6.3664% | WSS_y=7.6606% | WSS_z=9.1874%
+test_mirrored  loss=0.01600 abupt_axis_rel_l2_pct=11.2269 surface_p_mae=0.02574 volume_p_mae=18.31963 wall_shear_mae=0.09634 cases=50
+  test_mirrored -> abupt=11.2269% | SP=8.8915% | WSS=11.6525% | VP=8.7509% | WSS_x=10.0902% | WSS_y=13.3572% | WSS_z=15.0447%
+test_tta       loss=0.00743 abupt_axis_rel_l2_pct=7.7331 surface_p_mae=0.01723 volume_p_mae=11.87713 wall_shear_mae=0.07351 cases=50
+  test_tta -> abupt=7.7331% | SP=5.6488% | WSS=8.3932% | VP=5.4862% | WSS_x=7.4048% | WSS_y=9.2812% | WSS_z=10.8444%
+  runtime=198.9s n_batches=347
+
+=== TTA vs original (test) ===
+  abupt: +1.5677pp
+  wall_shear: +1.2736pp
+  wall_shear_x: +1.0384pp
+  wall_shear_y: +1.6205pp
+  wall_shear_z: +1.6570pp
+  surface_pressure: +1.6999pp
+  volume_pressure: +1.8225pp
+wandb: updating run metadata
+wandb: uploading history steps 0-0, summary, console lines 13-28
+wandb: 
+wandb: Run history:
+wandb:            test_delta_tta_minus_original/abupt ▁
+wandb: test_delta_tta_minus_original/surface_pressure ▁
+wandb:  test_delta_tta_minus_original/volume_pressure ▁
+wandb:       test_delta_tta_minus_original/wall_shear ▁
+wandb:     test_delta_tta_minus_original/wall_shear_x ▁
+wandb:     test_delta_tta_minus_original/wall_shear_y ▁
+wandb:     test_delta_tta_minus_original/wall_shear_z ▁
+wandb:           test_mirrored/abupt_axis_mean_rel_l2 ▁
+wandb:       test_mirrored/abupt_axis_mean_rel_l2_pct ▁
+wandb:                            test_mirrored/cases ▁
+wandb:                                           +219 ...
+wandb: 
+wandb: Run summary:
+wandb:                                 model/n_params 17413721
+wandb:            test_delta_tta_minus_original/abupt 1.56767
+wandb: test_delta_tta_minus_original/surface_pressure 1.69993
+wandb:  test_delta_tta_minus_original/volume_pressure 1.8225
+wandb:       test_delta_tta_minus_original/wall_shear 1.27359
+wandb:     test_delta_tta_minus_original/wall_shear_x 1.03836
+wandb:     test_delta_tta_minus_original/wall_shear_y 1.62053
+wandb:     test_delta_tta_minus_original/wall_shear_z 1.65703
+wandb:           test_mirrored/abupt_axis_mean_rel_l2 0.11227
+wandb:       test_mirrored/abupt_axis_mean_rel_l2_pct 11.22689
+wandb:                                           +220 ...
+wandb: 
+wandb: 🚀 View run edward/h200-h189-tta-mirror at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/jsdf4oww
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_030521-jsdf4oww/logs
