@@ -36,6 +36,7 @@ import argparse
 import os
 import time
 from dataclasses import asdict, dataclass, fields
+from datetime import timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -618,7 +619,11 @@ def resolve_checkpoint_path(cfg: EvalConfig, state) -> tuple[Path, str]:
 
 
 def main(argv: Iterable[str] | None = None) -> None:
-    state = init_distributed()
+    # NCCL TCPStore default is 600s; full-stack 60-pass eval can have val_surface
+    # straggler waits >600s before the next collective, triggering a wait-timeout
+    # on the lazy NCCL communicator init for the first post-val all_gather_object.
+    # Bump to 120 min (same shape as thorfinn #1433 / nezuko #1432 plumbing).
+    state = init_distributed(timeout=timedelta(minutes=120))
     cfg = parse_args(argv)
     device = state.device
 
