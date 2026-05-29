@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 11:50Z | Branch: `tay` | **NEW SOTA: H252 stacked TTA PR #1413** | Round 4i: 8 active | **alphonse H253 highest-EV (6-res stack)**
+**Updated**: 2026-05-29 12:25Z | Branch: `tay` | **SOTA: H252 (PR #1413)** | Round 4i: 8 active | **H244 EP15 checkpoint is a BIG deal — sent back for 6-res TTA SOTA push**
 
 ---
 
@@ -21,20 +21,28 @@
 
 ---
 
-## Round 4i Active Fleet (as of 11:50Z)
+## Round 4i Active Fleet (as of 12:25Z)
 
 | PR | Student | Hypothesis | Status | ETA |
 |---|---|---|---|---|
-| **#1415** | **edward** | **H244: H185 EP14-16 retrain (TRAINING)** | 🟡 training | ~14:00Z |
+| **#1415** | **edward** | **H244 follow-on: EP15 + 6-res mirror TTA (predicted SOTA)** | 🟡 sent back | ~13:30Z (60min eval) |
 | **#1428** | **alphonse** | **H253: noise σ=5e-4 + H243 6-res (60 passes, HIGHEST EV)** | 🟢 running | ~12:30-13:00Z |
 | **#1429** | **askeladd** | **H254: Surface-points multi-res (novel axis)** | 🟢 running | ~12:30-13:00Z |
 | **#1431** | **fern** | **H255: 7-res {32k-164k} extension** | 🟢 running | ~12:30-13:00Z |
 | **#1432** | **nezuko** | **H256: H183 + 6-res mirror + weight-noise stack** | 🟢 running | ~13:00-13:30Z |
 | **#1433** | **thorfinn** | **H257: σ-sweep on H243 6-res stack {1e-4,2e-4,1e-3}** | 🟢 running | ~13:30-14:30Z |
 | **#1434** | **frieren** | **H258: H148 EP13 + 6-res mirror multi-res TTA** | 🟢 running | ~12:00-12:30Z |
-| **#1435** | **tanjiro** | **H259: σ basin-edge probe {5e-4,1e-3,5e-3,1e-2} (FINDING)** | 🟢 just assigned | ~12:10-12:30Z |
+| **#1435** | **tanjiro** | **H259: σ basin-edge probe {5e-4,1e-3,5e-3,1e-2} (FINDING)** | 🟢 running | ~12:10-12:30Z |
 
-**Budget remaining**: ~3.9h (deadline ~15:45Z). edward H244 training uses ~2.2h more.
+**Budget remaining**: ~3.3h (deadline ~15:45Z).
+
+### H244 edward result (submitted 12:14Z, sent back)
+
+- EP14/15/16 trained successfully via cosine extension (t_max=16 schedule, EP13 LR=8.5e-6).
+- EP15 is the sweet spot: single-res val 6.0079 vs H185 EP13 6.0172 (−9.3bp).
+- With 3-res mirror TTA: val 5.9516 / test 5.7998 — beats H236 gate but **misses H252 SOTA gate** by 2.3bp/2.3bp.
+- **HOWEVER**: by additive composition, EP15 + 6-res TTA → val ~5.945 / test ~5.788 — strong SOTA candidate. Sent back to run that eval immediately.
+- Edward also landed key infrastructure: `--resume-from-wandb`, `--epochs-already-done`, `--mirror-augmentation`, `--save-every-epoch`, and `eval_multi_res.py --local-checkpoint-path`. These unblock all future EP-extension experiments.
 
 ---
 
