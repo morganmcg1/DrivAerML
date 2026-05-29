@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 16:20Z | Branch: `tay` | **SOTA: H244 EP15+6-res (PR #1415 merged 14:57Z)** | Round 4j: 8 active | **H253 val 5.9418 clears gate; H264/H265 closed (LL-EPchain confirmed)**
+**Updated**: 2026-05-29 17:00Z | Branch: `tay` | **SOTA: H244 EP15+6-res (PR #1415 merged 14:57Z)** | Round 4j: 8 active | **H253 val 5.9418 ✓; H268 askeladd done (antithetic marginal); H266 fern arms A/B done; H267 edward launched**
 
 ---
 
@@ -20,21 +20,20 @@
 
 ---
 
-## Active Fleet (Round 4j, as of 16:20Z)
+## Active Fleet (Round 4j, as of 17:00Z)
 
 | PR | Student | Hypothesis | Status | ETA |
 |---|---|---|---|---|
 | **#1428** | **alphonse** | **H253: EP13+full stack (val 5.9418 ✓)** | 🟢 test_stacked in progress | ~17:20Z |
-| **#1432** | **nezuko** | **H256: H183 + 6-res + noise stack (portability)** | 🟢 running (crash fixed) | ~16:30Z |
-| **#1433** | **thorfinn** | **H257: σ-sweep on 6-res+noise stack** | 🟢 running (σ=1e-3 arm) | ~16:30Z |
-| **#1438** | **tanjiro** | **H262: K-saturation noise_only K=10 done (5.9709/5.8183), K=20 launching** | 🟢 K=10 partial | ~17:00Z |
-| **#1439** | **frieren** | **H263: avg(EP14,EP15) + 6-res mirror** | 🟡 EP15 in W&B; waiting on edward EP14 upload | post-upload + ~75 min |
+| **#1432** | **nezuko** | **H256: H183 + 6-res + noise stack (val 5.9676 ❌ gate miss)** | 🟡 test_stacked in progress | ~17:50Z |
+| **#1433** | **thorfinn** | **H257: σ-sweep on 6-res+noise stack** | 🟡 σ=1e-3 partial val 5.9626 worse, ping sent | TBD |
+| **#1438** | **tanjiro** | **H262: K-saturation noise_only K=10 done (5.9709/5.8183) → K=20 running** | 🟢 K=10 partial | ~17:10Z |
+| **#1439** | **frieren** | **H263: avg(EP14,EP15) sanity 6.0138 (+5.9bp vs EP15); 6-res mirror TTA running** | 🟢 6-res TTA in progress | ~17:30Z |
+| **#1443** | **fern** | **H266: TTA ANOVA: Arm A val 5.975, Arm B val 5.960; Arm C running** | 🟢 Arm C (weight_noise_res_avg) | ~17:30Z |
+| **#1442** | **askeladd** | **H268: Anti-thetic noise pairs — DONE, ping for SENPAI-RESULT** | 🟢 4 runs complete, ~1.5bp gain marginal | ping sent |
+| **#1447** | **edward** | **H267: EP15 + full TTA stack (relaunch crashed Arm 2)** | 🟢 launched 16:31Z | ~18:30Z |
 | ~~#1440~~ | ~~fern~~ | ~~H264: Finding LL-EPchain banked~~ | 🔴 closed | — |
 | ~~#1441~~ | ~~edward~~ | ~~H265: EP14 + 6-res mirror gate miss; Finding LL-EPchain confirmed~~ | 🔴 closed | — |
-| **#1443** | **fern** | **H266: TTA ANOVA decomposition — mirror×res×noise 2³ design** | 🟡 just assigned | ~17:30Z |
-| **#1442** | **askeladd** | **H268: Anti-thetic noise pairs ±δ** (run n2j8u2lo) | 🟢 running, no metrics yet | ~17:00Z |
-| **#1447** | **edward** | **H267: EP15 + full TTA stack (relaunch crashed Arm 2)** | 🟡 just assigned | ~18:20Z |
-| ~~background~~ | ~~edward~~ | ~~Arm 2 h1ae7x1j CRASHED at 15:21Z (zero metrics) → reborn as H267~~ | 🔴 crashed | — |
 
 ---
 
