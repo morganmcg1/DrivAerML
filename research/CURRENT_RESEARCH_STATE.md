@@ -8,12 +8,12 @@
 
 | PR | Student | Hypothesis | step (mid-EP9/10) | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #1353 | thorfinn | H185 GradNorm × mirror-aug | EP9 banked (step 59780) | **6.0948 LEAD −0.108pp** | TERMINAL MERGE CANDIDATE (~03:00-04:00Z+1) |
+| #1353 | thorfinn | H185 GradNorm × mirror-aug | step 68347 (96.2% complete) | **6.0253 LEAD −0.18pp WIDENING** | TERMINAL MERGE CANDIDATE (~02:00-03:00Z+1, ahead of original projection) |
 | #1357 | frieren | H164e RNG calibration | step ~65875 mid-EP12 | 6.05% trajectory | terminal ~01:08Z+1; test eval ~02:35Z+1 |
 | #1364 | nezuko | H190 mirror p=0.25 | EP9 (step 59833) | **6.1386 LEAD −0.011pp (within noise)** | terminal ~03:00Z+1 (50/50 within RNG floor) |
 | #1365 | tanjiro | H191 mirror × tau_y=2.0 | EP10 banked (step 62501) | 6.3672 +0.23pp behind | EP9+EP10 PASS @ 00:08Z; WSS_x slope intact (−0.0109); terminal ~01:55Z+1 (NULL-expected boundary probe, mechanism confirmed) |
 | #1362 | alphonse | H188 mirror × DropPath=0.15 | step 64690 mid-EP9 | 6.20% / WSS_agg 7.05% | HEALTHY heartbeat live; in band with H112 EP9 |
-| #1363 | askeladd | H189 AdamW × tau_y=3.0 no-mirror | step 65221 EP9-boundary | 6.50% / WSS_agg 7.36% | HEALTHY |
+| #1363 | askeladd | H189 AdamW × tau_y=3.0 no-mirror | EP9 banked (step 65222) | **6.468 +0.33pp behind** | EP9 PASS @ 00:22Z; WSS_x slope −0.0282 NEGATIVE through full trajectory; basin invariant intact; terminal ~01:42Z+1 (mechanism control, NULL-expected) |
 | #1356 | fern | H186 mirror × AdamW (kill+restart cancelled 19:05Z) | step 64504 mid-EP9 | EP9 boundary pending | HEALTHY |
 | #1350 | edward | H184 surface:vol 4:0.5 + tau_y=3.0 | step 64928 EP9-boundary | 6.26% / WSS_agg 7.03% | HEALTHY |
 
