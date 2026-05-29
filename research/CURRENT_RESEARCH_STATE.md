@@ -1,16 +1,25 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 18:55Z._
+_Last updated: 2026-05-29 20:50Z._
 
-**18:55Z fleet update — Structural-perturbation wave EP1-EP3 readings in. H164 tracking H147 tightly.**
+**20:50Z fleet update — Structural wave EP3-EP5 readings. H164 LEADING merge candidate; H167 RECOVERED and now 2nd contender.**
 
-| Hyp | Student | rank0 run | rt | step | latest val_WSS | likely EP | vs H147 EP | State |
-|-----|---------|-----------|-----|------|----------------|-----------|------------|-------|
-| H147 SOTA | (merged) | k6q4c3on | — | — | EP3=6.98% | reference | — | merged baseline |
-| **H164 slices=192** | frieren | 2qm6c9w4 | 2.73h | 37117 | **7.0325%** | ~EP3 | +0.05pp ✓ tight | PR #1444 status:wip — strongest arm |
-| **H166 surfw=3.0** | nezuko | jmyv1byk | 2.12h | 31720 | **7.3621%** | ~EP2 | +0.10pp slow | PR #1446 status:wip |
-| **H165 pe=12** | fern | 3mpka9g9 | 2.07h | 31184 | **7.3790%** | ~EP2 | +0.12pp slow | PR #1445 status:wip |
-| **H167 heads=8** | tanjiro | 9b7sdo5k | 1.14h | 14239 | **13.5518%** | EP1 | +0.73pp HOT | PR #1450 status:wip — HOLD-WATCH (kill ladder EP1>13.5% breached by 0.05pp; EP3 is real decision) |
+Full per-EP trajectory across the 4-arm wave (all rank0 IDs, vs H147 reference):
+
+| EP | H147 | H164 slices=192 (frieren) | H165 pe=12 (fern) | H166 surfw=3 (nezuko) | H167 heads=8 (tanjiro) |
+|---|---:|---:|---:|---:|---:|
+| 1 | 12.82 | **12.76 (-0.06)** | **12.65 (-0.17)** | **12.66 (-0.16)** | 13.55 (+0.73 HOT) |
+| 2 | 7.26 | 7.31 (+0.05) | 7.38 (+0.12) | 7.36 (+0.10) | **7.29 (+0.03 recov)** |
+| 3 | 6.98 | 7.03 (+0.05) | 7.09 (+0.11) | 7.08 (+0.10) | **7.00 (+0.02 TIED)** |
+| 4 | ~6.85 | 6.92 (+0.07) | 6.99 (+0.14) | 6.95 (+0.10) | — |
+| 5 | 6.75 | **6.86 (+0.11)** | — | **6.87 (+0.12)** | — |
+
+| Hyp | Student | rank0 run | rt | latest EP val_WSS | State |
+|-----|---------|-----------|-----|---------------|-------|
+| **H164 slices=192** | frieren | 2qm6c9w4 | 4.13h | EP5=6.8598% (+0.11) | PR #1444 — **LEADING merge candidate; projected test ~6.57-6.62%** |
+| **H167 heads=8** | tanjiro | 9b7sdo5k | 2.73h | EP3=6.9989% (+0.02 TIED) | PR #1450 — **#2 contender; recovery complete** |
+| **H166 surfw=3.0** | nezuko | jmyv1byk | 3.69h | EP5=6.8712% (+0.12) | PR #1446 — runner-up; close behind H164 |
+| **H165 pe=12** | fern | 3mpka9g9 | 3.53h | EP4=6.9919% (+0.14) | PR #1445 — trailing, non-merge expected |
 
 **Closed in previous cycles (background context):**
 | Hyp | Run | rt | Terminal test_WSS | vs H147 SOTA 6.5409% | State |
@@ -20,10 +29,13 @@ _Last updated: 2026-05-29 18:55Z._
 | H161 wss_charb=0.3 z (nezuko prev) | kvfaya2j+5ttbfh4o | terminal | 6.7402 | +0.199 | CLOSED PR #1427 15:23Z |
 | H162 pe_features=24 (fern prev) | 7vdb5zwz+0jfesb3w | 3.78h+eval | 6.7070 | +0.166 | CLOSED PR #1430 15:52Z — NON-MERGE |
 
-**Key 18:55Z reads — structural wave EP1-EP3:**
-- **H164 (frieren) is the strongest arm so far.** At EP3 val_WSS=7.0325% only +0.05pp behind H147 EP3 (6.98%). If trajectory holds, predicted EP8 ≈ 6.70%, within 0.02pp of H147 EP8 ≈ 6.68%. **Trunk-token-count (slices 128→192) is at parity early.** Watch EP5 (H147 = 6.75%) for divergence.
-- **H165 (fern) pe_features=12** at EP2=7.379% (+0.12pp) and **H166 (nezuko) surf_out_width=3** at EP2=7.362% (+0.10pp) — tied behind H147. Both arms have larger parameter counts in different paths (PE basis halved for H165; decoder head widened 1.5× for H166); the +0.10-0.12pp lag is consistent with extra warmup needed for new parameter geometries. EP5 check is decisive — if either reaches val_WSS≤6.80% at EP5, structural axis wins.
-- **H167 (tanjiro) heads=8** at EP1=13.55% (+0.73pp) — HOT but expected, since 8 heads doubles attention-subspace count. The original kill ladder was EP1>13.5% but breach is razor-thin (0.05pp). HOLD-WATCH to EP3 — kill if val_WSS > 7.20%.
+**Key 20:50Z reads — structural wave update:**
+- **H164 (frieren) is the leading merge candidate.** EP5=6.8598%, cooling rate -0.06/EP (vs H147 -0.075 in this band). Projected EP8 ≈ 6.71-6.76% → projected test_WSS ≈ 6.57-6.62% vs H147 6.5409%. **Razor-thin — could tie or beat H147.** Only arm with EP1 BEAT H147 AND tight cooling. Continue to terminal with best-val test eval.
+- **H167 (tanjiro) heads=8 is the surprise #2 contender.** Recovery from EP1=13.55% (HOT) → EP2=+0.03 → EP3=+0.02 (effectively TIED with H147 EP3). Trajectory shape unique to this arm (slow EP1, sharp catchup); 8 heads = double attention-subspace count, late-EP capacity-friendly. EP5 gate: ≤6.77% confirms, >6.85% reverts to trail pattern.
+- **H166 (nezuko) surfw=3.0** EP5=6.8712 — close runner-up to H164. Cooling EP4→EP5 = -0.077 matches H147 rate. Projected EP8 ~6.73-6.78% → test ~6.59-6.64%, behind H147 by ~+0.05-0.10pp. Plausible runner-up if H164 misses.
+- **H165 (fern) pe_features=12** EP4=6.9919 — trailing at steady +0.10-0.14pp band. Non-merge expected. EP5 reading will confirm whether pe=12 is in the "tight local optimum around 16" pattern (like H162 pe=24's +0.166 regression).
+
+**Wave-level insight:** Three of four structural perturbations BEAT H147 at EP1 (-0.06, -0.17, -0.16), then the gap reverses at EP2 and stabilizes. This suggests H147's exact configuration is at a **tight architectural local optimum** where mild structural perturbations help initial feature variety but hurt converged-fit quality. H164's preserved cooling rate is what separates it.
 
 **Key 17:15Z reads (background):**
 - **H160 NON-MERGE (tanjiro — closed 17:15Z):** test_WSS=6.6247% (+0.084pp); test_VP=3.5659% ✓ clears 3.643%; test_SP=3.6542% ❌ misses 3.577% floor by 0.077pp; test_ABUPT=5.7827% ✓ clears 5.844%; test_WSS_z=8.6665% +0.178pp vs H147. **3 of 4 caps regress; test_SP missed.** Trajectory tracked H147 within ±0.09pp at every EP1-EP8 checkpoint — β2=0.985 axis is mildly forgiving (no destabilization, unlike β1↑), but does not open new test ceiling.
