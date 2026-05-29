@@ -12,6 +12,7 @@ import re
 import subprocess
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -96,7 +97,7 @@ class DistributedState:
         return self.rank == 0
 
 
-def init_distributed() -> DistributedState:
+def init_distributed(timeout: timedelta | None = None) -> DistributedState:
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -113,7 +114,10 @@ def init_distributed() -> DistributedState:
         if not dist.is_available():
             raise RuntimeError("torch.distributed is not available, but WORLD_SIZE > 1")
         backend = "nccl" if device.type == "cuda" else "gloo"
-        dist.init_process_group(backend=backend)
+        kwargs = {"backend": backend}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        dist.init_process_group(**kwargs)
     return DistributedState(
         enabled=enabled,
         rank=rank,

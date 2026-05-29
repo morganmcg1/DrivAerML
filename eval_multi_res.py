@@ -13,8 +13,9 @@ processes its assigned cases sequentially with single-case loaders. Per-case
 scratch buffers live on CPU (~200MB per case).
 
 Modes:
-    res_avg:        average over N resolutions, no mirror
-    mirror_res_avg: 2N-pass = orig + mirror at each of N resolutions
+    res_avg:                       average over N resolutions, no mirror
+    mirror_res_avg:                2N-pass = orig + mirror at each of N resolutions
+    mirror_res_weight_noise_avg:   K*2N-pass = K weight-noise perturbations × (orig + mirror) × N resolutions
 
 Mirror convention (H148/H183/H209):
     surface_x [x, y, z, nx, ny, nz, area] -> negate y(1) and ny(4)
@@ -30,6 +31,7 @@ import math
 import os
 import time
 from dataclasses import asdict, dataclass, fields
+from datetime import timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -70,9 +72,16 @@ class EvalConfig:
 
     # Multi-resolution TTA configuration
     resolutions: str = "49152,65536,81920"
-    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
+    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg, mirror_res_weight_noise_avg
     # Surface resolution stays fixed; only volume is varied.
     eval_surface_points: int = 65536
+
+    # H253/H257: weight-space Gaussian noise TTA. Relative noise added to every
+    # floating-point parameter as `sigma * |p| * eps` where eps ~ N(0,1) is
+    # sampled with a rank-independent CPU generator so all DDP ranks apply the
+    # same perturbation per noise pass.
+    weight_noise_sigma: float = 5e-4
+    n_weight_noise_passes: int = 5
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -241,7 +250,7 @@ def chunk_global_indices(view_index: int, view_count: int, n_full: int) -> torch
 
 
 @torch.no_grad()
-def process_case_multires(
+def _accumulate_multires_mirror(
     *,
     case_id: str,
     model: nn.Module,
@@ -251,24 +260,22 @@ def process_case_multires(
     cfg: EvalConfig,
     resolutions: list[int],
     use_mirror: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
-    """Run multi-res TTA passes for one case and return per-point averaged predictions.
+    surf_sum: torch.Tensor,
+    surf_cnt: torch.Tensor,
+    vol_sum: torch.Tensor,
+    vol_cnt: torch.Tensor,
+    timing: dict,
+) -> None:
+    """Run one full multi-res × mirror sweep and ADD into the provided accumulators.
 
-    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
-             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
-    Predictions are in **real units** (already denormalized).
+    Called by ``process_case_multires`` (once) and by
+    ``process_case_multires_weight_noise`` (K times under different weight
+    perturbations). Coverage checks, averaging, and GT loading happen in the
+    caller.
     """
-    counts = store.case_point_counts(case_id)
-    n_surf = counts["n_surface"]
-    n_vol = counts["n_volume"]
-
-    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
-    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
-    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
-    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
-
+    n_surf = surf_sum.shape[0]
+    n_vol = vol_sum.shape[0]
     eval_module = unwrap_model(model)
-    timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
 
     for K in resolutions:
         dataset = DrivAerMLSurfaceDataset(
@@ -358,6 +365,52 @@ def process_case_multires(
                             )
                 timing["io_seconds"] += time.time() - t1
 
+
+@torch.no_grad()
+def process_case_multires(
+    *,
+    case_id: str,
+    model: nn.Module,
+    transform: TargetTransform,
+    device: torch.device,
+    store: DrivAerMLCaseStore,
+    cfg: EvalConfig,
+    resolutions: list[int],
+    use_mirror: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    """Run multi-res TTA passes for one case and return per-point averaged predictions.
+
+    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
+             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
+    Predictions are in **real units** (already denormalized).
+    """
+    counts = store.case_point_counts(case_id)
+    n_surf = counts["n_surface"]
+    n_vol = counts["n_volume"]
+
+    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
+    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
+    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
+    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
+
+    timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
+
+    _accumulate_multires_mirror(
+        case_id=case_id,
+        model=model,
+        transform=transform,
+        device=device,
+        store=store,
+        cfg=cfg,
+        resolutions=resolutions,
+        use_mirror=use_mirror,
+        surf_sum=surf_sum,
+        surf_cnt=surf_cnt,
+        vol_sum=vol_sum,
+        vol_cnt=vol_cnt,
+        timing=timing,
+    )
+
     if int(surf_cnt.min()) == 0:
         raise RuntimeError(
             f"surface coverage incomplete for case {case_id}: "
@@ -378,6 +431,103 @@ def process_case_multires(
     vol_y = case.volume_y.float()
 
     n_passes = len(resolutions) * (2 if use_mirror else 1)
+    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
+
+
+@torch.no_grad()
+def process_case_multires_weight_noise(
+    *,
+    case_id: str,
+    model: nn.Module,
+    transform: TargetTransform,
+    device: torch.device,
+    store: DrivAerMLCaseStore,
+    cfg: EvalConfig,
+    resolutions: list[int],
+    sigma: float,
+    n_noise_passes: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    """H253/H257: K weight-noise passes × N resolutions × 2 mirror states.
+
+    Saves the clean state on CPU, perturbs by `sigma * |p| * eps` (eps ~ N(0,1))
+    using a rank-independent CPU generator so all DDP ranks apply the same
+    perturbation per noise pass, accumulates predictions across all passes,
+    and restores the clean state at the end (or on failure).
+    """
+    counts = store.case_point_counts(case_id)
+    n_surf = counts["n_surface"]
+    n_vol = counts["n_volume"]
+
+    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
+    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
+    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
+    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
+
+    timing: dict[str, float] = {
+        "forward_seconds": 0.0,
+        "io_seconds": 0.0,
+        "n_forwards": 0,
+        "noise_seconds": 0.0,
+    }
+
+    eval_module = unwrap_model(model)
+    clean_state = {k: v.detach().cpu().clone() for k, v in eval_module.state_dict().items()}
+
+    try:
+        for noise_idx in range(n_noise_passes):
+            t_noise = time.time()
+            perturbed: dict[str, torch.Tensor] = {}
+            for param_idx, (k, v) in enumerate(clean_state.items()):
+                if v.dtype.is_floating_point:
+                    # Rank-independent seed: identical noise on every DDP rank.
+                    seed = (noise_idx * 100003 + param_idx * 1009) % (2 ** 31)
+                    g = torch.Generator()  # CPU generator
+                    g.manual_seed(seed)
+                    noise = torch.empty_like(v).normal_(generator=g)
+                    perturbed[k] = (v + sigma * v.abs() * noise).to(device)
+                else:
+                    perturbed[k] = v.to(device)
+            eval_module.load_state_dict(perturbed)
+            timing["noise_seconds"] += time.time() - t_noise
+
+            _accumulate_multires_mirror(
+                case_id=case_id,
+                model=model,
+                transform=transform,
+                device=device,
+                store=store,
+                cfg=cfg,
+                resolutions=resolutions,
+                use_mirror=True,
+                surf_sum=surf_sum,
+                surf_cnt=surf_cnt,
+                vol_sum=vol_sum,
+                vol_cnt=vol_cnt,
+                timing=timing,
+            )
+    finally:
+        # Always restore clean weights so subsequent cases see the original model.
+        eval_module.load_state_dict({k: v.to(device) for k, v in clean_state.items()})
+
+    if int(surf_cnt.min()) == 0:
+        raise RuntimeError(
+            f"surface coverage incomplete for case {case_id}: "
+            f"{int((surf_cnt == 0).sum())} points have zero contributing chunks"
+        )
+    if int(vol_cnt.min()) == 0:
+        raise RuntimeError(
+            f"volume coverage incomplete for case {case_id}: "
+            f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
+        )
+
+    surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
+    vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
+
+    case = store.load_case(case_id)
+    surf_y = case.surface_y.float()
+    vol_y = case.volume_y.float()
+
+    n_passes = n_noise_passes * len(resolutions) * 2
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -472,7 +622,7 @@ def evaluate_split_multires(
     store: DrivAerMLCaseStore,
     cfg: EvalConfig,
     resolutions: list[int],
-    use_mirror: bool,
+    mode: str,
     distributed_state,
 ) -> dict[str, float]:
     """Distribute cases across ranks, run multi-res TTA per case, return finalized metrics."""
@@ -488,19 +638,34 @@ def evaluate_split_multires(
     total_t0 = time.time()
     total_forward = 0.0
     total_io = 0.0
+    total_noise = 0.0
     total_forwards = 0
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires(
-            case_id=case_id,
-            model=model,
-            transform=transform,
-            device=device,
-            store=store,
-            cfg=cfg,
-            resolutions=resolutions,
-            use_mirror=use_mirror,
-        )
+        if mode == "mirror_res_weight_noise_avg":
+            surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires_weight_noise(
+                case_id=case_id,
+                model=model,
+                transform=transform,
+                device=device,
+                store=store,
+                cfg=cfg,
+                resolutions=resolutions,
+                sigma=cfg.weight_noise_sigma,
+                n_noise_passes=cfg.n_weight_noise_passes,
+            )
+        else:
+            use_mirror = mode == "mirror_res_avg"
+            surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires(
+                case_id=case_id,
+                model=model,
+                transform=transform,
+                device=device,
+                store=store,
+                cfg=cfg,
+                resolutions=resolutions,
+                use_mirror=use_mirror,
+            )
         add_case_to_accumulator(
             acc,
             case_id=case_id,
@@ -512,20 +677,26 @@ def evaluate_split_multires(
         )
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
+        total_noise += timing.get("noise_seconds", 0.0)
         total_forwards += timing["n_forwards"]
         dt = time.time() - t0
+        noise_str = (
+            f" noise={timing['noise_seconds']:.1f}s" if "noise_seconds" in timing else ""
+        )
         print(
             f"  [rank {rank}] {split_name} {case_id} ({case_idx + 1}/{len(my_cases)}): "
             f"n_passes={n_passes} forwards={timing['n_forwards']} "
-            f"forward={timing['forward_seconds']:.1f}s io={timing['io_seconds']:.1f}s "
-            f"total={dt:.1f}s",
+            f"forward={timing['forward_seconds']:.1f}s io={timing['io_seconds']:.1f}s"
+            f"{noise_str} total={dt:.1f}s",
             flush=True,
         )
 
+    extra = f" noise={total_noise:.1f}s" if total_noise > 0 else ""
     print(
         f"[rank {rank}] {split_name} complete: {len(my_cases)} cases in "
         f"{time.time() - total_t0:.1f}s "
-        f"(forward={total_forward:.1f}s io={total_io:.1f}s n_forwards={total_forwards})",
+        f"(forward={total_forward:.1f}s io={total_io:.1f}s{extra} "
+        f"n_forwards={total_forwards})",
         flush=True,
     )
 
@@ -543,14 +714,18 @@ def evaluate_split_multires(
 
 
 def main(argv: Iterable[str] | None = None) -> None:
-    state = init_distributed()
+    # Weight-noise eval has ~900s/case. Per-rank case-count is uneven (some
+    # ranks get N+1 cases when N*world_size < total_cases), so the first
+    # rank to finish a split can wait ~1 case worth of time at the
+    # all_gather barrier. Default NCCL timeout (600s) is too tight.
+    state = init_distributed(timeout=timedelta(minutes=60))
     cfg = parse_args(argv)
     device = state.device
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
     for mode in modes:
-        if mode not in ("res_avg", "mirror_res_avg"):
+        if mode not in ("res_avg", "mirror_res_avg", "mirror_res_weight_noise_avg"):
             raise ValueError(f"Unknown eval mode: {mode!r}")
 
     if state.is_main:
@@ -657,11 +832,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode == "mirror_res_avg"
             if state.is_main:
+                extras = ""
+                if mode == "mirror_res_weight_noise_avg":
+                    extras = (
+                        f" weight_noise_sigma={cfg.weight_noise_sigma}"
+                        f" n_weight_noise_passes={cfg.n_weight_noise_passes}"
+                    )
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror} ===",
+                    f"resolutions={resolutions}{extras} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -674,7 +854,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 store=store,
                 cfg=cfg,
                 resolutions=resolutions,
-                use_mirror=use_mirror,
+                mode=mode,
                 distributed_state=state,
             )
             dt = time.time() - t0
