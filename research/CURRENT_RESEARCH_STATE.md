@@ -205,10 +205,11 @@ Zero idle students.
 - `<threshold` in kill-threshold string is PASS condition; never write `>threshold`
 - WSS_x slope sign is the BASIN-DISRUPTION DIAGNOSTIC — positive slope indicates shared-axis stacking failure
 - DrivAerML axes: x=streamwise, y=lateral (mirror axis), z=vertical
-- RNG floor on WSS_agg slope = ±0.063pp at N=2 EP11; treat as minimum effect size for single-draw mechanism claims
-- RNG floor on **val_abupt = ±0.053pp at N=2 EP11** — claims must exceed 2× floor (±0.106pp) to count as real signal
-- **WSS_z slope is NOT the canonical cohort-screening axis** (N=2 finding: ±0.083pp half-range, LARGEST not smallest) — supersedes earlier H164d single-draw hypothesis
-- VP smallest RNG floor at ±0.036pp → cross-axis compounds clear test_VP gate
+- RNG floor on WSS_agg = ±0.065pp at N=2 EP12; treat as minimum effect size for single-draw mechanism claims
+- RNG floor on **val_abupt = ±0.053pp at N=2 EP12** — claims must exceed 2× floor (±0.106pp) to count as real signal
+- **WSS_z slope is NOT the canonical cohort-screening axis** (N=2 finding: ±0.082pp half-range at EP12, LARGEST not smallest) — supersedes earlier H164d single-draw hypothesis
+- **SP is the NEW canonical screening channel** at ±0.020pp half-range at EP12 (4× tighter than abupt). Use SP slope for highest-power cross-run comparisons.
+- VP RNG floor ±0.037pp at EP12, **one-sided below H112** (both H164d/H164e VP < H112 reported value) → recipe-mean VP at EP12 ≈ 3.505% vs H112's 3.5495% → cross-axis compound test_VP margin against gate is MORE favorable than appears
 - **Actual EP boundaries** (tanjiro 00:08Z calibration via volume-points curriculum): EP6=48902, EP9=59780, EP10=62501, EP11=65184, EP13(terminal)≈70657 — supersedes uniform 10864-step assumption used in legacy PR kill-thresholds
 
 ---
