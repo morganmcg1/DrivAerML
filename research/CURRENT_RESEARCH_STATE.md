@@ -1,41 +1,33 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 15:23Z._
+_Last updated: 2026-05-29 15:55Z._
 
-**15:23Z fleet update — H161 CLOSED non-merge, H162 marginal-kill, H159 strongest in-flight (22 min to deadline):**
+**15:55Z fleet update — H159+H162 CLOSED non-merge, H161 already closed, H160 deadline-harvest in progress:**
 
-| Hyp | Run | rt | EP5 | EP6 | vs H147 EP5 (6.75%) | State |
-|-----|-----|----|------|------|------|------|
-| H147 SOTA | k6q4c3on | — | **6.75** | — | reference | merged baseline (test_WSS=6.5409%) |
-| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7 | 5.08h | 6.787 | **6.7415 ★** | +0.037 → **−0.0085 (descending past SOTA)** | **RUNNING** EP6.5; strongest merge candidate |
-| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 4.61h | 6.838 | **6.795** | +0.09 → +0.045 (descending) | **RUNNING** EP5.9; β2 axis flat-and-converging |
-| **H161** wss_charb=0.3 z (nezuko) | kvfaya2j+5ttbfh4o | terminal | 6.977 | — | +0.227 FAIL | **CLOSED PR #1427 15:23Z** — test_WSS=6.7402% (+0.199pp), 4-cap regression |
-| **H162** pe_features=24 (fern) | 7vdb5zwz | 3.78h | **6.885** | (mid-EP6 3%) | +0.14 PR-gate marginal-kill | **KILLED EP5 15:18Z** — test eval launching |
+| Hyp | Run | rt | Terminal test_WSS | vs H147 SOTA 6.5409% | State |
+|-----|-----|----|------|------|------|
+| H147 SOTA | k6q4c3on | — | **6.5409** | reference | merged baseline |
+| **H159** vol_p_charb=0.3 (frieren) | z6ybgmx7+juxadtjh | 5.13h+eval | **6.6678** | **+0.127** | **CLOSED PR #1423 15:51Z** — NON-MERGE |
+| **H160** β=0.95/0.985 (tanjiro) | 7a14s7uo | 5.11h running | TBD | TBD | **RUNNING past deadline** — advisor directed harvest NOW (15:55Z) |
+| **H161** wss_charb=0.3 z (nezuko) | kvfaya2j+5ttbfh4o | terminal | 6.7402 | +0.199 | CLOSED PR #1427 15:23Z |
+| **H162** pe_features=24 (fern) | 7vdb5zwz+0jfesb3w | 3.78h+eval | **6.7070** | **+0.166** | **CLOSED PR #1430 15:52Z** — NON-MERGE |
 
-**Key 15:23Z reads:**
-- **H161 CLOSED PR #1427 15:23Z (non-merge):** test_WSS=6.7402% (+0.199pp), test_WSS_z=8.6884% (+0.200pp), test_SP=3.7473% (+0.170pp over cap), test_VP=3.7565% (+0.114pp over cap), test_ABUPT=5.9187% (+0.075pp over cap). All 4 floors violated. Mechanism finding **banked** (see below). Stability evidence refutes β × Charbonnier compound divergence concern.
-- **H162 MARGINAL-KILL EP5 15:18Z (fern self-aborted):** val_WSS=6.885% crossed PR-gate (>6.85%) by 0.035pp but stayed under advisor watch (≤6.95%). Disciplined call given deadline pressure — EMA-EP5 best-val preserved, test eval launching. Trajectory mirrors H161 almost exactly (EP3→EP5 monotonic gap widening).
-- **H159 EP6 = 6.7415%** — descending past H147 EP5 SOTA by −0.0085pp, tracking toward H147 EP10 floor (6.64%). WSS_z=9.157%, AB=6.006%. **Strongest in-flight merge candidate**. EP7 + EMA-best test eval lands ~15:30-15:40Z — comfortably inside deadline.
-- **H160 EP6 = 6.795%** — descending from EP5 6.838 by −0.043pp/EP, converging toward H147 SOTA. β2 axis confirmed mildly forgiving in 0.98→0.985 direction. Still +0.045pp behind H147 EP5 SOTA but with negative slope.
+**Key 15:55Z reads:**
+- **H159 NON-MERGE (frieren — closed 15:51Z):** test_WSS=6.6678% (+0.127pp), test_VP=3.6092% ✓ (under cap), test_SP=3.6496% ❌ over cap by 0.073pp (same shortfall as H147), test_ABUPT=5.815% ✓ (under cap). Per-axis test_WSS_z=8.6709% ≈ tied H147 8.4882%. Trajectory tracked H147 within ±0.04pp through EP5 then plateaued. EP7 EMA-best harvested at deadline.
+- **H162 NON-MERGE (fern — closed 15:52Z):** test_WSS=6.7070% (+0.166pp), test_VP=3.7871% over cap by 0.144pp, test_SP=3.7292% over cap by 0.152pp, test_ABUPT=5.8859% over cap by 0.042pp. EP5 EMA-best harvest after disciplined kill.
+- **H160 RUNNING PAST DEADLINE (tanjiro):** W&B `7a14s7uo` state=running at runtime=5.11h step=76830 — 10 min past 15:45Z. Advisor directed harvest NOW via PR #1424 comment 15:55Z. Last reading val_WSS=6.795% at EP6.
 
-**FINDING BANKED — Charbonnier-by-GradNorm-state interaction (provisional, awaits H159 terminal):**
-- **VP head (H159, RUNNING)**: w_vol_p pinned at 0.15 floor during H147 training → VP under-served → heavier VP Charbonnier (0.3) closes the real gap. Trajectory tracks past H147 SOTA at EP5/EP6.
-- **WSS heads (H161, CLOSED non-merge)**: w_tau_{x,y,z} ran 0.4–1.4 across training → WSS heads well-served → heavier WSS Charbonnier *displaces* effort across tau components rather than closing tau_z floor. Per-axis EP3→EP5 descent rates show tau_z is the slowest, not the fastest (falsifying the prediction's direction).
-- **Compound stability**: H161 ran with zero grad spikes / zero nonfinite events. **Refutes 10:48Z β × Charbonnier compound divergence concern**: divergence axis in H157b was the Lion-β setting (0.97/0.985), NOT the Charbonnier weight.
-- **Pe-features axis (H162, awaiting terminal)**: pe_num_features 16→24 monotonically widens the gap to H147 in same pattern as H161. Compounds with β-grid result and H161 to support the "**H147 stack sits at a tight joint maximum**" hypothesis. Small perturbations on multiple axes (β-grid, representation density, auxiliary-loss strength) all degrade.
+**MAJOR FINDING — Charbonnier-by-GradNorm-state asymmetry PARTIALLY FALSIFIED on TEST:**
+- **Mechanism observable in GradNorm dynamics** (H159 confirmed): w_vol_p clamps at 0.15 floor; r_vol_p=3.5; w_tau_z peaks at 1.46 (vs H147 final ~1.27). Heavier VP Charbonnier DID shift gradient mass to tau_z as predicted.
+- **But the gradient reallocation does NOT translate to test_WSS gain**: H159 test_WSS_z=8.6709% essentially tied with H147 8.4882%. WSS-z does NOT appear gradient-budget-limited under H147 — it has a representational/architectural floor that loss-weight knobs cannot crack.
+- **The val_VP overfit motivating H159 was an artifact** of the unstable H156 (compound β+lr) stack — on H147, val/test VP ratio is 1.0 (3.6372/3.6092). The Charbonnier intervention had no overfit to suppress.
+- **Triple-arm joint conclusion (H159+H161+H162)**: three orthogonal single-knob amplifications on H147 — heavier VP Charbonnier (H159), heavier WSS Charbonnier (H161), richer PE features (H162) — all regress test_WSS by +0.127 to +0.199pp. The H147 stack sits at a **tight LOCAL TEST optimum**. Val trajectory does not predict test (H159 descended val past H147 EP5 SOTA but regressed test by +0.127pp).
 
-**If H159 lands MERGE**: publishable mechanism finding — heavier auxiliary regularization helps only on heads under-served by GradNorm (clamped at min_w floor). This reframes auxiliary-loss design from "uniform-strength" to "**GradNorm-state-aware**" weighting.
-
-**Emerging finding — Charbonnier-by-GradNorm-state asymmetry (pending H159 terminal + H161 test result):**
-- **GradNorm w_vol_p was clamped at 0.15 floor** during H147 training → VP axis was *under-served* → heavier VP Charbonnier (H159) closes a real gap = HELPFUL.
-- **GradNorm w_tau_x/y/z ran 0.4-1.4** during H147 training → WSS axes already *well-served* → heavier WSS Charbonnier (H161) *displaces effort* across tau components rather than closing tau_z floor = HURTFUL.
-- **Sharper than "Charbonnier 0.3 is too much"**: this reframes auxiliary-loss design — only under-served heads benefit from extra regularization. Publishable head-asymmetry finding.
-
-**Deadline:** 15:45Z = 1h05m. Terminal projections at current ~50min/EP:
-- H159: EP7 by deadline (best-val EMA checkpoint to submit)
-- H160: EP6 by deadline
-- H161: test eval lands ~15:00Z → SENPAI-RESULT JSON
-- H162: EP5 ~15:15-15:25Z, terminal eval ~15:35-15:45Z (very tight)
+**Implications for next-wave hypothesis design:**
+- **KILLED candidates**: "raise GradNorm w_tau_z floor explicitly" (H163, queued) — the saturated VP→tau_z reallocation in H159 is the direct version and produced no test gain. Drop.
+- **KILLED candidates**: any further single-knob amplification on the H147 loss/PE/Charbonnier surface (3 negative arms in 3 directions is enough).
+- **PROMISING directions**: structural perturbations rather than knob amplifications. WSS-z bottleneck likely needs: more slices (>128), different hidden_dim/projection, multi-resolution surface mesh, curvature-conditioned attention bias, or a representational fix.
+- **OPEN candidates** from human directive priority families: STRING-family validation (multi-sigma STRING, volume-point curriculum, per-axis output scaling), mild tau_y/z weights (9mm3sz7x y=1.2/z=1.3 lr=9e-5), extended cosine 5o7jc7wi.
 
 **CRITICAL — BASELINE.md correction (commit ea99dda was wrong):** nezuko discovered in PR #1360 that the 2026-05-28 H147 SOTA section copy-pasted H39's `yym5oa8x` test_VP/test_SP into the H147 row. Verified by W&B query of `k6q4c3on`. Correct H147 metrics: **test_VP=3.4014%** (clears 3.643% floor by 0.242pp) and **test_SP=3.5634%** (clears 3.577% floor by 0.014pp). **H147 actually CLEARS all 4 floors**, not 3-of-4. Patched in BASELINE.md this session.
 
