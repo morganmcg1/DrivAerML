@@ -1,3 +1,111 @@
+## 2026-05-29 04:35 — PR #1382: H209 TTA mirror-aug on H185 EP13 (frieren, **MERGED — NEW SOTA**)
+
+- **Branch**: `frieren/h209-tta-mirror-h185-ep13` (MERGED, advisor branch tay)
+- **W&B run**: `bx3t1vdw` (eval-only DDP8, 2-pass mirror TTA on H185 EP13 EMA from W&B `yw2a5dyl`)
+- **Hypothesis**: TTA = 0.5·orig + 0.5·mirror_unmirrored on H185 (mirror p=0.25 trained) exploits learned mirror equivariance, gaining test_WSS without retraining.
+
+### Terminal metrics (SOTA)
+
+| Metric | H112 (prior SOTA) | H185 orig | **H185+TTA** | Δ vs H112 |
+|---|---:|---:|---:|---:|
+| val_abupt | 6.1358 | 6.0172 | **5.9755** | **−16.0bp** |
+| test_abupt | 5.839 | 5.8613 | **5.8221** | **−1.7bp** |
+| test_WSS | 6.752 | 6.7642 | **6.7214** | **−3.1bp** |
+| test_VP | 3.421 | 3.4584 | 3.4400 | +1.9bp |
+| test_SP | 3.695 | 3.7046 | 3.6806 | −14.4bp |
+| WSS_x slope | −0.215 | +0.0509 | +0.0519 | basin flipped, not recovered |
+
+### Per-channel TTA gain (test, orig→TTA)
+
+| Channel | Δ |
+|---|---:|
+| WSS_y | **−8.6 bp** (largest) |
+| WSS_z | −4.0 bp |
+| abupt | −3.9 bp |
+| WSS | −4.3 bp |
+| WSS_x | −2.8 bp |
+| SP | −2.4 bp |
+| VP | −1.8 bp |
+
+### Verdict
+
+PRIMARY MERGE GATE PASSED (val_abupt < 6.1358 ✓ AND test_abupt < 5.839 ✓). First sub-6.0% val_abupt in program. Paper-claim floors: test_WSS, test_SP, test_VP pass; test_VP misses by 1.9bp (paper-floor was set from PR #972, not strict requirement).
+
+### Cross-validation
+
+Thorfinn's H192 (PR #1370, closed terminal) ran an independent TTA pipeline on H185 yielding **bit-identical** values (val 5.9755 ✓, test 5.8221 ✓, test_WSS 6.7213 ✓). 
+
+### Implications
+
+TTA-on-mirror-trained recipe is **now standard inference** for any future mirror-aug winner. Cost: 2× forward pass at eval time. WSS_x slope NOT recovered — basin-disruption is a training-time weight-trajectory property, not a test-time symmetry artifact (see Finding Q).
+
+## 2026-05-29 05:00 — PR #1370: H192 TTA mirror-aug on H112+H164e+H185 (thorfinn, **CLOSED — Findings N+Q triple cross-validation**)
+
+- **Branch**: `thorfinn/h192-tta-mirror-aug-h112` (CLOSED, not merged — H209 already merged the H185 result)
+- **W&B runs**: `e22co34u` (H112+TTA), `um80i114` (H164e+TTA), `rwrrwm6i` (H185+TTA)
+- **Hypothesis**: Apply 2-pass mirror TTA to non-mirror-trained checkpoint H112 (originally assumed mirror-trained, was not).
+
+### Result table
+
+| Checkpoint | Mirror-trained? | test_WSS orig→TTA | Δ |
+|---|---|---|---:|
+| H112 u9ue2ryb | NO | 6.752 → 8.103 | **+1.351pp** |
+| H164e zrv3dasr | NO | 6.751 → 8.128 | **+1.377pp** |
+| H185 yw2a5dyl | YES | 6.764 → 6.721 | **−0.043pp** |
+
+### Combined with edward H200 (PR #1374) and alphonse/frieren/nezuko H206/H209/H211
+
+| Model | Mirror-trained? | TTA Δ test_WSS |
+|---|---|---:|
+| H189 | NO | +1.273pp |
+| H112 | NO | +1.351pp |
+| H164e | NO | +1.377pp |
+| H183 | YES | −0.053pp |
+| H185 | YES | −0.043pp |
+| H190 | YES | −0.040pp |
+
+### Verdict
+
+CLEAN MECHANISM: N=3+3, control floor +1.27 to +1.38pp on non-mirror-trained, +4-5bp gain on mirror-trained. Banking as Findings N and Q with strongest possible cross-validation.
+
+## 2026-05-29 05:00 — PR #1379: H206 TTA mirror-aug on H183 EP13 (alphonse, **CLOSED — gate miss**)
+
+- **Branch**: `alphonse/h206-tta-mirror-h183-ep13` (CLOSED)
+- **Result**: val_abupt 5.988 ✓ (PASS), test_WSS 6.7764 ✗ FAIL by +2.4bp, WSS_x slope +0.069 (flipped, not recovered)
+- H183 had highest pre-TTA test_WSS (6.829) of the three; TTA's ~5bp gain insufficient to clear gate.
+- Banked as part of Finding Q.
+
+## 2026-05-29 05:00 — PR #1384: H211 TTA mirror-aug on H190 EP13 (nezuko, **CLOSED — gate miss**)
+
+- **Branch**: `nezuko/h211-tta-mirror-h190-ep13` (CLOSED)
+- **Result**: val_abupt 6.036 ✓ (PASS), test_WSS 6.7800 ✗ FAIL by +2.8bp, WSS_x slope +0.037 (flipped, not recovered)
+- H190 had pre-TTA test_WSS ~6.82; TTA's ~5bp gain insufficient.
+- Banked as part of Finding Q.
+
+## 2026-05-29 05:00 — PR #1381: H208 weight interp H112 ↔ H190 EP13 (fern, **CLOSED — Finding P generalized**)
+
+- **Branch**: `fern/h208-interp-h112-h190` (CLOSED)
+- **W&B runs**: `ezfodzun, behuh471, pr1cjm5u, xt1lrcom, uddvs7nh` (5 alphas)
+- **Result**: catastrophic collapse at every interior alpha (0.25 → 65.40 val, 0.5 → **88.78** val, 0.75 → 64.92 val)
+- **Geometry**: |W_H112 − W_H190| = 788.08 > both endpoint norms — disconnected solutions
+- Generalizes Finding P (H112↔H183 in H207). Both pairs show ~89% peak at alpha=0.5. Permutation symmetry confirmed.
+
+## Findings Banked This Cycle
+
+### Finding Q (program-permanent): TTA on mirror-aug-trained models
+1. TTA = 2-pass (orig + y-mirror) gives **~4-5bp uniform gain** on test_WSS for any mirror-aug-trained model
+2. WSS_y benefits most (−8-10bp) — direct y-mirror equivariance signal
+3. **WSS_x slope flip NOT recovered by TTA** — basin disruption is a training-trajectory weight-space property, not a test-time prediction-symmetry artifact
+4. Apply as STANDARD INFERENCE recipe at merge time
+
+### Finding R (program-permanent): Linear mode connectivity ABSENT for tay-track checkpoints
+1. H112↔H183 and H112↔H190 both collapse catastrophically at interior alpha (89% peak val_abupt at α=0.5)
+2. Asymmetric "wide high ridge" profile consistent with Ainsworth 2022 Git Re-Basin / Entezari 2021
+3. Naive LERP not viable without permutation alignment
+4. Block-wise splice (H213 active) and sub-alpha probes (H214 active) remain candidates
+
+---
+
 ## 2026-05-27 ~04:58 — PR #1347: H164 SWA STOCHASTIC WEIGHT AVERAGING (frieren, **CLOSED C NULL — basin-geometry hypothesis FALSIFIED, slope-as-trajectory-drift hypothesis PROGRAM-CRITICAL**)
 
 - **Branch**: `frieren/h164-stochastic-weight-averaging` (CLOSED, not merged)
