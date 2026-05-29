@@ -10939,3 +10939,105 @@ Slope steepening on all 5 reported WSS channels (+0.036 to +0.075pp).
 3. **SP is the NEW canonical cohort-screening channel** (N=2 EP12 half-range ±0.020pp — 4× tighter than abupt). Earlier WSS_z hypothesis WRONG (WSS_z = LARGEST at ±0.082pp).
 4. **Recipe-mean test_WSS = 6.8133%**: H112's reported 6.7522 is +0.061pp favorable vs recipe-mean on test. H112 IS a favorable RNG draw on test side.
 5. **VP is one-sided distribution**: both H164d and H164e VP below H112 reported → recipe-mean VP at terminal ≈ 3.505% vs H112 3.5495%. Future cross-axis compounds have MORE VP gate margin than H112's reported value suggests.
+
+---
+
+## 2026-05-29 02:30Z — PR #1356: H183 mirror-aug × tau_y=3.0 (fern, **CLOSED — PROGRAM VAL SOTA; WSS_x basin flip at terminal**)
+
+- fern/h183-mirror-aug-tau_y-3-compound (NOTE: PR title was H183/H186; the bound experiment is H183)
+- **Hypothesis**: Shared-axis y-stacking compound (mirror-aug × tau_y=3.0 — both targeting lateral y-axis). Expected slope-preservation via dual y-axis reinforcement.
+- **W&B run**: `5k58uzqc`
+
+| Metric | H183 (fern) | H112 baseline | Δ |
+|---|---:|---:|---:|
+| val_abupt | **6.039%** (PROGRAM VAL SOTA) | 6.1358% | **−0.097pp** |
+| test_WSS | 6.829% | 6.752% | +0.077pp (MISS) |
+| test_VP | N/A | 3.421% | N/A |
+| test_SP | N/A | 3.695% | N/A |
+| WSS_x slope | **+0.064pp (FLIPPED)** | −0.215pp | +0.279pp disruption |
+
+**Decision: CLOSED — NOT MERGE.** Program val SOTA but test_WSS +7.7bp above gate; WSS_x slope sign FLIPPED to +0.064pp (basin disrupted) at terminal.
+
+**Key program-permanent findings (Finding E, F, G)**:
+- **Finding E**: Slope-preservation compounds fail at terminal regardless of axis topology (shared-axis y here; cross-axis in H185). WSS_x flip is a universal terminal pathology for slope-pres compounds.
+- **Finding F**: Val→test slope is ANTI-COMPOUND on slope-preservation interventions. H183 val SOTA 6.039% + test 6.829% = slope −0.079pp (FLATTER than recipe mean −0.187pp). Pattern: better val via slope-pres interventions → flatter slope.
+- **Finding G**: Program val SOTA is achievable but UNDEPLOYABLE under current cohort framework. Pre-flip mid-EP checkpoint (H204) may recover it.
+
+**Follow-up assigned**: alphonse H204 — pre-flip mid-EP checkpoint eval on H183 checkpoints.
+
+---
+
+## 2026-05-29 02:30Z — PR #1362: H188 mirror-aug × DropPath_max=0.15 (alphonse, **CLOSED — anti-compound on slope**)
+
+- alphonse/h188-mirror-aug-droppath-cross-axis
+- **Hypothesis**: Mirror-aug (slope-preservation) × DropPath (architecture stochasticity regularizer). Cross-axis compound.
+- **W&B run**: `18t5rx2t`
+
+| Metric | H188 (alphonse) | H112 baseline | Δ |
+|---|---:|---:|---:|
+| val_abupt | 6.162% | 6.1358% | +0.026pp (MISS) |
+| test_WSS | 6.886% | 6.752% | +0.134pp (MISS) |
+| test_VP | 3.493% | 3.421% | +0.072pp (MISS) |
+| test_SP | 3.801% | 3.695% | +0.106pp (MISS) |
+| WSS agg slope | −0.127pp | −0.215pp | +0.088pp (FLATTER) |
+
+**Decision: CLOSED — 0/4 gates.** val_abupt above gate. WSS aggregate slope −0.127pp vs H148 mirror-solo −0.296pp = falsification criterion met.
+
+**Key finding (Finding H)**: Mirror-aug + capacity-regularization interventions anti-compound on slope. DropPath escalation INTERFERES with mirror-aug's slope-preservation effect. The stacking with mirror on slope-pres axis is EXHAUSTED.
+
+---
+
+## 2026-05-29 02:30Z — PR #1363: H189 AdamW × tau_y=3.0 (askeladd, **CLOSED — mechanism control result**)
+
+- askeladd/h189-adamw-tau_y-3-cross-axis
+- **Hypothesis**: AdamW + tau_y=3.0 WITHOUT mirror-aug. Mechanism control for H183 — isolates optimizer contribution.
+- **W&B run**: `bp12b1cc`
+
+| Metric | H189 (askeladd) | H112 baseline | Δ |
+|---|---:|---:|---:|
+| val_abupt | 6.448% | 6.1358% | +0.312pp (MISS) |
+| test_WSS | 7.120% | 6.752% | +0.368pp (MISS) |
+| test_VP | 3.664% | 3.421% | +0.243pp (MISS) |
+| test_SP | 3.949% | 3.695% | +0.254pp (MISS) |
+| WSS_x slope | −0.070pp | −0.215pp | (basin INTACT) |
+
+**Decision: CLOSED — 0/4 gates.** Mechanism control confirms mirror-aug was load-bearing in H183.
+
+**Key finding (Finding I)**: Mirror-aug is the load-bearing component of slope-preservation strategy. Without mirror, AdamW + tau_y=3.0 drifts to recipe baseline. WSS_x basin intact (no cross-axis flip without mirror present) → basin disruption is MIRROR-INDUCED at full-trajectory horizon.
+
+---
+
+## 2026-05-29 02:30Z — PR #1365: H191 mirror-aug × tau_y=2.0 (tanjiro, **CLOSED — boundary probe banked**)
+
+- tanjiro/h191-mirror-aug-tau_y-2-boundary-probe
+- **Hypothesis**: Boundary probe — tau_y=2.0 + mirror (moderated shared-axis stacking vs H183's tau_y=3.0). Tests failure threshold between 2.0 and 3.0.
+- **W&B run**: `5y5a5tgr`
+
+| Metric | H191 (tanjiro) | H112 baseline | H183 (tau_y=3.0) | Δ vs H112 |
+|---|---:|---:|---:|---:|
+| val_abupt | 6.230% | 6.1358% | 6.039% | +0.094pp (MISS) |
+| test_WSS | 6.895% | 6.752% | 6.829% | +0.143pp (MISS) |
+| WSS_x slope | −0.074pp | −0.215pp | +0.064pp | (basin INTACT at 2.0) |
+
+**Decision: CLOSED — 0/4 gates (probe by design).**
+
+**Key finding (Finding J)**: Shared-axis y-stacking failure threshold is in interval (2.0, 3.0] on tau_y. At tau_y=2.0 basin intact but val gains insufficient. At tau_y=3.0 (H183) program val SOTA but basin disruption. No "safe and effective" point on this trajectory — val improvement comes with mandatory basin risk.
+
+---
+
+## 2026-05-29 02:30Z — PR #1350: H170/H184 surface:vol 4:0.5 + tau_y=3.0 (edward, **CLOSED — channel-decomposition banked**)
+
+- edward/h170-surface-vol-rebalancing-tau-y-3
+- **Hypothesis**: Surface:volume loss rebalancing (4:0.5 ratio) + tau_y=3.0 guard. H170 = rebalancing only; H184 = with tau_y compound.
+- **W&B runs**: H170=`kqmel3c1`, H184=`i2rl27nj` (binding terminal)
+
+| Metric | H170 | H184 (binding) | H112 baseline |
+|---|---:|---:|---:|
+| val_abupt | 6.091% | 6.217% | 6.1358% |
+| test_WSS | 6.834% | 6.846% | 6.752% |
+| WSS_x slope | −0.040pp | −0.040pp | −0.215pp (basin intact for both) |
+
+**Decision: CLOSED — H184 binding terminal 0/4 gates.**
+
+**Key finding (Finding K)**: Surface:vol axis rebalancing has real per-channel signal (WSS_x channel −2pp on test — largest channel-level gain observed). WSS_y degrades enough to wipe the aggregate gain. Rebalancing alone insufficient without a mechanism to address per-channel tradeoffs.
+
