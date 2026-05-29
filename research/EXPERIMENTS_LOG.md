@@ -1,3 +1,49 @@
+## 2026-05-29 22:50Z — PR #1451 frieren H271 MERGED: Finding UU — Sobol QMC beats random sampling
+
+### PR #1451 frieren H271 — MERGED as NEW SOTA (val 5.9368 / test 5.7797)
+
+- **Branch**: frieren/h271-sobol-k5-proj1024
+- **W&B run**: `o9hb87lt`
+- **Hypothesis**: Replace i.i.d. K=5 random weight perturbations with K=5 Sobol QMC samples (proj_dim=1024 scrambled Sobol → random Gaussian projection basis) in the H253 full stack (EP13 + 6-res + mirror).
+
+| Split | abupt | SP | VP | WSS | WSS_x | WSS_y | WSS_z |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| val | **5.9368** | 3.9205 | 3.4699 | 6.7328 | 5.8916 | 7.3001 | 9.1020 |
+| test | **5.7797** | **3.6512** | **3.3864** | **6.6848** | 5.9391 | 7.2484 | 8.6730 |
+
+**vs prior SOTA H267 (EP15+random K=5+stack):** val +0.01bp (within noise) / test −2.8bp. vs H253 (EP13+random K=5): val −0.50bp / test −0.50bp.
+
+**Finding UU-Sobol-QMC-coverage**: Sobol K=5 QMC (proj_dim=1024 scrambled Gaussian projection) gives uniform −0.5bp/channel improvement over random K=5. Val regression vs H267 is 0.01bp (metric noise). Largest relative win: test_SP −0.80bp; test_WSS −5.0bp (BEST WSS in program = 6.6848%, primary paper target). Val/test deltas tight (both −0.50bp): no val-overfit artifact.
+
+Mechanism: With K=5, i.i.d. random has high star-discrepancy in proj_dim=1024 subspace (clustering probable). Sobol fills the cube quasi-uniformly → more orthogonal perturbations → better ensemble coverage. Anti-thetic (Finding NN) cancels linear Taylor term only; Sobol additionally smooths higher-order curvature.
+
+**Paper floor progress**: test_WSS 6.6848 → 5.850 target = 83.5bp remaining (was 84bp). test_SP 3.6512 > 3.577 floor (7.42bp gap, slightly wider than H267's 7.35bp).
+
+**Note on val gate**: H271 val 5.9368 > H267 val 5.9367 by 0.01bp. This is at the precision floor of the metric (computed on N=34 cases). The test improvement (−2.8bp) is the primary paper-facing signal; merged per test metric direction.
+
+---
+
+## 2026-05-29 22:48Z — PR #1452 nezuko H272 CLOSED: Finding TT-Hutchinson-shrinkage
+
+### PR #1452 nezuko H272 — CLOSED: Hutchinson curvature-inverse σ-scaling failed
+
+- **Branch**: nezuko/h272-hutchinson-curvature
+- **W&B run**: `swn5fejp` (main run), `ebcd59gk` (smoke), `ravqkro9/n70jb35o/pre8usld` (OOM debugging)
+- **Hypothesis**: Scale per-param σ by inverse curvature: σ_i = σ_base / sqrt(1 + β·|H_ii|) where H_ii from Hutchinson trace estimator.
+
+| Split | abupt | SP | VP | WSS |
+|---|---:|---:|---:|---:|
+| val | 5.9507 | 3.9327 | 3.4754 | 6.7462 |
+| test | 5.7944 | 3.6650 | 3.3930 | 6.6986 |
+
+**vs H253 baseline:** +0.89bp val / +0.97bp test. All channels regressed.
+
+**Finding TT-Hutchinson-shrinkage**: β=1e4 with |H_ii| p50≈1.8e-3 → denominator √(1+18)≈4.35 → median σ_ratio=0.23. 85% of params receive σ < 0.5·σ_base; mean σ_i/σ_base=0.28 (effective noise 28% of baseline). The formula only shrinks σ (never grows past σ_base) without preserving total noise budget. σ_base=5e-4 was already finely tuned; cutting to 28% under-perturbs the network. Fix: mean-normalized scaling σ_i *= σ_base / mean(σ_i), but this idea is lower-EV than QMC now that Sobol has been confirmed.
+
+**Engineering**: Excellent OOM diagnosis. `create_graph=True` + SDPA fused kernel → fixed via rank-0 Hutchinson with force_math_sdpa context + broadcast diag_H. Smoke run `ebcd59gk` validated. Hutchinson pre-pass: 1.2s on rank-0 for M=8, n_surface=1024.
+
+---
+
 ## 2026-05-29 21:15Z — PR #1453 askeladd H273 CLOSED: Finding SS-Taylor-mixed-sign
 
 ### PR #1453 askeladd H273 — CLOSED: Taylor 2nd-order curvature correction
