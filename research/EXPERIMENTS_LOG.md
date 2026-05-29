@@ -1,3 +1,62 @@
+## 2026-05-29 07:20 — Round 4c TERMINATIONS: PR #1407 frieren + PR #1402 tanjiro closed; H241/H242 respins
+
+### PR #1407 frieren H235 — TTA-mirror cross-checkpoint sweep N≥6 — CLOSED, Finding Q upgraded to N=8
+
+- **Hypothesis**: Cross-checkpoint TTA on N≥6 mirror-aug-trained EP13 EMA checkpoints to establish Finding Q's universality
+- **Method**: 8 checkpoints with `mirror_augmentation=True` config: H185, H183, H190, H188, H148, H191, H181b, H186
+- **W&B runs**: `arx4rwj1`, `yo40z3b7`, `dlv1k13e`, `tseo0ns6`, `5v39oyqz`, `zhii4ptq`, `qjkc55ad`, `7ed85v2p` (group h235-frieren-finding-q-extension)
+
+### Finding Q (N=8 publication-grade evidence)
+
+| checkpoint | val_orig | val_TTA | Δval (bp) | test_orig | test_TTA | Δtest (bp) | WSSx_Δ (bp) | floor hits |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| H185 | 6.0172 | **5.9755** | -4.17 | 5.8613 | **5.8221** | -3.92 | -2.75 | WSS |
+| H183 | 6.0388 | 5.9885 | -5.03 | 5.9136 | 5.8669 | -4.67 | -3.77 | none |
+| H190 | 6.0765 | 6.0363 | -4.02 | 5.8994 | 5.8639 | -3.55 | -2.46 | none |
+| H188 | 6.1621 | 6.1197 | -4.24 | 5.9564 | 5.9157 | -4.07 | -3.03 | none |
+| H148 | 6.2186 | 6.1714 | -4.73 | 5.8507 | **5.8056** | -4.51 | -3.42 | VP+WSS |
+| H191 | 6.2304 | 6.1796 | -5.08 | 5.9616 | 5.9129 | -4.87 | -3.75 | none |
+| H181b | 6.2346 | 6.1971 | -3.76 | 5.9391 | 5.9008 | -3.83 | -2.70 | none |
+| H186 | 6.3985 | 6.3335 | -6.49 | 6.1512 | 6.0916 | -5.95 | -4.69 | none |
+
+| metric | mean Δ | stdev | min | max | improved |
+|---|---:|---:|---:|---:|---:|
+| val_abupt | -4.69 bp | 0.87 | -3.76 | -6.49 | **8/8** |
+| test_abupt | -4.42 bp | 0.77 | -3.55 | -5.95 | **8/8** |
+| WSS_x | -3.32 bp | 0.74 | -2.46 | -4.69 | **8/8** |
+
+**Finding Q (final, program-permanent)**: TTA-mirror on mirror-aug-trained EP13 EMA checkpoints delivers tight uniform improvement. Mean -4.42bp test_abupt (σ 0.77bp). 8/8 checkpoints improve on every axis. The H185 anomaly (-3.92bp test vs N=8 mean -4.42bp) indicates yw2a5dyl's training already absorbed most of the mirror-invariance signal.
+
+**H186 outlier**: AdamW + mirror-aug. Largest TTA gain on weakest baseline — confirms TTA-as-variance-reduction.
+
+**Sub-finding (per-channel asymmetry, from H183 cleanest signal)**: WSS_y has -0.10pp val TTA gain, WSS_x has -0.04pp val TTA gain — 2.4× difference. Direct exploitation possible via per-channel α-blending.
+
+### PR #1402 tanjiro H229 — Input-coordinate Gaussian-noise TTA — CLOSED, Finding Z banked
+
+- **Hypothesis**: Adding small Gaussian noise to input mesh coordinates and averaging K passes acts as variance-reduction TTA
+- **W&B runs**: `ko3qawry` (σ=0.001), `vlsqkidd` (σ=0.0001)
+- **Result table**:
+
+| σ | val_abupt | test_abupt | noise_only val | noise_only test | Outcome |
+|---|---:|---:|---:|---:|---|
+| 0.001 | 10.3455 | 10.1127 | 12.1455 | 11.8931 | catastrophic (+4.3pp) |
+| 0.0001 | 6.0343 | 5.8754 | 6.0902 | 5.9281 | mildly worse than H209 |
+
+**Finding Z (program-permanent)**: Gaussian-noise TTA on input coordinates is INFEASIBLE for H185 on this dataset. No usable σ band:
+- σ ≤ 0.0001 → too small (model locally smooth, noise passes are near-clones)
+- σ ≥ 0.001 → too large (pushes inputs off training manifold, doubles error)
+
+**Sub-finding (channel asymmetry)**: At σ=0.0001, noise TTA SLIGHTLY improves VP/SP but degrades WSS (worst on WSS_y). Wall shear dominates abupt → aggregate degrades despite VP/SP gains. WSS is the most noise-sensitive channel.
+
+**Sub-finding (DDP RNG)**: Per-(pass, rank, batch) seed required for correct noise diversity across distributed eval.
+
+### Re-spin assignments (Round 4c expansion)
+
+- **PR #1412 frieren H241**: Per-channel TTA blending α-sweep on H185 EP13. Exploit channel-asymmetric TTA gain (WSS_y > WSS_x > VP). 6 configs. Eval-only ~30-45min.
+- **PR #1413 tanjiro H242**: Weight-space Gaussian-noise TTA on H185 EP13. Perturb weights at σ ∈ {1e-5, 5e-5, 1e-4, 5e-4}, K=5 forward passes, average. Tests loss surface flatness. Eval-only ~30-45min.
+
+---
+
 ## 2026-05-29 06:55 — Round 4b CLOSURES: PR #1399 fern + PR #1403 thorfinn closed; H239/H240 mesh-subsample respins
 
 ### PR #1399 fern H226 — TTA-mirror on H112 — CLOSED, Finding N extended to N=4

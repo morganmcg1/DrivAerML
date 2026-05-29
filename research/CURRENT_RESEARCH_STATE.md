@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 06:55Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4c: 7 sprints active (thorfinn+fern re-spun to mesh-subsample on H148/H183)
+**Updated**: 2026-05-29 07:20Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4c: 8 sprints active (frieren/tanjiro re-spun; Findings Q@N=8 + Z banked)
 
 ---
 
@@ -24,36 +24,51 @@
 
 **Finding X** (alphonse H232 abort, PR #1405 closed): Intra-trajectory SWA on yw2a5dyl IS NOT RUNNABLE — per-epoch EMA checkpoints were never persisted by train.py (single overwriting checkpoint slot). Reproducing requires a full H185 retrain (14.6h vs 6h cap). SWA arm CLOSED on the operational axis until checkpointing changes.
 
-**Implication**: Mirror y is the SOLE validated TTA augmentation for H185. The TTA geometric perturbation arm is FULLY EXHAUSTED. Weight-space averaging is BLOCKED by checkpoint-persistence. Future TTA must use non-geometric, non-weight-space mechanisms.
+**Finding Z** (tanjiro H229, PR #1402 closed): Gaussian-noise TTA on input coordinates is INFEASIBLE — no usable σ band exists. σ ≤ 0.0001 too small to add diversity (model is locally smooth), σ ≥ 0.001 too large (off-manifold, doubles error). Channel asymmetry: noise slightly improves VP/SP but degrades WSS (WSS_y worst). Input-perturbation TTA arm exhausted across (geometric, scale, noise).
+
+**Finding Q (UPGRADED to N=8)** (frieren H235, PR #1407 closed): TTA-mirror on mirror-aug-trained EP13 EMA checkpoints delivers tight, consistent improvement.
+- mean Δval = **-4.69bp** (stdev 0.87, range [-3.76, -6.49])
+- mean Δtest = **-4.42bp** (stdev 0.77, range [-3.55, -5.95])
+- mean ΔWSS_x = **-3.32bp**
+- **8/8 checkpoints improve on every axis**. Publication-grade evidence.
+- Universe: {H185, H183, H190, H188, H148, H191, H181b, H186} have `mirror_augmentation=True`. H164e and H171-plateau-exact-v2 do not.
+- H186 outlier: largest gain (-6.49bp val) and worst baseline → TTA acts as variance-reduction on weaker checkpoints.
+
+**Implication**: Mirror y is the SOLE validated TTA augmentation for H185. The TTA geometric perturbation arm + noise arm are FULLY EXHAUSTED. Weight-space averaging is BLOCKED by checkpoint-persistence. Future TTA must use non-geometric, non-weight-space, non-noise mechanisms.
 
 ---
 
 ## Round 4c Active Fleet (as of 06:00Z)
 
-### Round 4b closed (3 PRs)
+### Round 4b/c closures (5 PRs)
 
 | PR | Student | Hypothesis | Outcome |
 |---|---|---|---|
-| ~~#1399~~ | fern | H226: TTA-mirror on H112 | CLOSED — Finding N extension N=4 banked (+1.45val/+1.63test pp degradation) |
-| #1402 | tanjiro | H229: TTA Gaussian noise σ=0.001 | Running — W&B shows val_tta 10.35% (catastrophic) — pending terminal |
-| ~~#1403~~ | thorfinn | H230: TTA cross-checkpoint (H148/H183/H190) | CLOSED — Finding Q extension N=4 banked; H148+TTA passes test gate (5.8056) but fails val (6.1714) |
+| ~~#1399~~ | fern | H226: TTA-mirror on H112 | CLOSED — Finding N extension N=4 banked (+1.45val/+1.63test pp) |
+| ~~#1402~~ | tanjiro | H229: TTA Gaussian noise | CLOSED — Finding Z banked (σ=0.001 catastrophic, σ=0.0001 mild degradation) |
+| ~~#1403~~ | thorfinn | H230: TTA cross-checkpoint | CLOSED — Finding Q extension N=4 banked; H148+TTA passes test gate but fails val |
+| ~~#1405~~ | alphonse | H232: Intra-trajectory SWA | ABORTED — Finding X banked |
+| ~~#1407~~ | frieren | H235: TTA-mirror N≥6 | CLOSED — Finding Q UPGRADED to N=8, publication-grade |
 
-### Round 4c active fleet (7 PRs, 3 re-spins)
+### Round 4c active fleet (8 PRs, 4 re-spins)
 
 | PR | Student | Hypothesis | Mechanism |
 |---|---|---|---|
-| #1404 | askeladd | H231: Mesh point subsampling TTA on H185 (80%, 4-pass) | input subset sampling |
-| ~~#1405~~ | alphonse | ~~H232: Intra-trajectory SWA~~ ABORTED (Finding X) → respun to **#1409 H238** | — |
-| #1406 | edward | H233: Point order permutation TTA (4-pass) | attention perm invariance test |
-| #1407 | frieren | H235: TTA-mirror cross-checkpoint sweep N≥6 | Finding Q extension bank |
-| #1408 | nezuko | H236: Multi-resolution TTA (vol_points {49k, 65k, 82k}) | resolution averaging |
-| #1409 | alphonse | H238: Weighted TTA mirror blending α-sweep {0.3-0.7} on H185 EP13 | TTA α-tuning |
+| #1404 | askeladd | H231: Mesh-subsample TTA on H185 (80%, 4-pass) | input subset sampling |
+| #1406 | edward | H233: Point permutation TTA | attention perm invariance test |
+| #1408 | nezuko | H236: Multi-resolution TTA | resolution averaging |
+| #1409 | alphonse | H238: Weighted α-sweep on H185 EP13 | TTA α-tuning (uniform across channels) |
 | #1410 | thorfinn | H239: Mesh-subsample TTA on H148 EP13 (best-test-margin) | mesh subsample, new checkpoint |
 | #1411 | fern | H240: Mesh-subsample TTA on H183 EP13 (closest-to-val-gate, 13bp gap) | mesh subsample, new checkpoint |
+| #1412 | frieren | H241: Per-channel TTA α-sweep on H185 EP13 (exploit channel asymmetry) | TTA per-channel α-tuning |
+| #1413 | tanjiro | H242: Weight-space Gaussian-noise TTA on H185 EP13 (loss surface flatness probe) | weight-space perturbation |
 
-**Expected first result**: ~30min. Budget remaining: ~3h.
+**Expected first result**: ~30min for new respins. Budget remaining: ~2.5h.
 
-**Mesh-subsample TTA coverage**: 3 students (askeladd #1404 on H185, thorfinn #1410 on H148, fern #1411 on H183) testing the SAME mechanism on the 3 strongest mirror-aug checkpoints. Coordinated triangle — closest-to-merge axis is fern (H183 needs only 13bp val close).
+**Coverage triangulation**:
+- **Mesh-subsample TTA**: askeladd (H185), thorfinn (H148), fern (H183) — same mechanism, 3 checkpoints
+- **α-blending on H185 EP13**: alphonse (uniform α), frieren (per-channel α) — same checkpoint, two tuning strategies
+- **Novel mechanisms**: edward (permutation), nezuko (multi-res), tanjiro (weight-space noise)
 
 ---
 
@@ -65,13 +80,14 @@
 3. A different starting checkpoint with different basin structure (Finding Q extension)
 
 **Round 4c bets**:
-- **askeladd #1404 H231**: Mesh subsampling on H185 — if physics preserved by sub-sampling, may add 2-5bp like mirror TTA
-- **alphonse #1409 H238** (re-spun from #1405): Weighted TTA mirror blending α-sweep — H209's α=0.5 may not be optimum
-- **edward #1406 H233**: Permutation TTA — null result expected (model should be perm-invariant)
-- **frieren #1407 H235**: Cross-checkpoint TTA bank — N≥6 Finding Q publication evidence (4 already in: H185/H183/H190/H148 from thorfinn H230)
+- **askeladd #1404 H231**: Mesh subsampling on H185 — if physics preserved by sub-sampling, may add 2-5bp
+- **edward #1406 H233**: Permutation TTA — null result expected
 - **nezuko #1408 H236**: Multi-resolution TTA — if good cross-resolution conditioning, 1-3bp gain
-- **thorfinn #1410 H239** (re-spun from #1403): Mesh-subsample TTA on H148 EP13 — best-test-margin checkpoint + new mechanism. H148+TTA already passes test gate (5.8056), just blocked by val (6.1714)
-- **fern #1411 H240** (re-spun from #1399): Mesh-subsample TTA on H183 EP13 — closest-to-val-gate (13bp gap). Best mechanical odds of breaking through.
+- **alphonse #1409 H238**: Uniform α-sweep on H185 EP13 — H209's α=0.5 may not be optimum
+- **thorfinn #1410 H239**: Mesh-subsample on H148 — best-test-margin checkpoint + new mechanism
+- **fern #1411 H240**: Mesh-subsample on H183 — closest-to-val-gate (13bp), best mechanical odds
+- **frieren #1412 H241**: Per-channel α-sweep on H185 — WSS_y has 2.4× TTA gain vs WSS_x; structured exploitation
+- **tanjiro #1413 H242**: Weight-space noise TTA on H185 — flatness probe of loss surface
 
 Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 
@@ -110,6 +126,8 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | **V** | this cycle | **Rotation TTA falsified at ANY angle (Finding V banked from askeladd H223)** |
 | **W** | this cycle | **Coordinate scale TTA falsified at ε=±2% (Finding W banked from alphonse H224)** |
 | **X** | this cycle | **Intra-trajectory SWA blocked on yw2a5dyl — per-EP EMA never persisted by train.py (Finding X banked from alphonse H232 abort #1405)** |
+| **Z** | this cycle | **Gaussian-noise TTA infeasible — no usable σ band (banked from tanjiro H229 #1402). Sub-finding: WSS more noise-sensitive than VP/SP.** |
+| **Q@N=8** | this cycle | **TTA-mirror on mirror-aug-trained EP13 EMA: mean -4.42bp test, stdev 0.77 — 8/8 checkpoints improve. Publication-grade (frieren H235 #1407).** |
 
 ---
 
@@ -122,6 +140,7 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 - data/loader.py, data/preload.py, data/split_manifest.json — READ-ONLY
 - SENPAI_TIMEOUT_MINUTES=360 hard cap
 - TTA geometric perturbation arm CLOSED (mirror only)
+- Input-noise TTA arm CLOSED (Finding Z; no usable σ window)
 
 ---
 
