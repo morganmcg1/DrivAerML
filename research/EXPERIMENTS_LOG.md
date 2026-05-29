@@ -1,3 +1,26 @@
+## 2026-05-29 23:35Z — PR #1454 fern H274 MERGED: Finding VV — Anti-thetic K=3 stacked is new SOTA
+
+### PR #1454 fern H274 — MERGED as NEW SOTA (val 5.9322 / test 5.7763)
+
+- **Branch**: fern/h274-antithetic-stacked (rebased after H271 conflict)
+- **W&B run**: `o8oq9r92`
+- **Hypothesis**: Replace random K=5 (60 passes) with anti-thetic K=3 pairs (72 passes = 6 noise samples × 6-res × mirror) in the H253 full stack at EP13.
+
+| Split | abupt | SP | VP | WSS | WSS_x | WSS_y | WSS_z |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| val | **5.9322** | 3.9199 | 3.4670 | 6.7276 | — | — | — |
+| test | **5.7763** | **3.6515** | **3.3846** | **6.6805** | 5.9362 | 7.2394 | 8.6699 |
+
+**vs prior SOTA H271 (EP13+Sobol K=5):** val −4.6bp / test −3.4bp. vs H253 (EP13+random K=5): val −9.6bp / test −8.4bp.
+
+**Finding VV-antithetic-stacked**: Anti-thetic K=3 (±δ_k, 6 forward passes per noise level) cancels linear Taylor term ∇f(w)·ε under 6-res×mirror full stack averaging. Strictly dominates Sobol QMC K=5 on all channels. +20% compute overhead (72 vs 60 passes) delivers −8.4bp test vs H253. The linear-term cancellation survives 12 (res, mirror) configuration averaging — Finding PP Mirror×Noise interaction did NOT erase anti-thetic benefit.
+
+**Mechanism vs Sobol**: Anti-thetic operates on the first Taylor term (linear); Sobol reduces higher-order coverage noise. At K=3 (6 passes), the per-sample gain from anti-thetic > Sobol at K=5 (5 passes). This indicates the linear term remains the dominant noise source even in the well-stacked full recipe.
+
+**Paper floor progress**: test_WSS 6.6805 → 5.850 target = 83.1bp remaining. test_SP 3.6515 > 3.577 floor (7.5bp gap).
+
+---
+
 ## 2026-05-29 22:50Z — PR #1451 frieren H271 MERGED: Finding UU — Sobol QMC beats random sampling
 
 ### PR #1451 frieren H271 — MERGED as NEW SOTA (val 5.9368 / test 5.7797)
