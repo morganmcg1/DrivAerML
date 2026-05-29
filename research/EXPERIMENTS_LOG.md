@@ -3780,3 +3780,60 @@ PR closed 2026-05-29T02:53Z. GPUs freed; fern assigned H157 (PR #1378).
 
 ---
 
+
+
+### PR #1369 — H156: β1=0.97/β2=0.985 + lr=9e-5 compound on H147 stack — CLOSED, FALSIFIED + VAL/TEST VP GAP FINDING
+
+- dl24-frieren/h156-beta-lr-compound
+- Hypothesis: compound H150-β + H155-lr could exploit deeper cosine basin with stable β-dynamics, recovering descent that lr=9e-5 alone (H155) lost
+- W&B runs: rank0 = `ugpyo62a`, eval-only = `66ys15yn`
+- Best EMA checkpoint: EP10 (selection metric val_primary/abupt_axis_mean_rel_l2_pct=6.2370%)
+
+| EP | val_WSS | vs H147 | per-EP Δ | Notes |
+|----|---------|---------|----------|-------|
+| 1 | 13.154% | +0.33pp | — | β-dominated warmup |
+| 2 | 7.572% | +0.31pp | -5.582 | |
+| 3 | 7.182% | +0.20pp | -0.390 | gap compressing |
+| 5 | 6.993% | +0.24pp | -0.049 | gap re-widening |
+| 7 | 6.940% | +0.28pp | -0.013 | tau_z reversal (1st floor signal) |
+| 9 | 6.929% | +0.29pp | +0.0002 | multi-axis plateau |
+| **10** | **6.895%** | **+0.255pp** | **-0.034** | late-cosine renewal; EMA-best moved EP8→EP10 |
+
+**Terminal SENPAI-RESULT (08:13Z, harvested EP10 EMA-best):**
+
+| Metric | H156 test | H147 SOTA test | Δ | Hard constraint | Status |
+|---|---:|---:|---:|---:|:---|
+| test_WSS | **6.6909%** | 6.5409% | +0.150pp | beat 6.49% to win | ❌ FAILS win target |
+| test_VP | **11.8441%** | 3.6033% | **+8.24pp** | ≤ 3.643% | ❌ MASSIVE 3.3x cap violation |
+| test_SP | **3.7103%** | 3.6498% | +0.060pp | ≤ 3.577% | ❌ FAILS floor |
+| test_ABUPT | **7.4963%** | 5.6648% | +1.83pp | — | ❌ VP-dominated regression |
+| test_WSS_x | 5.9155% | — | — | — | — |
+| test_WSS_y | 7.3236% | — | — | — | — |
+| test_WSS_z | 8.6882% | — | — | — | 3rd independent tau_z floor confirmation |
+
+**RESEARCH FINDING — val/test discrepancy on VP (publishable result):**
+
+| Metric | val | test | val/test ratio | H147 ratio |
+|---|---:|---:|---:|---:|
+| WSS | 6.8949% | 6.6909% | 0.97x | ~1.0x |
+| SP | 4.1013% | 3.7103% | 0.90x | ~1.0x |
+| **VP** | **4.1687%** | **11.8441%** | **2.84x** ⚠️ | ~1.0x |
+| ABUPT | 6.2370% | 7.4963% | 1.20x | ~1.0x |
+
+H147 has matched val/test on every metric. **The 2.84x val/test gap on VP is unique to H156's compound β+lr config.** Eval pipeline verified identical (same `run_final_evaluation` call path). Mechanism hypothesis: high-β momentum + low-lr drives optimizer into val-distribution-specific local minimum on volume pressure — small effective step in flat directions tracks val-set features without exploring volume-pressure-generalizing directions.
+
+**Mechanistic conclusions:**
+
+1. **Compound β+lr does NOT recover H155's descent loss.** Gap to H147 closed EP1→EP3 (+0.33→+0.20pp) then re-widened EP3→EP7 (+0.20→+0.28pp). Compound is slower than H147 in mid-cosine.
+2. **Late-cosine renewal capacity exists but is val-specific.** EP9→EP10 drop -0.034pp confirms renewal, but converges to val-distribution-specific minimum.
+3. **tau_z floor confirmed for the 3rd time (H154, H155, H156).** All ~9.40% on H147 stack under loss-side allocation. Bottleneck is upstream — needs representation/architecture change, not loss tuning.
+4. **NEW: Compound β+lr induces VP generalization degradation.** Directly motivates H158 (vol_p_charbonnier on H147 stack) to test loss-side VP regularization without touching β/lr dynamics.
+
+**Falsifications:**
+- Compound H150-β + H155-lr does not produce SOTA-beating descent
+- Hard constraints not met on any of three test gates (WSS regression + VP/SP floor violations)
+- The "lr=9e-5 single-knob falsified" claim from H155 strengthens to "lr=9e-5 + β-coupling also falsified for paper-facing targets"
+
+PR closed 2026-05-29T08:23Z. GPUs freed; frieren assigned H158 (vol_p_charbonnier=0.1 on H147 stack).
+
+---

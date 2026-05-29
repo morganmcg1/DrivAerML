@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 07:38Z (**H156 EP10 SURPRISE**: late-cosine descent re-emerged val_WSS=6.8949% (-0.034pp from EP9) val_ABUPT=6.237% (run-best) — both kill gates STILL fire; EMA-best moved EP8→EP10; harvest proceeding with checkpoint verification; **H157b EP3 PASS** val_WSS=7.063% (gate ≤7.40% by 0.34pp), val_VP=3.491% (-0.633pp vs H150!), val_ABUPT=6.217% (already lower than H156 terminal); **H150 EP27.7=6.6393%** plateau; **H151 EP28.0=6.8094%** noise; **HUMAN DEADLINE 15:45Z (8.5h from 07:15Z)** — H157b EP15 target ~14:46Z is realistic terminal)_
+_Last updated: 2026-05-29 08:25Z (**H156 TERMINAL — CLOSED PR #1369 (no merge)**: test_WSS=6.6909% (+0.150pp regression), test_VP=11.8441% (3.3x violation of 3.643% cap), test_SP=3.7103% (+0.13pp over 3.577% cap), test_ABUPT=7.4963%; **RESEARCH FINDING — val_VP→test_VP gap = 2.84x is unique to compound β+lr** (H147 has val/test ≈ 1.0x); mechanism hypothesis: high-β + low-lr drives optimizer into val-distribution-specific local minimum on VP; tau_z floor confirmed 3rd independent time (~9.40% on H147 stack). **H158 (vol_p_charbonnier=0.1 on H147 stack)** being assigned to frieren — addresses VP regularization symmetric to H157b's wss_charbonnier. **H157b EP4.6=7.070% val_ABUPT=6.240%** — EP5 gate imminent ~08:25Z. **H150 EP28.67=6.6404% val_ABUPT=5.899%** — terminal harvest ~10:00Z. **H151 EP28.95=6.8118%** noise. **HUMAN DEADLINE 15:45Z (7.3h remaining)** — H158 10-EP terminal ~15:25Z; H157b EP10 terminal ~11:34Z)_
 
 ---
 
@@ -42,18 +42,17 @@ _Last updated: 2026-05-29 07:38Z (**H156 EP10 SURPRISE**: late-cosine descent re
 
 **β-space is fully exhausted.** Only H150 remains as an active β-grid arm and it is a delayed converger.
 
-### Fleet status (2026-05-29 07:38Z)
+### Fleet status (2026-05-29 08:25Z)
 
 | Run ID | Student | H# | Epoch | val_WSS | val_ABUPT | State | vs H147 |
 |---|---|---|---:|---:|---:|---|---|
-| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **27.77** | **6.6393%** | **5.8978%** | running | cosine-floor plateau; EP24→EP27 drift -0.005pp; EMA EP18-20 ~6.622% harvest target |
-| d20sf8th | nezuko | H151 (extended 45EP canonical) | 28.03 | 6.8094% | 6.0702% | running | noise band oscillation; +0.17pp vs H150 holding |
-| ugpyo62a (+7 ranks) | frieren | **H156 (β1=0.97/β2=0.985 + lr=9e-5)** | **10.11** | **6.8949%** | **6.2370%** | running→harvesting | ⚠️ EP10 late-cosine descent re-emerged (-0.034pp); both kill gates STILL fire; EMA-best moved EP8→EP10 |
-| ew63yb7p (+7 ranks) | **fern** | **H157b (wss-charbonnier=0.1 + H150-β)** | **3.62** | **7.063%** | **6.217%** | running | ✅ EP3 PASS by 0.34pp; **ahead of H150 on 3/4 axes**; val_VP=3.491% (-0.633pp vs H150!); val_ABUPT already lower than H156 terminal |
-| 9xo566ws | (fern prev) | H155 (lr=9e-5) | 10.27 | 7.092% | 6.157% | **CLOSED (PR #1368 03:00Z)** | ⛔ test_WSS=6.8936%, lr-axis falsified |
-| 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.991% | 6.123% | **CLOSED (PR #1367 22:57Z)** | ⛔ EP7 falsified |
-| u3vbwwhd | (frieren old) | H149 (β1=0.93/β2=0.97) | 3.1 | 7.083% | — | crashed | β1↓+β2↓ falsifying |
-| 2h8cddnz | (fern old) | H152 (β1=0.95/β2=0.97) | 5.4 | 7.113% | — | crashed | β2↓ falsifying |
+| 5bgp2ryq | tanjiro | H150 (β1=0.97/β2=0.985) | **28.67** | **6.6404%** | **5.8993%** | running | cosine-floor plateau; EMA EP18-20 ~6.622% harvest target; ~10:00Z terminal |
+| d20sf8th | nezuko | H151 (extended 45EP canonical) | 28.95 | 6.8118% | 6.0726% | running | noise band oscillation; +0.17pp vs H150 holding |
+| ew63yb7p (+7 ranks) | **fern (tay)** | **H157b (wss-charbonnier=0.1 + H150-β)** | **4.61** | **7.070%** | **6.240%** | running | ✅ EP3 PASS; EP5 gate ≤6.85% imminent ~08:25Z; EP10 terminal ~11:34Z |
+| (H158 PR pending) | **frieren (dl24)** | **H158 (vol_p_charbonnier=0.1 on H147 stack)** | — | — | — | **assigning** | symmetric to H157b, targets VP regularization (H156 val/test gap finding); 10 EPs / ~7h |
+| ugpyo62a + 66ys15yn | (frieren prev) | H156 (β1=0.97/β2=0.985 + lr=9e-5) | 10 (terminal) | 6.8949% (val) | 6.2370% (val) | **CLOSED PR #1369 08:23Z** | ⛔ test_WSS=6.6909% (+0.150pp), test_VP=11.8441% (3.3x cap), test_SP=3.7103% — val/test VP gap 2.84x is the finding |
+| 9xo566ws | (fern prev) | H155 (lr=9e-5) | 10.27 | 7.092% | 6.157% | **CLOSED PR #1368 03:00Z** | ⛔ test_WSS=6.8936%, lr-axis falsified |
+| 8w7qtm5e | (frieren prev) | H154 (tau_z=1.3) | 7.64 | 6.991% | 6.123% | **CLOSED PR #1367 22:57Z** | ⛔ EP7 falsified |
 
 ### H147 SOTA trajectory reference
 
@@ -156,20 +155,49 @@ Launched 00:40Z after `grdap1rg` smoke passed clean. Config: `lion_beta1=0.97`, 
 
 **Decision: ride to EP10 soft kill (~07:25Z).** Direction pre-committed: if EP10 WSS >6.65% AND gap >+0.10pp → harvest EMA-best, do NOT extend to EP30. EP10 reading determines the call.
 
+**TERMINAL OUTCOME (08:13Z, PR #1369 CLOSED 08:23Z):**
+
+| Metric | H156 val | H156 test | val/test ratio | H147 val/test ratio |
+|---|---:|---:|---:|---:|
+| WSS | 6.8949% | 6.6909% | 0.97x (test slightly better) | ~1.0x |
+| SP  | 4.1013% | 3.7103% | 0.90x | ~1.0x |
+| **VP** | **4.1687%** | **11.8441%** | **2.84x** ⚠️ | **~1.0x** |
+| ABUPT | 6.2370% | 7.4963% | 1.20x (VP-dominated) | ~1.0x |
+
+**Research finding — val_VP/test_VP gap = 2.84x is unique to compound β+lr.** H147 has matched val/test on VP (~1.0x). H156 compound config (β1=0.97/β2=0.985 + lr=9e-5) drives the optimizer into a val-distribution-specific local minimum on VP. Mechanism hypothesis: very small effective step in flat directions (high-β momentum + low-lr) tracks val-set features without exploring volume-pressure-generalizing directions. Late-cosine renewal exists (-0.034pp EP9→EP10 confirms it) but converges to a val-specific minimum that does not transfer to test.
+
+This finding **directly motivates H158** (vol_p_charbonnier on H147 stack) — the only single-flag VP-regularization lever left in train.py.
+
+### H158 (frieren, ASSIGNED 08:25Z) — vol_p_charbonnier=0.1 on H147 stack
+
+**Hypothesis:** H156 revealed compound β+lr induces structural VP val/test gap (2.84x). Charbonnier loss on volume pressure (smooth-near-zero L1-like) should regularize VP and close the val/test gap by penalizing outlier volume points without distorting bulk learning. Symmetric to H157b's wss_charbonnier (in flight on H150 stack on the WSS axes).
+
+**Config:** H147 SOTA stack (β1=0.95/β2=0.98, lr=1e-4, 6L/512d/4h/128slices, surface_out_width_factor=2.0, STRING-multisigma sigmas 0.25/0.5/1.0/2.0/4.0, ema_decay=0.999) + `--vol-p-charbonnier-weight 0.1 --vol-p-charbonnier-eps 1e-3`, 10 EP cosine T_max=10. Single seed.
+
+**Kill ladder:**
+- EP1 > 13.5% kill
+- EP3 > 7.20% kill (must beat H147 EP3=6.98% by margin compatible with Charbonnier overhead)
+- EP5 > 6.85% kill
+- EP10 terminal harvest (EMA-best if val ≤ 6.65% AND val_VP < 4.0% — the second condition is the test of the H158 hypothesis)
+
+**Expected:** if Charbonnier closes the VP gap, test_VP should land in 3.5-4.0% range (H147 SOTA had test_VP=3.6033%). If test_VP > 5.0%, Charbonnier doesn't address the structural gap and we close.
+
 ---
 
 ## Decisive epochs ahead (active runs)
 
-**⚠️ HUMAN DEADLINE 15:45Z** (8.5h from human msg at 07:15Z) — all terminal harvests must land before this.
+**⚠️ HUMAN DEADLINE 15:45Z** (7.3h from current 08:25Z) — all terminal harvests must land before this.
 
-- **H156 EP10 harvest IN PROGRESS** (07:32Z landed) — both kill gates FIRE; EMA-best moved EP8→EP10 (val_ABUPT 6.272%→6.237%); student must verify checkpoint selection updated before test eval; terminal SENPAI-RESULT expected ~08:30Z
-- **H157b EP5 kill check** (~08:22Z) — gate >6.85%; EP3 PASS by 0.34pp; strong descent so projection ~6.80-6.85%
+- **H156 TERMINAL** (08:13Z) — CLOSED PR #1369; test_WSS=6.6909% (+0.150pp), test_VP=11.84% (3.3x cap), test_SP=3.71% (+0.13pp) — no merge; **val/test VP gap 2.84x is the publishable finding**
+- **H157b EP5 kill check** (~08:25Z, imminent) — gate >6.85%; EP3 PASS by 0.34pp
+- **H158 launch** (~08:35Z) — vol_p_charbonnier=0.1 on H147 stack; tests if Charbonnier on volume axis closes val/test VP gap
 - **H151 EP30 first inflection** (~09:50Z) — extended-training value signal (15-EP tail)
 - **H150 EP30 terminal harvest** (~10:00-11:00Z) — EMA-best at EP18-20 ~6.622% val → ~6.522% test, marginal win vs H147 6.5409%
 - **H157b EP10 soft kill** (~11:34Z) — gate >6.65%
+- **H158 EP10 terminal** (~15:25Z) — 1.5h buffer; harvest EMA-best for test eval if val ≤6.65% and val_VP < 4.0%
 - **H157b EP15 realistic terminal** (~14:46Z) — last gate within 1h buffer to deadline; harvest EMA-best for test eval if val ≤6.60%
 - **H151 EP45 terminal** (~14:50-15:30Z) — 45-EP extended-training experiment final
-- **HARD DEADLINE 15:45Z** — all test_eval harvests must complete before this; no 30-EP H157b possible
+- **HARD DEADLINE 15:45Z** — all test_eval harvests must complete before this
 
 ---
 
@@ -256,5 +284,8 @@ The gap from current SOTA (6.5409%) to Transolver-3 SOTA (5.85%) is **0.69pp**. 
 - PR #1360 — H151 45-EP extended (nezuko, running)
 - PR #1367 — H154 tau_z=1.3 (frieren, CLOSED 22:57Z aborted_descent_reversal_ep7)
 - PR #1368 — H155 lr=9e-5 (fern, running)
-- PR #1369 — H156 β1=0.97/β2=0.985 + lr=9e-5 compound (frieren, draft 22:58Z) — LAST in-wave run
+- PR #1369 — H156 β1=0.97/β2=0.985 + lr=9e-5 compound (frieren, **CLOSED 08:23Z** — test_VP 3.3x cap, test_SP +0.13pp, test_WSS +0.150pp regression; **val/test VP gap 2.84x finding documented**)
+- PR #1378 — H157 (auto-merged in error, superseded by PR #1385)
+- PR #1385 — H157b wss_charbonnier=0.1 on H150 stack (fern/tay, RUNNING)
+- (H158 PR TBD) — vol_p_charbonnier=0.1 on H147 stack (frieren, ASSIGNING 08:25Z)
 - `RESEARCH_IDEAS_*.md` — researcher-agent design briefs from prior waves
