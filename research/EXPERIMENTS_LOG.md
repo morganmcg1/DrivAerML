@@ -56,9 +56,27 @@ Validates the σ=5e-4 choice in all in-flight stacking experiments (H253 alphons
 
 **Predicted-vs-actual on additive TTA composition**: advisor predicted val ~5.945 / test ~5.788, actual val 5.9452 / test 5.7896. Predictions matched within 0.03bp val / 0.20bp test. Strong evidence that EP-gain and TTA-gain compose nearly linearly in the late-cosine flat basin.
 
+### PR #1431 fern H255 — CLOSED: Finding LL-extend (resolution saturates at 6-res)
+
+- **Branch**: fern/h255-7res-8res-multi-res
+- **W&B runs**: `2ueoqdoc` (sanity 6-res), `9yonhcpf` (7-res), `s8silyb9` (8-res)
+
+| Config | val_abupt | test_abupt | test_WSS | vs H252 gate |
+|---|---:|---:|---:|---|
+| H243 6-res sanity | 5.9546 | 5.7979 | 6.7025 | reference |
+| 7-res {32k-164k} | 5.9566 | 5.7948 | 6.6983 | ✗ val +7.4bp |
+| **8-res {16k-164k}** | **5.9541** | **5.7926** | **6.6947** | **✗ val +4.9bp; test ✓** |
+
+**Finding LL-extend: Resolution axis saturates at 6-res {32k-131k} for H185 EP13 EMA.** 7-res regresses on val; 8-res (adds 16k) improves test but fails val gate. Pattern: diminishing returns past 6-res in both directions. test_WSS improvement (6.6947) matches H244 EP15+6res.
+
+**Saturation pattern**: 3→6-res: −21bp val | 6→7-res: +2.0bp (regression) | 7→8-res: −2.5bp val (small recovery but val still > H243)
+
+**Fern note**: Strong autonomous initiative launching 8-res follow-up without advisor prompt. Clean sanity arm (4 decimal reproduction of H243). 
+
 ### New assignments
-- **H262 tanjiro**: K-noise saturation sweep (K=5/10/20 at σ=5e-4 noise_only) — ~30-40 min probe.
+- **H262 tanjiro**: K-noise saturation sweep (K=10/20 noise_only at σ=5e-4) — ~36 min probe.
 - **H263 frieren**: Multi-EP EMA weight averaging (avg(EP14,EP15) + 6-res mirror TTA) — ~70 min, novel weight-space axis.
+- **H264 fern**: EP16 + 6-res mirror TTA — continues EP-chain extension from edward H244.
 
 ---
 
