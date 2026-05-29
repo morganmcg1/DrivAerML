@@ -13,8 +13,10 @@ processes its assigned cases sequentially with single-case loaders. Per-case
 scratch buffers live on CPU (~200MB per case).
 
 Modes:
-    res_avg:        average over N resolutions, no mirror
-    mirror_res_avg: 2N-pass = orig + mirror at each of N resolutions
+    res_avg:                    average over N resolutions, no mirror
+    mirror_res_avg:             2N-pass = orig + mirror at each of N resolutions
+    mirror_res_weight_noise_avg: K × 2N pass = K weight-noise perturbations of the
+                                  full mirror×res accumulation (H253/H256 stack)
 
 Mirror convention (H148/H183/H209):
     surface_x [x, y, z, nx, ny, nz, area] -> negate y(1) and ny(4)
@@ -70,9 +72,14 @@ class EvalConfig:
 
     # Multi-resolution TTA configuration
     resolutions: str = "49152,65536,81920"
-    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
+    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg, mirror_res_weight_noise_avg
     # Surface resolution stays fixed; only volume is varied.
     eval_surface_points: int = 65536
+
+    # Weight-noise stack (mirror_res_weight_noise_avg only). Relative noise:
+    # state <- state + sigma * |state| * Normal(0, 1). K passes per case.
+    weight_noise_sigma: float = 5e-4
+    n_weight_noise_passes: int = 5
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -241,7 +248,7 @@ def chunk_global_indices(view_index: int, view_count: int, n_full: int) -> torch
 
 
 @torch.no_grad()
-def process_case_multires(
+def _accumulate_multires_mirror_into(
     *,
     case_id: str,
     model: nn.Module,
@@ -251,24 +258,21 @@ def process_case_multires(
     cfg: EvalConfig,
     resolutions: list[int],
     use_mirror: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
-    """Run multi-res TTA passes for one case and return per-point averaged predictions.
+    n_surf: int,
+    n_vol: int,
+    surf_sum: torch.Tensor,
+    surf_cnt: torch.Tensor,
+    vol_sum: torch.Tensor,
+    vol_cnt: torch.Tensor,
+    timing: dict,
+) -> None:
+    """Run res×mirror passes for one case, accumulate into provided CPU buffers.
 
-    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
-             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
-    Predictions are in **real units** (already denormalized).
+    Buffers are mutated in-place (`index_add_`). Called once per `process_case_multires`
+    and K times by `process_case_multires_weight_noise` (one call per noise pass).
     """
-    counts = store.case_point_counts(case_id)
-    n_surf = counts["n_surface"]
-    n_vol = counts["n_volume"]
-
-    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
-    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
-    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
-    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
-
     eval_module = unwrap_model(model)
-    timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
+    mirror_flags = (False, True) if use_mirror else (False,)
 
     for K in resolutions:
         dataset = DrivAerMLSurfaceDataset(
@@ -289,7 +293,6 @@ def process_case_multires(
             prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
         )
 
-        mirror_flags = (False, True) if use_mirror else (False,)
         for batch in loader_iter:
             batch = batch.to(device)
             metas_cached = list(batch.metadata)
@@ -314,10 +317,11 @@ def process_case_multires(
                 timing["n_forwards"] += int(batch.surface_x.shape[0])
 
                 t1 = time.time()
-                surface_pred_real_cpu = surface_pred_real.detach().cpu()
-                volume_pred_real_cpu = volume_pred_real.detach().cpu()
-                surface_mask_cpu = batch.surface_mask.detach().cpu()
-                volume_mask_cpu = batch.volume_mask.detach().cpu()
+                # Accumulators live on `device`; keep predictions on GPU and
+                # do index_add there. ~50× faster than per-sample CPU index_add.
+                surface_mask_dev = batch.surface_mask
+                volume_mask_dev = batch.volume_mask
+                buffer_device = surf_sum.device
                 for i in range(len(batch.case_ids)):
                     meta = metas_cached[i]
                     s_view_idx = int(meta["surface_view_index"])
@@ -326,9 +330,9 @@ def process_case_multires(
                     v_view_count = int(meta["volume_view_count"])
 
                     if s_view_idx < s_view_count:
-                        s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf)
-                        s_mask_i = surface_mask_cpu[i].bool()
-                        s_chunk = surface_pred_real_cpu[i][s_mask_i]
+                        s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf).to(buffer_device)
+                        s_mask_i = surface_mask_dev[i].bool()
+                        s_chunk = surface_pred_real[i][s_mask_i]
                         if s_global.shape[0] != s_chunk.shape[0]:
                             raise RuntimeError(
                                 f"surface global-index mismatch case={case_id} K={K} "
@@ -342,9 +346,9 @@ def process_case_multires(
                             )
 
                     if v_view_idx < v_view_count:
-                        v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
-                        v_mask_i = volume_mask_cpu[i].bool()
-                        v_chunk = volume_pred_real_cpu[i][v_mask_i]
+                        v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol).to(buffer_device)
+                        v_mask_i = volume_mask_dev[i].bool()
+                        v_chunk = volume_pred_real[i][v_mask_i]
                         if v_global.shape[0] != v_chunk.shape[0]:
                             raise RuntimeError(
                                 f"volume global-index mismatch case={case_id} K={K} "
@@ -358,6 +362,30 @@ def process_case_multires(
                             )
                 timing["io_seconds"] += time.time() - t1
 
+
+def _alloc_case_buffers(
+    store: DrivAerMLCaseStore, case_id: str, device: torch.device
+) -> tuple[int, int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Allocate per-case accumulation buffers on `device` (GPU keeps index_add fast)."""
+    counts = store.case_point_counts(case_id)
+    n_surf = counts["n_surface"]
+    n_vol = counts["n_volume"]
+    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32, device=device)
+    surf_cnt = torch.zeros(n_surf, dtype=torch.int32, device=device)
+    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32, device=device)
+    vol_cnt = torch.zeros(n_vol, dtype=torch.int32, device=device)
+    return n_surf, n_vol, surf_sum, surf_cnt, vol_sum, vol_cnt
+
+
+def _finalize_case_avg(
+    *,
+    case_id: str,
+    store: DrivAerMLCaseStore,
+    surf_sum: torch.Tensor,
+    surf_cnt: torch.Tensor,
+    vol_sum: torch.Tensor,
+    vol_cnt: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if int(surf_cnt.min()) == 0:
         raise RuntimeError(
             f"surface coverage incomplete for case {case_id}: "
@@ -368,16 +396,220 @@ def process_case_multires(
             f"volume coverage incomplete for case {case_id}: "
             f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
         )
-
-    surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
-    vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
-
-    # Load full ground truth once for metric computation.
+    surf_avg = (surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)).cpu()
+    vol_avg = (vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)).cpu()
     case = store.load_case(case_id)
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
+    return surf_avg, vol_avg, surf_y, vol_y
 
+
+@torch.no_grad()
+def process_case_multires(
+    *,
+    case_id: str,
+    model: nn.Module,
+    transform: TargetTransform,
+    device: torch.device,
+    store: DrivAerMLCaseStore,
+    cfg: EvalConfig,
+    resolutions: list[int],
+    use_mirror: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    """Run multi-res TTA passes for one case and return per-point averaged predictions.
+
+    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
+             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
+    Predictions are in **real units** (already denormalized).
+    """
+    n_surf, n_vol, surf_sum, surf_cnt, vol_sum, vol_cnt = _alloc_case_buffers(store, case_id, device)
+    timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
+
+    _accumulate_multires_mirror_into(
+        case_id=case_id,
+        model=model,
+        transform=transform,
+        device=device,
+        store=store,
+        cfg=cfg,
+        resolutions=resolutions,
+        use_mirror=use_mirror,
+        n_surf=n_surf,
+        n_vol=n_vol,
+        surf_sum=surf_sum,
+        surf_cnt=surf_cnt,
+        vol_sum=vol_sum,
+        vol_cnt=vol_cnt,
+        timing=timing,
+    )
+    surf_avg, vol_avg, surf_y, vol_y = _finalize_case_avg(
+        case_id=case_id, store=store,
+        surf_sum=surf_sum, surf_cnt=surf_cnt, vol_sum=vol_sum, vol_cnt=vol_cnt,
+    )
     n_passes = len(resolutions) * (2 if use_mirror else 1)
+    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
+
+
+# --- H253/H256: stacked weight-noise × multi-res × mirror TTA ---
+
+
+@torch.no_grad()
+def _perturb_model_inplace(
+    eval_module: nn.Module,
+    clean_state: dict[str, torch.Tensor],
+    sigma: float,
+    noise_idx: int,
+) -> None:
+    """Set `eval_module` weights to `clean + sigma * |clean| * Normal(0,1)` in place.
+
+    Seeds are deterministic per (noise_idx, param_idx) so the same K perturbations
+    are applied across every case and every DDP rank (each rank holds the same
+    unwrapped model). Generated on CPU then moved to device.
+    """
+    target = eval_module.state_dict()
+    for param_idx, (k, clean_v) in enumerate(clean_state.items()):
+        if clean_v.dtype.is_floating_point:
+            seed = (noise_idx * 100003 + param_idx * 1009) % (2**31)
+            g = torch.Generator()
+            g.manual_seed(seed)
+            noise = torch.empty_like(clean_v, device="cpu", dtype=torch.float32).normal_(generator=g)
+            perturbed = clean_v.float() + sigma * clean_v.float().abs() * noise
+            target[k].copy_(perturbed.to(dtype=clean_v.dtype, device=clean_v.device))
+        else:
+            target[k].copy_(clean_v.to(target[k].device))
+
+
+@torch.no_grad()
+def _restore_model_inplace(
+    eval_module: nn.Module, clean_state: dict[str, torch.Tensor]
+) -> None:
+    target = eval_module.state_dict()
+    for k, clean_v in clean_state.items():
+        target[k].copy_(clean_v.to(target[k].device))
+
+
+@torch.no_grad()
+def process_case_multires_weight_noise(
+    *,
+    case_id: str,
+    model: nn.Module,
+    transform: TargetTransform,
+    device: torch.device,
+    store: DrivAerMLCaseStore,
+    cfg: EvalConfig,
+    resolutions: list[int],
+    sigma: float,
+    n_noise_passes: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    """K weight-noise passes × N resolutions × 2 mirror states = K·N·2 passes per case.
+
+    Loader topology: build ONE loader per resolution and iterate it K_noise times,
+    perturbing weights between iterations. With persistent_workers=True the worker
+    pool stays alive across iterations, avoiding (K-1)×N spawn cycles per case.
+    """
+    n_surf, n_vol, surf_sum, surf_cnt, vol_sum, vol_cnt = _alloc_case_buffers(store, case_id, device)
+    timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
+
+    eval_module = unwrap_model(model)
+    clean_state = {k: v.detach().to("cpu").clone() for k, v in eval_module.state_dict().items()}
+    mirror_flags = (False, True)
+
+    try:
+        for K_res in resolutions:
+            dataset = DrivAerMLSurfaceDataset(
+                case_ids=[case_id],
+                store=store,
+                max_surface_points=cfg.eval_surface_points,
+                max_volume_points=K_res,
+                sampling_mode="eval_chunk",
+            )
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=cfg.batch_size,
+                shuffle=False,
+                num_workers=cfg.num_workers,
+                pin_memory=cfg.pin_memory,
+                collate_fn=pad_collate,
+                persistent_workers=cfg.num_workers > 0,
+                prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
+            )
+            for noise_idx in range(n_noise_passes):
+                _perturb_model_inplace(eval_module, clean_state, sigma, noise_idx)
+                for batch in loader:
+                    batch = batch.to(device)
+                    metas_cached = list(batch.metadata)
+                    for mirror in mirror_flags:
+                        t0 = time.time()
+                        model_input = mirror_inputs(batch) if mirror else batch
+                        with autocast_context(device, cfg.amp_mode):
+                            out = eval_module(
+                                surface_x=model_input.surface_x,
+                                surface_mask=model_input.surface_mask,
+                                volume_x=model_input.volume_x,
+                                volume_mask=model_input.volume_mask,
+                            )
+                        surface_pred_real = transform.invert_surface(out["surface_preds"].float())
+                        volume_pred_real = transform.invert_volume(out["volume_preds"].float())
+                        if mirror:
+                            surface_pred_real = unmirror_surface_real(surface_pred_real)
+                        timing["forward_seconds"] += time.time() - t0
+                        timing["n_forwards"] += int(batch.surface_x.shape[0])
+
+                        t1 = time.time()
+                        surface_mask_dev = batch.surface_mask
+                        volume_mask_dev = batch.volume_mask
+                        buffer_device = surf_sum.device
+                        for i in range(len(batch.case_ids)):
+                            meta = metas_cached[i]
+                            s_view_idx = int(meta["surface_view_index"])
+                            s_view_count = int(meta["surface_view_count"])
+                            v_view_idx = int(meta["volume_view_index"])
+                            v_view_count = int(meta["volume_view_count"])
+                            if s_view_idx < s_view_count:
+                                s_global = chunk_global_indices(
+                                    s_view_idx, s_view_count, n_surf
+                                ).to(buffer_device)
+                                s_mask_i = surface_mask_dev[i].bool()
+                                s_chunk = surface_pred_real[i][s_mask_i]
+                                if s_global.shape[0] != s_chunk.shape[0]:
+                                    raise RuntimeError(
+                                        f"surface global-index mismatch case={case_id} K={K_res} "
+                                        f"view_idx={s_view_idx}/{s_view_count}: "
+                                        f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
+                                    )
+                                if s_global.numel() > 0:
+                                    surf_sum.index_add_(0, s_global, s_chunk)
+                                    surf_cnt.index_add_(
+                                        0, s_global, torch.ones_like(s_global, dtype=torch.int32)
+                                    )
+                            if v_view_idx < v_view_count:
+                                v_global = chunk_global_indices(
+                                    v_view_idx, v_view_count, n_vol
+                                ).to(buffer_device)
+                                v_mask_i = volume_mask_dev[i].bool()
+                                v_chunk = volume_pred_real[i][v_mask_i]
+                                if v_global.shape[0] != v_chunk.shape[0]:
+                                    raise RuntimeError(
+                                        f"volume global-index mismatch case={case_id} K={K_res} "
+                                        f"view_idx={v_view_idx}/{v_view_count}: "
+                                        f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
+                                    )
+                                if v_global.numel() > 0:
+                                    vol_sum.index_add_(0, v_global, v_chunk)
+                                    vol_cnt.index_add_(
+                                        0, v_global, torch.ones_like(v_global, dtype=torch.int32)
+                                    )
+                        timing["io_seconds"] += time.time() - t1
+            # Free workers between resolutions to bound peak FD/process count.
+            del loader, dataset
+    finally:
+        _restore_model_inplace(eval_module, clean_state)
+
+    surf_avg, vol_avg, surf_y, vol_y = _finalize_case_avg(
+        case_id=case_id, store=store,
+        surf_sum=surf_sum, surf_cnt=surf_cnt, vol_sum=vol_sum, vol_cnt=vol_cnt,
+    )
+    n_passes = n_noise_passes * len(resolutions) * 2
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -472,7 +704,7 @@ def evaluate_split_multires(
     store: DrivAerMLCaseStore,
     cfg: EvalConfig,
     resolutions: list[int],
-    use_mirror: bool,
+    mode: str,
     distributed_state,
 ) -> dict[str, float]:
     """Distribute cases across ranks, run multi-res TTA per case, return finalized metrics."""
@@ -483,6 +715,7 @@ def evaluate_split_multires(
         else 1
     )
     my_cases = case_ids[rank::world_size]
+    use_mirror = mode in ("mirror_res_avg", "mirror_res_weight_noise_avg")
 
     acc = EvalAccumulator()
     total_t0 = time.time()
@@ -491,16 +724,31 @@ def evaluate_split_multires(
     total_forwards = 0
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires(
-            case_id=case_id,
-            model=model,
-            transform=transform,
-            device=device,
-            store=store,
-            cfg=cfg,
-            resolutions=resolutions,
-            use_mirror=use_mirror,
-        )
+        if mode == "mirror_res_weight_noise_avg":
+            surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = (
+                process_case_multires_weight_noise(
+                    case_id=case_id,
+                    model=model,
+                    transform=transform,
+                    device=device,
+                    store=store,
+                    cfg=cfg,
+                    resolutions=resolutions,
+                    sigma=cfg.weight_noise_sigma,
+                    n_noise_passes=cfg.n_weight_noise_passes,
+                )
+            )
+        else:
+            surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires(
+                case_id=case_id,
+                model=model,
+                transform=transform,
+                device=device,
+                store=store,
+                cfg=cfg,
+                resolutions=resolutions,
+                use_mirror=use_mirror,
+            )
         add_case_to_accumulator(
             acc,
             case_id=case_id,
@@ -543,15 +791,19 @@ def evaluate_split_multires(
 
 
 def main(argv: Iterable[str] | None = None) -> None:
-    state = init_distributed()
+    # Stacked weight-noise eval can exceed the 10-min NCCL default between
+    # rank barriers when slowest-rank case count differs from fastest by 1
+    # case (~15min per case at K=5, 6-res). Bump to 90min to absorb skew.
+    state = init_distributed(timeout_minutes=90)
     cfg = parse_args(argv)
     device = state.device
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
+    valid_modes = ("res_avg", "mirror_res_avg", "mirror_res_weight_noise_avg")
     for mode in modes:
-        if mode not in ("res_avg", "mirror_res_avg"):
-            raise ValueError(f"Unknown eval mode: {mode!r}")
+        if mode not in valid_modes:
+            raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
@@ -657,11 +909,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode == "mirror_res_avg"
             if state.is_main:
+                extra = ""
+                if mode == "mirror_res_weight_noise_avg":
+                    extra = (
+                        f" sigma={cfg.weight_noise_sigma:.0e} "
+                        f"K={cfg.n_weight_noise_passes}"
+                    )
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror} ===",
+                    f"resolutions={resolutions}{extra} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -674,7 +931,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 store=store,
                 cfg=cfg,
                 resolutions=resolutions,
-                use_mirror=use_mirror,
+                mode=mode,
                 distributed_state=state,
             )
             dt = time.time() - t0
