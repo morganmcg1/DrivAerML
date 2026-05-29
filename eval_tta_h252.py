@@ -83,6 +83,11 @@ class EvalConfig:
     weight_noise_sigma: float = 5e-4
     weight_noise_passes: int = 5
     weight_noise_seed_base: int = 42
+    # H274: anti-thetic noise pairs. When True, each of weight_noise_passes
+    # samples ε once and evaluates BOTH f(θ+ε) and f(θ−ε), so the effective
+    # number of forward passes per (res, mirror) is 2 * weight_noise_passes.
+    # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
+    antithetic_noise: bool = False
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -257,8 +262,13 @@ def perturb_relative_(
     sigma: float,
     seed: int,
     device: torch.device,
+    sign: float = 1.0,
 ) -> None:
-    """p <- clean_p + randn(seed) * sigma * |clean_p|, identical across DDP ranks."""
+    """p <- clean_p + sign * randn(seed) * sigma * |clean_p|, identical across DDP ranks.
+
+    With matched ``seed`` and ``sign=±1.0`` calls, produces an anti-thetic pair
+    whose linear Taylor term cancels in the average (Finding NN / H274).
+    """
     gen = torch.Generator(device=device)
     gen.manual_seed(seed)
     for name, p in module.named_parameters():
@@ -266,7 +276,7 @@ def perturb_relative_(
             continue
         clean_p = clean[name]
         noise = torch.randn(p.shape, generator=gen, device=device, dtype=p.dtype)
-        noise.mul_(sigma).mul_(clean_p.abs())
+        noise.mul_(sigma * sign).mul_(clean_p.abs())
         p.data.copy_(clean_p).add_(noise)
 
 
@@ -288,10 +298,16 @@ def process_case_stacked(
     K_passes: int,
     sigma: float,
     seed_base: int,
+    antithetic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
-    """Run K x R x M (mirror) TTA passes for one case and return per-point averaged
-    predictions in real units. The K outer loop perturbs the model weights and
-    reuses the perturbed copy across all (res, mirror) inner passes.
+    """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
+    averaged predictions in real units. The outer K loop perturbs the model
+    weights and reuses the perturbed copy across all (res, mirror) inner passes.
+
+    With ``antithetic=False`` K_eff = ``K_passes`` (i.i.d. samples). With
+    ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
+    (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
+    cancels in the per-point average (Finding NN / H274).
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -312,12 +328,21 @@ def process_case_stacked(
 
     mirror_flags = (False, True) if use_mirror else (False,)
 
-    for k in range(K_passes):
-        # Perturb once per k; reuse across (res, mirror) inner passes.
+    # Build the (noise_idx, sign) schedule. Anti-thetic pairs share a seed so
+    # +ε / −ε use the SAME draw of ε (otherwise it would just be 2K i.i.d.).
+    if antithetic and sigma > 0.0:
+        schedule = [(k, sign) for k in range(K_passes) for sign in (+1.0, -1.0)]
+    else:
+        schedule = [(k, +1.0) for k in range(K_passes)]
+
+    for k, sign in schedule:
+        # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
         t_p = time.time()
         if sigma > 0.0:
             seed = (seed_base + k) * 100003
-            perturb_relative_(eval_module, clean, sigma=sigma, seed=seed, device=device)
+            perturb_relative_(
+                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
+            )
         else:
             restore_clean_params(eval_module, clean)
         timing["perturb_seconds"] += time.time() - t_p
@@ -423,7 +448,8 @@ def process_case_stacked(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    n_passes = K_passes * len(resolutions) * (2 if use_mirror else 1)
+    k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
+    n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -519,6 +545,7 @@ def evaluate_split_stacked(
     sigma: float,
     seed_base: int,
     distributed_state,
+    antithetic: bool = False,
 ) -> dict[str, float]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -549,6 +576,7 @@ def evaluate_split_stacked(
             K_passes=K_passes,
             sigma=sigma,
             seed_base=seed_base,
+            antithetic=antithetic,
         )
         add_case_to_accumulator(
             acc,
@@ -639,9 +667,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(f"Device: {device}{ddp_suffix}")
         print(f"Resolutions: {resolutions}")
         print(f"Modes: {modes}")
+        k_eff_print = cfg.weight_noise_passes * (2 if cfg.antithetic_noise else 1)
         print(
             f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
-            f"K_passes={cfg.weight_noise_passes} seed_base={cfg.weight_noise_seed_base}"
+            f"K_passes={cfg.weight_noise_passes} "
+            f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
+            f"seed_base={cfg.weight_noise_seed_base}"
         )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
@@ -746,9 +777,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 raise ValueError(f"Unknown mode {mode!r}")
 
             if state.is_main:
+                k_eff_print = cfg.weight_noise_passes * (
+                    2 if cfg.antithetic_noise else 1
+                )
                 print(
                     f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
                     f"mirror={use_mirror} K={cfg.weight_noise_passes} "
+                    f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
                     f"sigma={cfg.weight_noise_sigma} ===",
                     flush=True,
                 )
@@ -768,6 +803,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 sigma=cfg.weight_noise_sigma,
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
+                antithetic=cfg.antithetic_noise,
             )
             dt = time.time() - t0
             if state.is_main:
