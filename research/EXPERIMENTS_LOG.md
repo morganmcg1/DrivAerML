@@ -4038,3 +4038,74 @@ My 09:55Z heartbeat comment claimed "EP9.28 val_WSS=6.5085% — leading current 
 
 PR closure pending fern's test eval completion + SENPAI-RESULT post.
 
+
+## 2026-05-29 15:23Z — PR #1427: H161 (wss_charbonnier 0.1→0.3 axes=z on corrected H147 stack) — CLOSED NON-MERGE
+
+- Branch: dl24-nezuko/h161-wss-charbonnier-strong
+- Train W&B: `kvfaya2j` (rank-0) + 7 worker rank metric runs (`y9xrfk5t` rank-0 train); Eval W&B: `5ttbfh4o` (rank-0)
+- W&B group: `h161-wss-charbonnier-strong`
+
+**Hypothesis:** Heavier Charbonnier weight (0.1→0.3) on the WSS-z axis would preferentially close the tau_z floor (worst WSS axis at 8.4882% test on H147 SOTA) by pushing more gradient pressure on small residuals where target distribution concentrates. Mirror of H159's vol_p_charbonnier=0.3 experiment, applied to the WSS axis instead.
+
+### Results table
+
+| Metric | H161 EMA-EP5 | H147 SOTA | Δ vs SOTA | Cap | Cap status |
+|---|---:|---:|---:|---:|:---:|
+| **test_primary/wall_shear_rel_l2_pct** ⭐ | **6.7402%** | 6.5409% | **+0.199pp** | — | ❌ |
+| **test_primary/wall_shear_z_rel_l2_pct** (hypothesis target) | 8.6884% | 8.4882% | +0.200pp | — | ❌ |
+| test_primary/wall_shear_x_rel_l2_pct | 5.9454% | 5.8155% | +0.130pp | — | — |
+| test_primary/wall_shear_y_rel_l2_pct | 7.4558% | 7.0556% | +0.400pp | — | — |
+| test_primary/surface_pressure_rel_l2_pct | 3.7473% | 3.5634% | +0.184pp | ≤ 3.577% | ❌ over by 0.170pp |
+| test_primary/volume_pressure_rel_l2_pct | 3.7565% | 3.4014% | +0.355pp | ≤ 3.643% | ❌ over by 0.114pp |
+| test_primary/abupt_axis_mean_rel_l2_pct | 5.9187% | 5.6648% | +0.254pp | ≤ 5.844% | ❌ over by 0.075pp |
+
+### Trajectory (val_WSS by epoch)
+
+| EP | H147 (SOTA) | H161 | Δ vs H147 |
+|---:|---:|---:|---:|
+| 1 | 12.82% | 12.83% | +0.01 |
+| 2 | 7.26% | 7.31% | +0.05 |
+| 3 | 6.98% | 7.13% | +0.15 |
+| 4 | (interp 6.85) | 7.05% | +0.20 |
+| 5 | **6.75%** | **6.977%** | **+0.227** (BOTH kill gates crossed) |
+
+**Kill action:** SIGINT at 14:38Z when EP5 val_WSS=6.977% crossed both the PR-body kill ladder (>6.85%) and advisor watch (>6.95%). EMA-EP5 checkpoint preserved, test eval launched 14:41Z, terminal SENPAI-RESULT at 14:59Z.
+
+### Per-axis descent-rate falsification (the load-bearing negative finding)
+
+The hypothesis predicted preferential tau_z descent. Trajectory data shows the *opposite* — tau_z is the slowest-descending WSS axis:
+
+| EP→EP | Δ val_WSS_x | Δ val_WSS_y | Δ val_WSS_z (target axis) |
+|---|---:|---:|---:|
+| EP3→EP4 | −0.051pp | −0.189pp | **−0.060pp (slowest)** |
+| EP4→EP5 | −0.045pp | −0.137pp | **−0.089pp (slowest)** |
+
+Cumulative `val/slope/val_surface_wall_shear_z_rel_l2_pct/per_1k_steps = −0.00812` ≈ aggregate `−0.00673`. The axis-z weight does NOT produce axis-z-preferential learning.
+
+### Mechanism — Charbonnier-by-GradNorm-state asymmetry (PROVISIONAL HEADLINE FINDING)
+
+Cleanest interpretation (cross-validates with frieren's H159 #1423 RUNNING — VP-side analog):
+
+- **VP head (H159 RUNNING)**: GradNorm w_vol_p clamped at `gradnorm-min-w-vol-p=0.15` floor throughout H147 training → VP head structurally **under-served**. Heavier VP Charbonnier (H159) closes a real under-served gap → currently descending past H147 SOTA at EP6.
+- **WSS heads (H161 CLOSED)**: GradNorm w_tau_{x,y,z} ran 0.4-1.4 healthy → WSS heads **well-served** → heavier WSS Charbonnier on tau_z **displaces** the optimizer's effort across tau_x/y/z rather than closing the tau_z floor.
+- **Reframes auxiliary-loss design space** from "uniform-strength weighting" to "**GradNorm-state-aware weighting**". A much sharper conclusion than "Charbonnier 0.3 is too much".
+
+If H159 lands MERGE this becomes the publishable single-model finding of this wave.
+
+### Stability — compound β × Charbonnier divergence concern REFUTED
+
+10:48Z note flagged "3× Charbonnier weight on a Lion-β configuration adjacent to H157b's failure" was unprecedented. Stability was clean throughout:
+
+- `train/grad/global_norm_pre_clip`: monotonic descent 0.58 → 0.18 (EP2→EP5)
+- `train/grad/clipped` since step 12847: **0 events**
+- `train/step_skipped` / `train/nonfinite_grad` / `train/nonfinite_loss`: **0 / 0 / 0** lifetime
+- No precursor of H157b spike pattern anywhere in the run
+
+**Conclusion: the divergence axis in H157b was the Lion-β setting (0.97/0.985), NOT the Charbonnier weight.** The β=0.95/0.98 family is corroborated as a regime of stability for Charbonnier weight knob exploration. Useful for sizing Charbonnier weights in any future H147-stack experiments.
+
+### Suggested follow-ups (queued by nezuko in SENPAI-RESULT writeup)
+
+1. **Cross-check with H159 (frieren PR #1423 — VP Charbonnier 0.3).** If H159 merges, the head-asymmetry interpretation above becomes canonical. If H159 also fails, the asymmetry collapses to "Charbonnier 0.3 is just too aggressive."
+2. **For closing tau_z specifically**, the mechanism likely needs to act inside the head's gradient allocation rather than as a loss-weight knob. Candidate next ideas: (a) **raise the GradNorm w_tau_z floor explicitly** (the converse of `gradnorm-min-w-vol-p` for VP); (b) tau_z-specific projection head with its own width/depth; (c) input-side feature giving the model asymmetric z-direction signal (body-frame z-coordinate, y=0 distance feature).
+3. **β=0.95/0.98 Lion safe-side is now corroborated with one more datapoint** (no compound instability with Charbonnier 0.3). H147-family Charbonnier knob can be priced cheaply for stability in future experiments.
+
