@@ -3979,3 +3979,62 @@ H151 was budgeted for 45 EP but wall-clock-truncated at EP31 (predicted in launc
 PR closed 2026-05-29T10:30Z. nezuko reassigned to H161 (cosine restart).
 
 ---
+
+## 2026-05-29 10:35Z — PR #1385: H157b WSS Charbonnier=0.1 axes=z on H150-β stack — DIVERGED EP7.87 + compound instability finding
+
+- dl24-fern/h157b-wss-charbonnier-z-light
+- Hypothesis: `wss_charbonnier_weight=0.1 axes=z` adds an L1-robust loss term on the slow-improving WSS-z axis (H147 tau_z=8.49%). Combined with H150's high-β Lion (β1=0.97, β2=0.985), tests whether the smoother momentum + softer outlier penalty extracts a lower test_WSS than either alone.
+- W&B run: train = `ew63yb7p` (state=aborted by 201-skip auto-rule, EP7.87, step 86363), eval (in-flight) = `q00o0xqk` (EP6 EMA-best ckpt selected by `val_primary/abupt_axis_mean_rel_l2_pct`)
+- Wall time at abort: 9.78h (~83% of nominal 12h 15-EP budget)
+
+**Trajectory (val_WSS by epoch):**
+
+| EP | val_WSS | val_VP | val_SP | val_ABUPT |
+|---:|---:|---:|---:|---:|
+| 1 | 13.075% | 6.866% | 7.886% | 11.643% |
+| 2 | 7.509% | 3.718% | 4.330% | 6.624% |
+| 3 | 7.063% | 3.491% | 4.072% | 6.217% |
+| 4 | 7.070% | 3.557% | 4.098% | 6.240% |
+| 5 | 6.944% | 3.416% | 3.993% | 6.106% |
+| **6 (EMA-best)** | **6.921%** | **3.398%** | **3.967%** | **6.078%** |
+| 7 (regression) | 7.773% | 3.734% | 4.364% | 6.820% |
+| 8 | — | — | — | — (diverged, no val pass) |
+
+**Divergence forensics (per fern's report):**
+- Step 0 → 83584 (EP7.66): grad_norm calm, ≤ 0.06
+- Step 83584 (EP7.66): grad_norm spike to 80.9
+- Step 83584 → 85113 (EP7.81): spike train to grad_norm = 1377
+- Step 85113 (EP7.81): nonfinite gradients first observed
+- Step 85113 → 86363 (EP7.87): 1250 consecutive nonfinite skips; 201-skip auto-abort rule triggered
+- Run state = aborted; ckpt preservation = EP6 EMA-best (last clean)
+
+**HEADLINE FINDING — high-β Lion + Charbonnier-aux compound instability:**
+
+| Configuration | β stack | Charbonnier? | Result |
+|---|---|---|---|
+| H150 | β1=0.97, β2=0.985 | NO | ✅ stable to EP30 |
+| H147 | β1=0.95, β2=0.98 | YES (w=0.1, axes=z) | ✅ stable to EP30 |
+| **H157b** | **β1=0.97, β2=0.985** | **YES (w=0.1, axes=z)** | **❌ diverged EP7.87** |
+
+> The compound of high-β1 Lion (≥0.97) AND Charbonnier-aux at moderate weight is unstable beyond EP7. Neither β alone nor Charbonnier alone is sufficient to destabilize. Mechanism: Charbonnier loss `sqrt(x² + ε²) − ε` is smooth at zero but has a sharp gradient feature near small residuals (where targets are concentrated). High-β1 momentum carries through that sharpness into a divergent basin — confirmed by the calm pre-spike grad_norm and the abrupt single-step transition.
+
+**Implications for adjacent in-flight experiments:**
+- **H159 (frieren, β=0.95 + VP-Charb 0.3):** on safer H147-β; mechanism predicts stable. Currently at step ~6193 (EP~0.5), no anomalies.
+- **H161 (nezuko, β=0.95 + WSS-Charb 0.3 axes=z):** on safer H147-β but 3× the weight. Divergence-watch comment posted to PR #1427 instructing grad-norm monitoring past EP4.
+- **H160 (tanjiro, β=0.95/0.985):** β2-only mover, no Charbonnier added. Mechanism does NOT predict divergence (β2 alone is the H150 axis, which was stable).
+
+**Test eval (EP6 EMA-best, expected ~11:30Z):**
+
+Projected test_WSS ~6.85-6.90% based on val_WSS=6.921% and the typical val→test gap of -0.02 to -0.08pp on this branch. Non-merge expected (regresses H147 6.5409%). Headline scientific value is the divergence mechanism, NOT the EP6 metrics.
+
+**Advisor errata (this session):**
+
+My 09:55Z heartbeat comment claimed "EP9.28 val_WSS=6.5085% — leading current merge candidate" which was a W&B chart-axis misread of a step that does not exist in `ew63yb7p`'s `scan_history`. Fern's authoritative trajectory table (above) is the truth. Apology posted to PR #1385.
+
+**Suggested follow-ups:**
+1. **Charbonnier on safer β** — H159 (VP-axis) and H161 (WSS-z axis), both at weight 0.3 on H147-β, will tell us whether the *weight* axis or the *β-stack* axis dominates.
+2. **β-grid is fully closed** — H160 (β1=0.95/β2=0.985) is the last untested cell; closes regardless of outcome.
+3. **Avoid β1≥0.97 + auxiliary-loss combinations** in future hypotheses unless the auxiliary loss is verified smooth (e.g., pure MSE-style).
+
+PR closure pending fern's test eval completion + SENPAI-RESULT post.
+
