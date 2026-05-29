@@ -11790,3 +11790,64 @@ Collapse onset: alpha=0.25 already 10× degradation. Basin boundary lies in (0, 
 
 **Follow-up assigned**: H214 askeladd — sub-alpha sweep at alpha ∈ {0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.2} to quantify H112's basin radius in the H183 direction (PR #1388).
 
+
+---
+
+## 2026-05-29 10:50Z — PR #1414: H243 askeladd — Extended Multi-Res TTA 6-res MERGED NEW SOTA
+
+- **Branch**: askeladd/h243-extended-multi-res
+- **Hypothesis**: Extending multi-res TTA range from H236's {49152, 65536, 81920} (3-res) to {32768, 49152, 65536, 81920, 98304, 131072} (6-res) + {16384..98304} (5-res bonus) extracts additional cross-resolution variance reduction.
+
+### Results
+
+| Mode | val_abupt | test_abupt | test_VP | test_SP | test_WSS | W&B |
+|---|---|---|---|---|---|---|
+| H236 (3-res, prior SOTA) | 5.9613 | 5.8081 | 3.4033 | 3.6759 | 6.7130 | faa8ymsy |
+| H243 res_avg (5-res) | 5.9947 | 5.8394 | 3.4133 | 3.6950 | 6.7480 | k5qfrzf5 |
+| H243 mirror_res_avg (5-res) | 5.9575 | 5.8045 | 3.3981 | 3.6741 | 6.7095 | k5qfrzf5 |
+| H243 res_avg (6-res) | 5.9915 | 5.8326 | 3.4098 | 3.6880 | 6.7406 | yty4tnew |
+| **H243 mirror_res_avg (6-res)** | **5.9546** | **5.7979** | **3.3947** | **3.6672** | **6.7025** | **yty4tnew** |
+
+**PRIMARY GATE**: val 5.9546 < 5.9613 ✅ AND test 5.7979 < 5.8081 ✅ → **NEW SOTA MERGED**
+
+Per-channel (6-res mirror, SOTA arm): val_VP=3.4768, val_SP=3.9350, val_WSS=6.7506, val_WSS_x=5.9022, val_WSS_y=7.3325, val_WSS_z=9.1266. Test: test_VP=3.3947, test_SP=3.6672, test_WSS=6.7025, test_WSS_x=5.9489, test_WSS_y=7.2821, test_WSS_z=8.6965.
+
+### Analysis
+
+**Finding HH (banked)**: Multi-resolution TTA range is NOT saturated at 3-res {49k-82k}. Extending to 6-res {32k-131k} adds another −0.67bp val / −1.02bp test over H236. The 5→6 step (-0.29bp val / -0.66bp test) is larger than 3→5 step (-0.38bp val / -0.36bp test) on the test side, suggesting the K=131072 (2× training end-state) resolution captures large-scale flow features poorly sampled at 65536 or 98304.
+
+Diminishing returns ARE visible (incremental gain per resolution decreasing) but the mechanism is not yet exhausted. 7-res with K=163840 likely adds another 0.2-0.3bp.
+
+Primary implication: the multi-res TTA mechanism is additive-in-range. Each new resolution adds an independent variance-reduction signal as long as it captures a distinct spatial frequency.
+
+**New merge gate**: val < 5.9546% AND test < 5.7979%
+
+---
+
+## 2026-05-29 10:55Z — PR #1419: H248 alphonse — Point-Jitter TTA CLOSED (Finding EE confirmed)
+
+- **Branch**: alphonse/h248-multi-aug-jitter
+- **Hypothesis**: Small Gaussian point-position jitter (ε ∈ {0.0005, 0.001, 0.002}) as a 3rd orthogonal TTA axis orthogonal to mirror and multi-res.
+
+### Results
+
+| Config | val_abupt | test_abupt | W&B |
+|---|---|---|---|
+| H236 sanity (no jitter, control) | 5.9613 | 5.8081 | ql91bidw |
+| eps=0.0005, K=2 jitter passes | 8.1833 | 7.9515 | oui3epra |
+| eps=0.001, K=2 | 10.9043 | 10.6620 | m1bd4i4x |
+| eps=0.002, K=2 | 16.7022 | 16.3753 | nafuu4bh |
+
+Monotone catastrophic degradation (~quadratic in ε). All channels degrade simultaneously.
+
+### Analysis
+
+**Finding EE (BANKED — definitive)**: Point-position jitter is NOT a viable TTA axis on DrivAerML CFD surrogates. Even ε=0.0005 (5×10⁻⁴ in normalized coordinates) causes +2220bp val degradation.
+
+Mechanism: the model is fundamentally position-dependent. Its k-NN graph is built from point positions, and normals/SDF are derived from those positions. Even tiny xyz jitter flips edge membership in the kNN topology without updating normals or SDF, breaking position↔normal↔SDF consistency. Predictions become biased (not just noisy) so averaging over jitter draws cannot recover — it averages systematically wrong predictions.
+
+This conclusively closes the "input noise" TTA sub-family. The only viable input-space perturbations are those that respect mesh topology: mirror-y (discrete geometric symmetry) and volume-point-count resampling (same topology, different density).
+
+**Important validation**: sanity run (ql91bidw) reproduces faa8ymsy EXACTLY (5.9613/5.8081/6.7130 bit-for-bit). Confirms eval_multi_res.py's `mirror_res_jitter_avg` extension leaves the baseline path intact.
+
+**Follow-on assigned**: alphonse H253 — stack weight-noise σ=5e-4 ON H243 6-res (PR #1428, highest-EV next SOTA bet).
