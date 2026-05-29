@@ -11160,3 +11160,29 @@ H112 baseline sanity: every column matches canonical H112 to ≤0.0001pp — eva
 
 **Follow-up assigned**: H213 tanjiro — layer-wise block splice H112↔H183, 6 configs k=0..5 (PR #1387). Block splicing preserves intra-block coherence, bypasses permutation conflict.
 
+---
+
+## 2026-05-29 04:30Z — PR #1380: H207 weight interpolation H112 EP13 ↔ H183 EP13 (askeladd, **CLOSED — NEGATIVE, Finding P banked**)
+
+- askeladd/h207-interp-h112-h183
+- **Hypothesis**: Linear interpolation of H112 and H183 EP13 state_dicts may find a sweet spot with partial val gain AND basin integrity.
+- **W&B runs**: `69ul5jj7` (α=0.0), `u4mttmbd` (α=0.25), `5w1mo8zj` (α=0.5), `ynkwv226` (α=0.75), `vuj4sqpi` (α=1.0)
+
+### Results
+
+| alpha | val_abupt | test_WSS | functional? |
+|---|---:|---:|---|
+| 0.0 (H112) | **6.1358** | 6.752 | ✓ canonical (exact ≤0.0001pp) |
+| 0.25 | 66.60 | 72.03 | DESTROYED |
+| 0.5 | 88.77 | 91.92 | DESTROYED (deepest pass) |
+| 0.75 | 62.54 | 66.93 | DESTROYED (H183-side slightly less brutal) |
+| 1.0 (H183) | **6.0388** | 6.829 | ✓ canonical (exact) |
+
+Collapse onset: alpha=0.25 already 10× degradation. Basin boundary lies in (0, 0.25).
+
+**Finding P (program-permanent)**: H112 and H183 EP13 are NOT linearly mode-connected. The two basins are separated by a loss barrier requiring permutation alignment (Ainsworth 2022 *Git Re-Basin*) to traverse. Asymmetric collapse (H183-side wall slightly less steep than H112-side) indicates different basin curvature/orientation.
+
+**Cross-validation**: Confirms the corollary of Finding O (tanjiro H210 SWA). Same mechanism — permutation-equivalent but parameter-distinct basins.
+
+**Follow-up assigned**: H214 askeladd — sub-alpha sweep at alpha ∈ {0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.2} to quantify H112's basin radius in the H183 direction (PR #1388).
+
