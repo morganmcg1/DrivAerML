@@ -62,7 +62,9 @@ from trainer_runtime import (
 class EvalConfig:
     """H236 eval config. Defaults match the H185 yw2a5dyl training-time config."""
 
-    # Checkpoint source — fetch from W&B by run_id + artifact alias.
+    # Checkpoint source — either a direct path (preferred when present) or
+    # fetch from W&B by run_id + artifact alias.
+    ckpt_path: str = ""  # if set, load this checkpoint directly (skip W&B download)
     run_id: str = "yw2a5dyl"
     checkpoint: str = "epoch-13"  # artifact alias; can also be "best"
     use_ema: bool = True  # validates that loaded checkpoint_source == "ema"
@@ -70,9 +72,11 @@ class EvalConfig:
 
     # Multi-resolution TTA configuration
     resolutions: str = "49152,65536,81920"
-    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
-    # Surface resolution stays fixed; only volume is varied.
+    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: orig, mirror, res_avg, mirror_res_avg
+    # Surface resolution stays fixed; only volume is varied (except for orig/mirror modes,
+    # which run at the single resolution ``eval_volume_points``).
     eval_surface_points: int = 65536
+    eval_volume_points: int = 65536  # used by single-resolution modes (orig, mirror)
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -549,27 +553,37 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
+    valid_modes = ("orig", "mirror", "res_avg", "mirror_res_avg")
     for mode in modes:
-        if mode not in ("res_avg", "mirror_res_avg"):
-            raise ValueError(f"Unknown eval mode: {mode!r}")
+        if mode not in valid_modes:
+            raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
-        print(f"Source run_id={cfg.run_id} alias={cfg.checkpoint} use_ema={cfg.use_ema}")
+        if cfg.ckpt_path:
+            print(f"Source ckpt_path={cfg.ckpt_path} use_ema={cfg.use_ema}")
+        else:
+            print(f"Source run_id={cfg.run_id} alias={cfg.checkpoint} use_ema={cfg.use_ema}")
         print(f"Resolutions: {resolutions}")
+        print(f"Single-res volume points (for orig/mirror): {cfg.eval_volume_points}")
         print(f"Modes: {modes}")
 
-    # Download/locate the checkpoint on rank 0 only, then broadcast the path.
+    # Resolve checkpoint path on rank 0 only, then broadcast.
     cache_root = Path(cfg.cache_root)
     if state.is_main:
-        ckpt_path = download_checkpoint(
-            entity=cfg.wandb_entity,
-            project=cfg.wandb_project,
-            run_id=cfg.run_id,
-            alias=cfg.checkpoint,
-            cache_root=cache_root,
-        )
+        if cfg.ckpt_path:
+            ckpt_path = Path(cfg.ckpt_path)
+            if not ckpt_path.exists():
+                raise FileNotFoundError(f"--ckpt-path not found: {ckpt_path}")
+        else:
+            ckpt_path = download_checkpoint(
+                entity=cfg.wandb_entity,
+                project=cfg.wandb_project,
+                run_id=cfg.run_id,
+                alias=cfg.checkpoint,
+                cache_root=cache_root,
+            )
         ckpt_path_str = str(ckpt_path)
     else:
         ckpt_path_str = ""
@@ -657,11 +671,15 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode == "mirror_res_avg"
+            use_mirror = mode in ("mirror", "mirror_res_avg")
+            if mode in ("orig", "mirror"):
+                mode_resolutions = [cfg.eval_volume_points]
+            else:
+                mode_resolutions = resolutions
             if state.is_main:
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror} ===",
+                    f"resolutions={mode_resolutions} mirror={use_mirror} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -673,7 +691,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 device=device,
                 store=store,
                 cfg=cfg,
-                resolutions=resolutions,
+                resolutions=mode_resolutions,
                 use_mirror=use_mirror,
                 distributed_state=state,
             )
