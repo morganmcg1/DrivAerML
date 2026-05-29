@@ -1,0 +1,117 @@
+-rw-r--r-- 1 root root 67M May 29 05:51 outputs/h228_eval/_artifacts/yw2a5dyl/epoch-13/checkpoint.pt
+=== [19:29:08Z] H272 SMOKE TEST: small debug run ===
+W0529 19:29:09.107000 129800 torch/distributed/run.py:862] 
+W0529 19:29:09.107000 129800 torch/distributed/run.py:862] *****************************************
+W0529 19:29:09.107000 129800 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0529 19:29:09.107000 129800 torch/distributed/run.py:862] *****************************************
+Device: cuda:0, DDP world_size=8
+Resolutions: [32768, 49152]
+Modes: ['mirror_res_weight_noise_avg']
+Weight-noise TTA: sigma_base=0.0005 K_passes=2 seed_base=42
+Hutchinson: M=2 beta=10000.0 cache=outputs/h272_diag_hessian_smoke.pt
+Checkpoint: outputs/h228_eval/_artifacts/yw2a5dyl/epoch-13/checkpoint.pt (source=local)
+Loaded checkpoint epoch=13 source=ema
+  missing=0 unexpected=0
+Snapshotted 136 fp tensors (17,413,721 elements)
+DEBUG: 2 val + 2 test cases only
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260529_192914-ebcd59gk
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/h272-smoke-debug-v3
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/ebcd59gk
+
+=== Hutchinson diagonal Hessian pre-pass ===
+Running Hutchinson diagonal Hessian estimation: M=2
+  Hutchinson done in 0.9s
+  Cached diag_H to outputs/h272_diag_hessian_smoke.pt
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+[rank 7] val_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 6] val_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 5] val_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)[rank 4] val_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+
+[rank 3] val_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 2] val_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+  sigma_ratio: min=0.0004 mean=0.2081 p1=0.0150 p10=0.0490 p50=0.1566 frac_below_half=0.9262
+  diag_H (abs): p1=3.558e-05 p10=4.200e-04 p50=3.977e-03 p90=4.159e-02 p99=4.450e-01
+
+=== val_surface mode=mirror_res_weight_noise_avg resolutions=[32768, 49152] mirror=True K=2 sigma_base=0.0005 beta=10000.0 ===
+  [rank 0] val_surface/mirror_res_weight_noise_avg run_4 (1/1): n_passes=8 forwards=2800 forward=7.0s perturb=0.0s io=212.2s total=224.5s
+[rank 0] val_surface/mirror_res_weight_noise_avg complete: 1 cases in 224.5s (forward=7.0s perturb=0.0s io=212.2s n_forwards=2800)
+  [rank 1] val_surface/mirror_res_weight_noise_avg run_22 (1/1): n_passes=8 forwards=2976 forward=7.9s perturb=0.0s io=228.0s total=241.1s
+[rank 1] val_surface/mirror_res_weight_noise_avg complete: 1 cases in 241.1s (forward=7.9s perturb=0.0s io=228.0s n_forwards=2976)
+[rank 2] test_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 3] test_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 4] test_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 5] test_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 6] test_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+[rank 7] test_surface/mirror_res_weight_noise_avg complete: 0 cases in 0.0s (forward=0.0s perturb=0.0s io=0.0s n_forwards=0)
+  total val_surface/mirror_res_weight_noise_avg: 239.5s
+val_surface/mirror_res_weight_noise_avg loss=0.00350 abupt_axis_rel_l2_pct=5.1885 surface_p_mae=0.01013 volume_p_mae=6.95966 wall_shear_mae=0.05357 cases=2
+
+=== test_surface mode=mirror_res_weight_noise_avg resolutions=[32768, 49152] mirror=True K=2 sigma_base=0.0005 beta=10000.0 ===
+  [rank 0] test_surface/mirror_res_weight_noise_avg run_11 (1/1): n_passes=8 forwards=2732 forward=6.4s perturb=0.0s io=204.5s total=215.9s
+[rank 0] test_surface/mirror_res_weight_noise_avg complete: 1 cases in 215.9s (forward=6.4s perturb=0.0s io=204.5s n_forwards=2732)
+  [rank 1] test_surface/mirror_res_weight_noise_avg run_12 (1/1): n_passes=8 forwards=3088 forward=7.6s perturb=0.0s io=239.7s total=252.9s
+[rank 1] test_surface/mirror_res_weight_noise_avg complete: 1 cases in 252.9s (forward=7.6s perturb=0.0s io=239.7s n_forwards=3088)
+  total test_surface/mirror_res_weight_noise_avg: 253.0s
+test_surface/mirror_res_weight_noise_avg loss=0.00550 abupt_axis_rel_l2_pct=6.7096 surface_p_mae=0.01211 volume_p_mae=7.91434 wall_shear_mae=0.06313 cases=2
+
+=== Summary (rel_l2_pct lower-is-better) ===
+
+[val_surface]
+  metric                                        mirror_res_weight_noise_avg
+  abupt_axis_mean_rel_l2_pct                                         5.1885
+  surface_pressure_rel_l2_pct                                        3.3393
+  wall_shear_rel_l2_pct                                              5.9811
+  wall_shear_x_rel_l2_pct                                            5.3393
+  wall_shear_y_rel_l2_pct                                            6.4977
+  wall_shear_z_rel_l2_pct                                            7.5678
+  volume_pressure_rel_l2_pct                                         3.1984
+
+[test_surface]
+  metric                                        mirror_res_weight_noise_avg
+  abupt_axis_mean_rel_l2_pct                                         6.7096
+  surface_pressure_rel_l2_pct                                        4.2471
+  wall_shear_rel_l2_pct                                              7.7602
+  wall_shear_x_rel_l2_pct                                            7.0446
+  wall_shear_y_rel_l2_pct                                            7.9016
+  wall_shear_z_rel_l2_pct                                           10.4133
+  volume_pressure_rel_l2_pct                                         3.9413
+wandb: updating run metadata
+wandb: uploading history steps 3-3, summary, console lines 19-42
+wandb: 
+wandb: Run history:
+wandb:                          full_val_extra/mirror_res_weight_noise_avg/loss ▁
+wandb:                       full_val_extra/mirror_res_weight_noise_avg/seconds ▁
+wandb:      full_val_primary/mirror_res_weight_noise_avg/abupt_axis_mean_rel_l2 ▁
+wandb:  full_val_primary/mirror_res_weight_noise_avg/abupt_axis_mean_rel_l2_pct ▁
+wandb:        full_val_primary/mirror_res_weight_noise_avg/surface_pressure_mae ▁
+wandb: full_val_primary/mirror_res_weight_noise_avg/surface_pressure_rel_l2_pct ▁
+wandb:         full_val_primary/mirror_res_weight_noise_avg/volume_pressure_mae ▁
+wandb:  full_val_primary/mirror_res_weight_noise_avg/volume_pressure_rel_l2_pct ▁
+wandb:              full_val_primary/mirror_res_weight_noise_avg/wall_shear_mae ▁
+wandb:       full_val_primary/mirror_res_weight_noise_avg/wall_shear_rel_l2_pct ▁
+wandb:                                                                      +28 ...
+wandb: 
+wandb: Run summary:
+wandb:                          full_val_extra/mirror_res_weight_noise_avg/loss 0.0035
+wandb:                       full_val_extra/mirror_res_weight_noise_avg/seconds 239.49503
+wandb:      full_val_primary/mirror_res_weight_noise_avg/abupt_axis_mean_rel_l2 0.05189
+wandb:  full_val_primary/mirror_res_weight_noise_avg/abupt_axis_mean_rel_l2_pct 5.18851
+wandb:        full_val_primary/mirror_res_weight_noise_avg/surface_pressure_mae 0.01013
+wandb: full_val_primary/mirror_res_weight_noise_avg/surface_pressure_rel_l2_pct 3.33932
+wandb:         full_val_primary/mirror_res_weight_noise_avg/volume_pressure_mae 6.95966
+wandb:  full_val_primary/mirror_res_weight_noise_avg/volume_pressure_rel_l2_pct 3.19836
+wandb:              full_val_primary/mirror_res_weight_noise_avg/wall_shear_mae 0.05357
+wandb:       full_val_primary/mirror_res_weight_noise_avg/wall_shear_rel_l2_pct 5.9811
+wandb:                                                                      +82 ...
+wandb: 
+wandb: 🚀 View run nezuko/h272-smoke-debug-v3 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/ebcd59gk
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260529_192914-ebcd59gk/logs
+=== [19:37:34Z] DONE ===
