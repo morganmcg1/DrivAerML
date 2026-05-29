@@ -1,3 +1,26 @@
+## 2026-05-29 15:20 — PR #1440 fern H264 CLOSED: Finding LL-EPchain (EP15 is cosine optimum)
+
+### PR #1440 fern H264 — CLOSED: Finding LL-EPchain
+
+- **Branch**: fern/h264-ep16-6res-mirror
+- **W&B runs**: `0gjfv45i` (training-time val history), `k2samojh` (edward's EP16 3-res TTA prior result)
+- **Key insight**: Fern used edward's training-time `val_primary/*` per-epoch history from W&B instead of running eval_multi_res.py — equivalent to single-res sanity (same EMA-shadowed weights, same loader). Zero new GPU time.
+
+| EP | val_orig (65k, single-res EMA) | Δ vs EP15 |
+|---|---:|---:|
+| EP13 | 6.0172 | +9.3bp |
+| EP14 | 6.0168 | +8.9bp |
+| **EP15** | **6.0079** | **(best)** |
+| EP16 | 6.0118 | **+3.9bp (regression)** |
+
+Edward's `k2samojh` prior TTA: EP16 + 3-res mirror = val 5.9548 / test 5.8028 — both miss gate (5.9452 / 5.7896). Even extrapolating LL-extend 3→6-res improvement (~−3-4bp), EP16+6-res ~5.951 val, above gate.
+
+**Finding LL-EPchain**: H185 cosine extension (T_max=16, lr 8.5e-6→1e-7) peaked at EP15. Chain is monotone-improving EP13→EP14→EP15 (total −9.3bp), then reverses at EP16 (+3.9bp). EP15 is the empirical training-floor. Do NOT extend cosine schedules past EP15 for this recipe.
+
+**Side finding**: The W&B artifact `model-edward-h244-h185-ep16-cosine-ext-0gjfv45i:v0` is aliased `epoch-15`/`best` (not epoch-16 as the name suggests). EP15 is accessible from W&B; EP14 still requires edward to upload.
+
+---
+
 ## 2026-05-29 14:50 — PR #1437 askeladd H261 CLOSED Finding HH-H188; H244 edward MERGED as new SOTA
 
 ### PR #1437 askeladd H261 — CLOSED: Finding HH-H188 (H188 EP13 not competitive with H185 EP13)
