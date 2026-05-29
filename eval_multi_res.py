@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-PackageName: senpai
-"""H236: Multi-resolution TTA — eval at varied volume point counts and average.
+"""H236/H247: Multi-resolution TTA — eval at varied volume point counts and average.
 
 For each case, accumulates per-point predictions across multiple
 ``eval_volume_points`` resolutions (optionally combined with mirror TTA),
@@ -13,8 +13,12 @@ processes its assigned cases sequentially with single-case loaders. Per-case
 scratch buffers live on CPU (~200MB per case).
 
 Modes:
-    res_avg:        average over N resolutions, no mirror
-    mirror_res_avg: 2N-pass = orig + mirror at each of N resolutions
+    res_avg:                       average over N resolutions, no mirror
+    mirror_res_avg:                2N-pass = orig + mirror at each of N resolutions
+    mirror_res_avg_per_channel:    H247 — per-channel α blend of mirror_res_avg
+                                   and single-res-K mirror prediction.
+                                   pred_c = α_c * multi_res_pred_c + (1 - α_c) * single_res_pred_c
+                                   Channels: VP (volume), SP (surface cp), WSS (surface tau_x/y/z).
 
 Mirror convention (H148/H183/H209):
     surface_x [x, y, z, nx, ny, nz, area] -> negate y(1) and ny(4)
@@ -70,9 +74,16 @@ class EvalConfig:
 
     # Multi-resolution TTA configuration
     resolutions: str = "49152,65536,81920"
-    eval_modes: str = "res_avg,mirror_res_avg"  # comma-separated: res_avg, mirror_res_avg
+    eval_modes: str = "res_avg,mirror_res_avg"
     # Surface resolution stays fixed; only volume is varied.
     eval_surface_points: int = 65536
+
+    # H247 per-channel α blending (only used for mirror_res_avg_per_channel mode).
+    # Format: "VP:1.0,SP:0.5,WSS:0.5". α=1.0 → multi-res only; α=0.0 → single-res only.
+    # Same α applies to all sub-channels of WSS (tau_x, tau_y, tau_z).
+    per_channel_alpha: str = "VP:1.0,SP:0.5,WSS:0.5"
+    # K that defines the single-res reference for per-channel blending; must be one of `resolutions`.
+    single_res_K: int = 65536
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -143,6 +154,62 @@ def parse_resolutions(spec: str) -> list[int]:
 
 def parse_modes(spec: str) -> list[str]:
     return [m.strip() for m in spec.split(",") if m.strip()]
+
+
+_VALID_ALPHA_KEYS = ("VP", "SP", "WSS")
+
+
+def parse_per_channel_alpha(spec: str) -> dict[str, float]:
+    """Parse 'VP:1.0,SP:0.5,WSS:0.5' into {'VP': 1.0, 'SP': 0.5, 'WSS': 0.5}.
+
+    Required keys: VP, SP, WSS. Each α must lie in [0, 1] (linear interpolation).
+    """
+    result: dict[str, float] = {}
+    for piece in spec.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if ":" not in piece:
+            raise ValueError(f"per-channel-alpha entry must be 'KEY:VALUE': {piece!r}")
+        k, v = piece.split(":", 1)
+        k = k.strip()
+        if k not in _VALID_ALPHA_KEYS:
+            raise ValueError(
+                f"per-channel-alpha key {k!r} not in {_VALID_ALPHA_KEYS}: {spec!r}"
+            )
+        a = float(v.strip())
+        if not 0.0 <= a <= 1.0:
+            raise ValueError(f"per-channel-alpha for {k} must be in [0, 1], got {a}")
+        result[k] = a
+    missing = [k for k in _VALID_ALPHA_KEYS if k not in result]
+    if missing:
+        raise ValueError(
+            f"per-channel-alpha missing required keys {missing}: {spec!r}"
+        )
+    return result
+
+
+def blend_per_channel(
+    multi_surf: torch.Tensor,
+    multi_vol: torch.Tensor,
+    single_surf: torch.Tensor,
+    single_vol: torch.Tensor,
+    alphas: dict[str, float],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-channel α blend in real units.
+
+    Surface channels: [SP (cp), WSS_x (tau_x), WSS_y (tau_y), WSS_z (tau_z)]
+    Volume channels: [VP (volume_pressure)]
+    The same α_WSS applies to all 3 wall-shear sub-channels.
+    """
+    a_sp = alphas["SP"]
+    a_wss = alphas["WSS"]
+    a_vp = alphas["VP"]
+    surf_blended = torch.empty_like(multi_surf)
+    surf_blended[..., 0:1] = a_sp * multi_surf[..., 0:1] + (1.0 - a_sp) * single_surf[..., 0:1]
+    surf_blended[..., 1:4] = a_wss * multi_surf[..., 1:4] + (1.0 - a_wss) * single_surf[..., 1:4]
+    vol_blended = a_vp * multi_vol + (1.0 - a_vp) * single_vol
+    return surf_blended, vol_blended
 
 
 def build_model(cfg: EvalConfig) -> SurfaceTransolver:
@@ -251,13 +318,42 @@ def process_case_multires(
     cfg: EvalConfig,
     resolutions: list[int],
     use_mirror: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    track_single_res_K: int | None = None,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor,
+    torch.Tensor,
+    int,
+    dict,
+]:
     """Run multi-res TTA passes for one case and return per-point averaged predictions.
 
-    Returns (surface_avg_real[n_surf, 4], volume_avg_real[n_vol, 1],
-             surface_y[n_surf, 4], volume_y[n_vol, 1], n_passes, timing).
-    Predictions are in **real units** (already denormalized).
+    Returns
+    -------
+    surf_avg : Tensor[n_surf, 4]
+        Multi-res averaged surface predictions in real units.
+    vol_avg : Tensor[n_vol, 1]
+        Multi-res averaged volume predictions in real units.
+    surf_avg_single : Tensor[n_surf, 4] | None
+        If ``track_single_res_K`` is set, averaged surface predictions over only the
+        passes at K=``track_single_res_K`` (1 K × N mirror passes). Else None.
+    vol_avg_single : Tensor[n_vol, 1] | None
+        Same for volume predictions.
+    surf_y, vol_y : Tensors
+        Full-case ground truth in real units.
+    n_passes : int
+        Total number of forward passes across all (K, mirror) combinations.
+    timing : dict
+        forward/io seconds and n_forwards counters.
     """
+    if track_single_res_K is not None and track_single_res_K not in resolutions:
+        raise ValueError(
+            f"track_single_res_K={track_single_res_K} must be in resolutions={resolutions}"
+        )
+
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
     n_vol = counts["n_volume"]
@@ -267,10 +363,19 @@ def process_case_multires(
     vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
     vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
 
+    if track_single_res_K is not None:
+        surf_sum_s = torch.zeros(n_surf, 4, dtype=torch.float32)
+        surf_cnt_s = torch.zeros(n_surf, dtype=torch.int32)
+        vol_sum_s = torch.zeros(n_vol, 1, dtype=torch.float32)
+        vol_cnt_s = torch.zeros(n_vol, dtype=torch.int32)
+    else:
+        surf_sum_s = surf_cnt_s = vol_sum_s = vol_cnt_s = None
+
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {"forward_seconds": 0.0, "io_seconds": 0.0, "n_forwards": 0}
 
     for K in resolutions:
+        is_single_K = track_single_res_K is not None and K == track_single_res_K
         dataset = DrivAerMLSurfaceDataset(
             case_ids=[case_id],
             store=store,
@@ -336,10 +441,12 @@ def process_case_multires(
                                 f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
                             )
                         if s_global.numel() > 0:
+                            ones_s = torch.ones_like(s_global, dtype=torch.int32)
                             surf_sum.index_add_(0, s_global, s_chunk)
-                            surf_cnt.index_add_(
-                                0, s_global, torch.ones_like(s_global, dtype=torch.int32)
-                            )
+                            surf_cnt.index_add_(0, s_global, ones_s)
+                            if is_single_K:
+                                surf_sum_s.index_add_(0, s_global, s_chunk)
+                                surf_cnt_s.index_add_(0, s_global, ones_s)
 
                     if v_view_idx < v_view_count:
                         v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
@@ -352,10 +459,12 @@ def process_case_multires(
                                 f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
                             )
                         if v_global.numel() > 0:
+                            ones_v = torch.ones_like(v_global, dtype=torch.int32)
                             vol_sum.index_add_(0, v_global, v_chunk)
-                            vol_cnt.index_add_(
-                                0, v_global, torch.ones_like(v_global, dtype=torch.int32)
-                            )
+                            vol_cnt.index_add_(0, v_global, ones_v)
+                            if is_single_K:
+                                vol_sum_s.index_add_(0, v_global, v_chunk)
+                                vol_cnt_s.index_add_(0, v_global, ones_v)
                 timing["io_seconds"] += time.time() - t1
 
     if int(surf_cnt.min()) == 0:
@@ -372,13 +481,40 @@ def process_case_multires(
     surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
     vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
 
+    surf_avg_single: torch.Tensor | None = None
+    vol_avg_single: torch.Tensor | None = None
+    if track_single_res_K is not None:
+        if int(surf_cnt_s.min()) == 0:
+            raise RuntimeError(
+                f"single-res surface coverage incomplete for case {case_id} "
+                f"K={track_single_res_K}: "
+                f"{int((surf_cnt_s == 0).sum())} points have zero contributing chunks"
+            )
+        if int(vol_cnt_s.min()) == 0:
+            raise RuntimeError(
+                f"single-res volume coverage incomplete for case {case_id} "
+                f"K={track_single_res_K}: "
+                f"{int((vol_cnt_s == 0).sum())} points have zero contributing chunks"
+            )
+        surf_avg_single = surf_sum_s / surf_cnt_s.unsqueeze(-1).to(torch.float32)
+        vol_avg_single = vol_sum_s / vol_cnt_s.unsqueeze(-1).to(torch.float32)
+
     # Load full ground truth once for metric computation.
     case = store.load_case(case_id)
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
     n_passes = len(resolutions) * (2 if use_mirror else 1)
-    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
+    return (
+        surf_avg,
+        vol_avg,
+        surf_avg_single,
+        vol_avg_single,
+        surf_y,
+        vol_y,
+        n_passes,
+        timing,
+    )
 
 
 def add_case_to_accumulator(
@@ -474,8 +610,16 @@ def evaluate_split_multires(
     resolutions: list[int],
     use_mirror: bool,
     distributed_state,
+    per_channel_alphas: dict[str, float] | None = None,
+    single_res_K: int | None = None,
 ) -> dict[str, float]:
-    """Distribute cases across ranks, run multi-res TTA per case, return finalized metrics."""
+    """Distribute cases across ranks, run multi-res TTA per case, return finalized metrics.
+
+    If ``per_channel_alphas`` is provided, ``single_res_K`` must also be set; predictions
+    are blended per-channel: pred_c = α_c * multi_res + (1 - α_c) * single_res_K.
+    """
+    if per_channel_alphas is not None and single_res_K is None:
+        raise ValueError("per_channel_alphas requires single_res_K")
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
         distributed_state.world_size
@@ -489,9 +633,19 @@ def evaluate_split_multires(
     total_forward = 0.0
     total_io = 0.0
     total_forwards = 0
+    track_K = single_res_K if per_channel_alphas is not None else None
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_multires(
+        (
+            surf_avg,
+            vol_avg,
+            surf_avg_single,
+            vol_avg_single,
+            surf_y,
+            vol_y,
+            n_passes,
+            timing,
+        ) = process_case_multires(
             case_id=case_id,
             model=model,
             transform=transform,
@@ -500,12 +654,24 @@ def evaluate_split_multires(
             cfg=cfg,
             resolutions=resolutions,
             use_mirror=use_mirror,
+            track_single_res_K=track_K,
         )
+        if per_channel_alphas is not None:
+            surf_pred, vol_pred = blend_per_channel(
+                multi_surf=surf_avg,
+                multi_vol=vol_avg,
+                single_surf=surf_avg_single,
+                single_vol=vol_avg_single,
+                alphas=per_channel_alphas,
+            )
+        else:
+            surf_pred = surf_avg
+            vol_pred = vol_avg
         add_case_to_accumulator(
             acc,
             case_id=case_id,
-            surface_pred_real=surf_avg,
-            volume_pred_real=vol_avg,
+            surface_pred_real=surf_pred,
+            volume_pred_real=vol_pred,
             surface_y=surf_y,
             volume_y=vol_y,
             transform=transform,
@@ -549,9 +715,18 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
+    valid_modes = ("res_avg", "mirror_res_avg", "mirror_res_avg_per_channel")
     for mode in modes:
-        if mode not in ("res_avg", "mirror_res_avg"):
-            raise ValueError(f"Unknown eval mode: {mode!r}")
+        if mode not in valid_modes:
+            raise ValueError(f"Unknown eval mode: {mode!r}; valid={valid_modes}")
+
+    per_channel_alphas: dict[str, float] | None = None
+    if "mirror_res_avg_per_channel" in modes:
+        per_channel_alphas = parse_per_channel_alpha(cfg.per_channel_alpha)
+        if cfg.single_res_K not in resolutions:
+            raise ValueError(
+                f"--single-res-K={cfg.single_res_K} must be in --resolutions={resolutions}"
+            )
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
@@ -559,6 +734,10 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(f"Source run_id={cfg.run_id} alias={cfg.checkpoint} use_ema={cfg.use_ema}")
         print(f"Resolutions: {resolutions}")
         print(f"Modes: {modes}")
+        if per_channel_alphas is not None:
+            print(
+                f"Per-channel alphas: {per_channel_alphas} (single_res_K={cfg.single_res_K})"
+            )
 
     # Download/locate the checkpoint on rank 0 only, then broadcast the path.
     cache_root = Path(cfg.cache_root)
@@ -623,6 +802,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     if state.is_main:
         run_name = cfg.wandb_name or f"{cfg.agent}/h236-multi-res-tta-h185-ep{ck.get('epoch')}"
+        tags = ["h236", "tta", "multi-res", "eval-only", cfg.agent]
+        if per_channel_alphas is not None:
+            tags.append("h247")
+            tags.append("per-channel-alpha")
         run = wandb.init(
             project=os.environ.get("WANDB_PROJECT", cfg.wandb_project),
             entity=os.environ.get("WANDB_ENTITY", cfg.wandb_entity),
@@ -637,14 +820,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "modes_list": modes,
                 "n_val_cases": len(val_case_ids),
                 "n_test_cases": len(test_case_ids),
+                "per_channel_alpha_parsed": per_channel_alphas,
             },
-            tags=[
-                "h236",
-                "tta",
-                "multi-res",
-                "eval-only",
-                cfg.agent,
-            ],
+            tags=tags,
             reinit="finish_previous",
         )
 
@@ -657,11 +835,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
-            use_mirror = mode == "mirror_res_avg"
+            use_mirror = mode in ("mirror_res_avg", "mirror_res_avg_per_channel")
+            mode_alphas = per_channel_alphas if mode == "mirror_res_avg_per_channel" else None
+            mode_single_K = cfg.single_res_K if mode == "mirror_res_avg_per_channel" else None
             if state.is_main:
+                extra = ""
+                if mode_alphas is not None:
+                    extra = f" alphas={mode_alphas} single_res_K={mode_single_K}"
                 print(
                     f"\n=== Evaluating split={split_name} mode={mode} "
-                    f"resolutions={resolutions} mirror={use_mirror} ===",
+                    f"resolutions={resolutions} mirror={use_mirror}{extra} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -676,6 +859,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 resolutions=resolutions,
                 use_mirror=use_mirror,
                 distributed_state=state,
+                per_channel_alphas=mode_alphas,
+                single_res_K=mode_single_K,
             )
             dt = time.time() - t0
             if state.is_main:
