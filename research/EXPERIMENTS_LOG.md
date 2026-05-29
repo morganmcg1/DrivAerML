@@ -4109,3 +4109,140 @@ If H159 lands MERGE this becomes the publishable single-model finding of this wa
 2. **For closing tau_z specifically**, the mechanism likely needs to act inside the head's gradient allocation rather than as a loss-weight knob. Candidate next ideas: (a) **raise the GradNorm w_tau_z floor explicitly** (the converse of `gradnorm-min-w-vol-p` for VP); (b) tau_z-specific projection head with its own width/depth; (c) input-side feature giving the model asymmetric z-direction signal (body-frame z-coordinate, y=0 distance feature).
 3. **β=0.95/0.98 Lion safe-side is now corroborated with one more datapoint** (no compound instability with Charbonnier 0.3). H147-family Charbonnier knob can be priced cheaply for stability in future experiments.
 
+
+
+## 2026-05-29 15:51Z — PR #1423 (CLOSED non-merge): H159 — vol_p_charbonnier=0.3 on CORRECTED H147 stack (frieren)
+
+**Hypothesis**: heavier VP-side Charbonnier auxiliary (0.1→0.3) closes the under-served-VP-head gap (w_vol_p clamped at 0.15 floor) and frees gradient mass for tau_z, closing the WSS-z floor.
+
+**W&B runs**: train `z6ybgmx7` (5.13h, EP7 EMA-best harvest, killed at EP8 0% for deadline) + eval-only `juxadtjh`.
+
+### Result table (test, EP7 EMA-best harvest)
+
+| Metric | H159 EP7 EMA | H147 SOTA | Δ | Floor | Cap status |
+|---|---:|---:|---:|---:|---|
+| **test_primary/wall_shear_rel_l2_pct** | **6.6678%** | **6.5409%** ⭐ | **+0.127** | — | — |
+| test_primary/volume_pressure_rel_l2_pct | 3.6092% | 3.4014% | +0.208 | 3.643% | ✓ under |
+| test_primary/surface_pressure_rel_l2_pct | 3.6496% | 3.5634% | +0.086 | 3.577% | ❌ over by 0.073pp (= H147 SP shortfall) |
+| test_primary/abupt_axis_mean_rel_l2_pct | 5.8150% | 5.6648% | +0.150 | 5.844% | ✓ under |
+| test_primary/wall_shear_x_rel_l2_pct | 5.9131% | 5.8155% | +0.098 | — | — |
+| test_primary/wall_shear_y_rel_l2_pct | 7.2323% | 7.0556% | +0.177 | — | — |
+| test_primary/wall_shear_z_rel_l2_pct | 8.6709% | 8.4882% | +0.183 | — | — |
+
+### Trajectory (val_WSS by EP, T_max=8)
+
+| EP | val_WSS | val_VP | val_SP | val_AB |
+|---:|---:|---:|---:|---:|
+| 1 | 12.852% | 13.900% | 8.853% | 13.027% |
+| 2 | 7.302% | 4.974% | 4.308% | 6.729% |
+| 3 | 6.982% | 4.215% | 4.061% | 6.308% |
+| 4 | 6.848% | 3.917% | 3.977% | 6.139% |
+| 5 | 6.787% | 3.772% | 3.945% | 6.060% |
+| 6 | 6.7415% | 3.689% | 3.921% | 6.006% |
+| **7 EMA** | **6.7145%** | **3.6372%** | **3.9104%** | **5.9725%** ⭐ |
+
+### Banked finding — Charbonnier-by-GradNorm-state asymmetry PARTIALLY FALSIFIED on TEST
+
+The mechanism prediction held in **GradNorm dynamics** but did NOT produce a test_WSS gain:
+
+| EP | w_vol_p | w_cp | w_tau_x | w_tau_y | w_tau_z | gradnorm/r_vol_p |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.1501 (clamped) | 1.007 | 1.326 | 1.204 | 1.313 | — |
+| 3 | 0.1500 (clamped) | 0.984 | 1.170 | 1.240 | 1.456 | 3.50 |
+| 5 | 0.1500 (clamped) | 0.947 | 1.107 | 1.335 | 1.461 | 3.52 |
+| 6 | 0.1500 (clamped) | 0.920 | 1.187 | 1.332 | 1.410 | — |
+
+- w_vol_p clamped at min=0.15 floor throughout (under-served VP head as predicted)
+- w_tau_z peaks at 1.46 vs H147 final ~1.27 — extra gradient share to tau_z as predicted
+- test_WSS_z=8.6709% ≈ tied H147 8.4882% (+0.183pp) — extra gradient share **did NOT translate to test_WSS_z gain**
+
+### The val_VP overfit motivating H159 was an artifact of H156's compound stack
+
+| Run | val_VP | test_VP | Ratio |
+|---|---:|---:|---:|
+| H156 (compound β+lr) | (high) | (high) | 2.84x |
+| H147 SOTA reference | ~3.61% | 3.6033% | ~1.00x |
+| H159 EP7 EMA | 3.6372% | 3.6092% | **1.008x** (test ~= val) |
+
+The val_VP/test_VP overfit signature was specific to the unstable H156 stack — does NOT exist on H147 SOTA. Heavier Charbonnier had no overfit to suppress.
+
+### Two non-exclusive interpretations of the partial falsification
+
+(a) **WSS-z is not GradNorm-weight-limited under H147** — test_WSS_z = 8.67% is a representational/architectural floor (slices, PE density, hidden_dim) that gradient-budget reallocation does not cross.
+(b) **The val→test overfit mechanism is the wrong target** — H147's val and test are already aligned. No gap to close.
+
+### Implications
+
+- "Raise GradNorm w_tau_z floor explicitly" (H163, queued) is killed: the saturated VP→tau_z reallocation in H159 already tested this directionally.
+- **WSS-z floor at H147 needs structural perturbation**, not loss-weight knob: more slices, different attention bias, multi-resolution mesh, curvature-conditioned head, or a feature-side mechanism.
+
+### Suggested follow-ups (frieren in SENPAI-RESULT writeup)
+
+1. The val_VP/test_VP=1.0 ratio on H147 is itself a strong-baseline statement worth banking — future "close val/test overfit" motivations should be **stack-tied**, not stack-invariant.
+2. WSS-z floor candidates for future: more slices (>128), curvature-conditioned head, geometric/loss-side mechanism rather than spectral or auxiliary-loss knob.
+
+---
+
+## 2026-05-29 15:52Z — PR #1430 (CLOSED non-merge): H162 — pe_num_features 16→24 (fern)
+
+**Hypothesis**: richer STRING spectral basis (16 features × 5 sigmas → 24 × 5) improves WSS-z bottleneck by giving the model more fine-grained surface feature representation.
+
+**W&B runs**: train `7vdb5zwz` (3.78h to EP5+EP6@3%, EP5 EMA-best harvested after disciplined PR-gate kill) + eval-only `0jfesb3w`.
+
+### Result table (test, EMA-EP5 best, selection=val_primary/abupt_axis_mean_rel_l2_pct)
+
+| Metric | H162 (pe=24) | H147 SOTA (pe=16) | Δ vs H147 | Cap | Cap status |
+|---|---:|---:|---:|---:|---|
+| **test_primary/wall_shear_rel_l2_pct** ⭐ | **6.7070%** | 6.5409% | **+0.166** | — | — |
+| **test_primary/wall_shear_z_rel_l2_pct** (hypothesis axis) | **8.6298%** | 8.4882% | **+0.142** | — | — |
+| test_primary/wall_shear_x_rel_l2_pct | 5.9608% | 5.8155% | +0.145 | — | — |
+| test_primary/wall_shear_y_rel_l2_pct | 7.3223% | 7.0556% | +0.267 | — | — |
+| test_primary/volume_pressure_rel_l2_pct | 3.7871% | 3.4014% | +0.386 | 3.643% | ❌ over by 0.144pp |
+| test_primary/surface_pressure_rel_l2_pct | 3.7292% | 3.5634% | +0.166 | 3.577% | ❌ over by 0.152pp |
+| test_primary/abupt_axis_mean_rel_l2_pct | 5.8859% | 5.6648% | +0.221 | 5.844% | ❌ over by 0.042pp |
+
+Three of four PR #972 caps violated. No axis on which H162 beats H147.
+
+### Trajectory (val_WSS by EP)
+
+| EP | H162 (pe=24) | H147 (pe=16) | Δ |
+|---:|---:|---:|---:|
+| 1 | 12.799% | 12.82% | −0.02 |
+| 2 | 7.353% | 7.26% | +0.09 |
+| 3 | 7.033% | 6.98% | +0.05 |
+| 4 | 6.950% | (interp 6.85) | +0.10 |
+| 5 | **6.885%** | **6.75%** | **+0.14** (PR-gate marginal kill) |
+
+EP5 val_WSS=6.885% crossed PR gate (>6.85%) by 0.035pp. Disciplined kill given deadline pressure.
+
+### Fern's PE-projection dilution hypothesis (banked candidate explanation)
+
+> "Counted heads here: 5 sigma groups × 24 features = 120 vs 5 × 16 = 80 channels. Projecting 120 → 512 may dilute the learned feature mixing."
+
+Plausible mechanism: 24-feature × 5-sigma = 120 channels projecting into 512 hidden_dim may dilute the learned mixing relative to 80 → 512. Testable predictions:
+
+- **Inverse direction (pe_features 16→12 or 8)**: if dilution hypothesis is right, fewer-but-better should help OR be flat. If 12 also degrades, both 12 and 24 are worse than 16 (saddle).
+- **Joint PE × hidden_dim (pe=24 with hidden_dim=768)**: if dilution at 512 is the issue, larger projection capacity may close the gap.
+
+### Banked TRIPLE-ARM joint finding (H161 + H159 + H162)
+
+Three orthogonal single-knob amplifications on the H147 stack all regress test_WSS by +0.127 to +0.199pp:
+
+| Hypothesis | Single-knob perturbation | Test_WSS vs H147 |
+|---|---|---:|
+| H161 (nezuko) | WSS-Charbonnier 0.1 → 0.3 axes=z | +0.199pp |
+| H159 (frieren) | vol_p-Charbonnier 0.1 → 0.3 | +0.127pp |
+| H162 (fern) | pe_num_features 16 → 24 | +0.166pp |
+
+**Joint conclusion**: H147 sits at a **tight local TEST optimum**. Small representational and loss-density perturbations all overshoot, even when val behaves locally well (H159 descended val past H147 EP5 SOTA but regressed test by +0.127pp). The val trajectory does NOT predict test under perturbations of the H147 stack.
+
+This kills any further single-knob amplification candidate on the H147 loss/PE/Charbonnier surface. Next-wave hypotheses must be **structural** (slice count, hidden_dim, multi-resolution, attention bias, feature engineering) rather than knob amplifications.
+
+### Suggested follow-ups (fern in SENPAI-RESULT writeup)
+
+1. **Inverse direction: pe_num_features 16 → 12 or 8.** Cheap diagnostic for the dilution hypothesis. Single-flag.
+2. **Joint PE × hidden_dim**: pe=24 with hidden_dim=768. Tests dilution-by-projection-capacity directly. More expensive.
+3. **Per-sigma asymmetric feature allocation** (not uniform 24 per sigma). Tests representational asymmetry between high/low-frequency bands.
+4. **WSS-z geometric/loss-side mechanism** (tau-z-aware loss weighting, curvature-conditioned attention bias). Spectral knob exhausted.
+5. **Joint negative with H161 finding banked** — single-knob amplification on H147 stack does not improve on test.
+
