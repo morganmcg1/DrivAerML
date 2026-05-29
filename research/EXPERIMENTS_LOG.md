@@ -1,3 +1,48 @@
+## 2026-05-29 06:00 — Round 4b: TTA geometric arm closed, Round 4c begun
+
+### Results from Round 4b (eval-only TTA variants)
+
+**PR #1390 askeladd H223 — TERMINAL CLOSE — Finding V banked**: Rotation TTA falsified at all tested angles θ ∈ [0.1°, 2°] around x-axis.
+- Sanity passed: orig 6.0172/5.8613 matched; mirror 6.0195/5.8638 matched H209 ref
+- At θ=2°: mirror_rotation 31.34/31.07 (catastrophic); rotation_only 41.55/41.25
+- At θ=1°: mirror_rotation 26.31/26.20; rotation_only 34.75/34.67
+- Sub-degree smoke: even θ=0.1° pushes 1-case val from 4.80 → 8.05
+- W&B runs: escmztn1, bi2x1ldc, q4rq8zxe, ptgerw1k, 6mpi8bet, dppd018x
+- **Finding V (banked)**: H185 EP13 EMA has zero rotational invariance at any angle ≥0.1°. Rotation changes the physics, not just the coordinate frame.
+
+**PR #1397 alphonse H224 — CLOSE — Finding W banked**: Coordinate scale TTA falsified at ε=±2%. W&B (h224-alphonse-scale-tta): TTA-averaged val_abupt ≈ 22.60% (catastrophic). Scale up 39.6%, scale down 36.2%.
+- **Finding W (banked)**: Geometric coordinate scale perturbation TTA fails for the same mechanistic reason as rotation — different geometric scale = different Reynolds regime = different physics.
+
+**PR #1398 edward H225 — CLOSE — superseded** by askeladd's H223 angle sweep bonus arm. No GPU spent.
+
+**PR #1400 frieren H227 — CLOSE — informed analogy** to Finding V. rot_z falsified by mechanism (rotation around any axis changes physics). No GPU spent.
+
+**PR #1401 nezuko H228 — CLOSE** — 4-pass stack {orig, mirror, rot_x±2°} corrupted by falsified rot_x passes. Pod interrupted, no usable signal.
+
+**PR #1403 thorfinn H230 — pending SENPAI-RESULT**, W&B shows TTA val ≈ 5.988 / test ≈ 5.867 (does NOT pass H209 merge gate of 5.9755/5.8221). Awaiting formal close + Finding Q extension bank.
+
+**PR #1399 fern H226 — still running**, W&B shows TTA val ≈ 7.59 (mirror degrades H112 baseline as expected — confirms Finding N at N=4). Awaiting terminal result.
+
+**PR #1402 tanjiro H229 — still running** (Gaussian noise σ=0.001 TTA — viable, no falsification yet).
+
+### Mechanistic takeaway
+
+**The TTA geometric perturbation arm is fully exhausted**: mirror_y is the SOLE validated TTA augmentation for H185. Rotation (Finding V), scale (Finding W), and 4-pass combinations all fail. Mirror exploits a true symmetry (car geometry); other geometric perturbations change the underlying flow physics.
+
+### Round 4c (new direction): non-geometric TTA mechanisms + intra-trajectory weight averaging
+
+Five new sprints assigned, targeting orthogonal mechanisms that DON'T perturb geometry:
+
+| PR | Student | Hypothesis | Mechanism |
+|---|---|---|---|
+| #1404 | askeladd | H231: Mesh point subsampling TTA (80% retention, 4-pass) | input subset sampling |
+| #1405 | alphonse | H232: Intra-trajectory weight averaging on yw2a5dyl EP10-13 EMA | Polyak/SWA single-recipe |
+| #1406 | edward | H233: Point order permutation TTA (4-pass random reorder) | attention perm invariance test |
+| #1407 | frieren | H235: TTA-mirror cross-checkpoint sweep N≥6 (Finding Q extension) | finding bank |
+| #1408 | nezuko | H236: Multi-resolution TTA (eval at vol_points {49k, 65k, 82k}) | resolution averaging |
+
+Expected first result ~30-45min. Remaining budget: ~4h.
+
 ## 2026-05-29 05:45 — Round 4 PIVOTED: closed PRs #1389/#1391/#1392/#1393/#1394/#1395/#1396, reassigned all 7 students to eval-only TTA variants
 
 ### Why closed
