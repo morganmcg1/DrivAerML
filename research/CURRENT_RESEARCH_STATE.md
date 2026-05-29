@@ -11,7 +11,7 @@
 | #1353 | thorfinn | H185 GradNorm × mirror-aug | EP9 banked (step 59780) | **6.0948 LEAD −0.108pp** | TERMINAL MERGE CANDIDATE (~03:00-04:00Z+1) |
 | #1357 | frieren | H164e RNG calibration | step ~65875 mid-EP12 | 6.05% trajectory | terminal ~01:08Z+1; test eval ~02:35Z+1 |
 | #1364 | nezuko | H190 mirror p=0.25 | EP9 (step 59833) | **6.1386 LEAD −0.011pp (within noise)** | terminal ~03:00Z+1 (50/50 within RNG floor) |
-| #1365 | tanjiro | H191 mirror × tau_y=2.0 | step 59780 mid-EP10 | 6.3982 +0.26pp behind | terminal ~04:30Z+1 (NULL-expected boundary probe) |
+| #1365 | tanjiro | H191 mirror × tau_y=2.0 | EP10 banked (step 62501) | 6.3672 +0.23pp behind | EP9+EP10 PASS @ 00:08Z; WSS_x slope intact (−0.0109); terminal ~01:55Z+1 (NULL-expected boundary probe, mechanism confirmed) |
 | #1362 | alphonse | H188 mirror × DropPath=0.15 | step 64690 mid-EP9 | 6.20% / WSS_agg 7.05% | HEALTHY heartbeat live; in band with H112 EP9 |
 | #1363 | askeladd | H189 AdamW × tau_y=3.0 no-mirror | step 65221 EP9-boundary | 6.50% / WSS_agg 7.36% | HEALTHY |
 | #1356 | fern | H186 mirror × AdamW (kill+restart cancelled 19:05Z) | step 64504 mid-EP9 | EP9 boundary pending | HEALTHY |
@@ -209,6 +209,7 @@ Zero idle students.
 - RNG floor on **val_abupt = ±0.053pp at N=2 EP11** — claims must exceed 2× floor (±0.106pp) to count as real signal
 - **WSS_z slope is NOT the canonical cohort-screening axis** (N=2 finding: ±0.083pp half-range, LARGEST not smallest) — supersedes earlier H164d single-draw hypothesis
 - VP smallest RNG floor at ±0.036pp → cross-axis compounds clear test_VP gate
+- **Actual EP boundaries** (tanjiro 00:08Z calibration via volume-points curriculum): EP6=48902, EP9=59780, EP10=62501, EP11=65184, EP13(terminal)≈70657 — supersedes uniform 10864-step assumption used in legacy PR kill-thresholds
 
 ---
 
