@@ -1,6 +1,18 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 05:30Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4 fleet: 8/8 active
+**Updated**: 2026-05-29 05:45Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4 PIVOTED: 8 eval-only TTA variants
+
+---
+
+## Round 4 Pivot Notice
+
+Original Round 4 (PRs #1389–#1396) was assigned with two systemic errors:
+1. **Recipe spec mismatched actual yw2a5dyl config** (tau_y=1.3 actual vs 3.0 cited; mirror_augmentation boolean vs `--mirror-augment-p`; grad-clip-norm 0.5 vs grad-clip 1.0; many flags non-existent on tay)
+2. **Budget infeasible**: yw2a5dyl ran 874.4 min (~14.6h) — full H185 retrain incompatible with 6h SENPAI_TIMEOUT_MINUTES cap
+
+All 7 affected PRs CLOSED with apology + reassignment. New Round 4 = 8 parallel eval-only TTA variants, all building on `eval_tta_h209.py` infrastructure, no training, no recipe dependence.
+
+BASELINE.md corrected with actual yw2a5dyl recipe (commit pending).
 
 ---
 
@@ -12,7 +24,7 @@
 | **SOTA H185+TTA (PR #1382)** | **5.9755%** | **5.8221%** | **6.7214%** | 3.4400% | 3.6806% |
 | Transolver-3 target (Morgan) | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% |
 
-**Gap to test_WSS target**: 0.87pp (13% relative) — ~6h compute remaining.
+**Gap to test_WSS target**: 0.87pp (13% relative)
 
 **Merge gate**: val_abupt < **5.9755%** AND test_abupt < **5.8221%**
 **Paper floor**: test_VP ≤ 3.421, test_SP ≤ 3.577, test_WSS ≤ 6.727
@@ -21,42 +33,58 @@ Source: W&B `bx3t1vdw` | H185 checkpoint: `yw2a5dyl` EP13 EMA
 
 ---
 
-## Round 4 Active Fleet (all 8 students WIP as of 05:30Z)
+## H185 Recipe (ACTUAL — verified from W&B config)
 
-| PR | Student | Hypothesis | Type | ETA |
-|---|---|---|---|---|
-| #1389 | alphonse | H215: Ultra-low-LR continuation EP13→EP16 (lr=1e-6 constant) | training-light | ~2h |
-| #1390 | askeladd | H223: Rotational TTA ±2° on H185 (eval-only) | eval-only | ~45min |
-| #1391 | edward | H222: Tau_x channel upweight 2.0 — address WSS_x slope flip at training time | training-heavy | ~3.5h |
-| #1392 | fern | H216: H185 + tau_y=2.0 retrain (de-escalate below Finding J boundary) | training-heavy | ~3.5h |
-| #1393 | frieren | H217: H185 EP15 cosine extension from EP13 checkpoint | training-light | ~2h |
-| #1394 | nezuko | H218: Mirror p=0.5 + tau_y=2.0 — untested (p × tau_y) grid cell | training-heavy | ~4h |
-| #1395 | tanjiro | H221: Lion→AdamW switch at EP10 — late-epoch optimizer refinement | training-heavy | ~3.5h |
-| #1396 | thorfinn | H219: Fresh H185 seed + within-recipe LERP test | training-heavy | ~5h |
+- optimizer=lion, β1=0.9, β2=0.99
+- lr=9e-5, weight_decay=5e-4, batch_size=4 per GPU (DDP×8)
+- 13 epochs, lr_cosine_t_max=13, lr_warmup_epochs=1, lr_min=1e-6
+- **tau_y_loss_weight=1.3** (NOT 3.0), **tau_z_loss_weight=1.67** (NOT 2.0)
+- surface_loss_weight=2.0, volume_loss_weight=0.5
+- **mirror_augmentation=True** (boolean — not `--mirror-augment-p`)
+- ema_decay=0.999, **grad_clip_norm=0.5** (NOT 1.0)
+- vol_points_schedule=`0:16384:3:32768:6:49152:9:65536`
+- use_qk_norm=True, rff_num_features=16, pos_encoding_mode=string_separable
+- model: 5 layers, hidden 512, heads 4, slices 128
+- Runtime: **874.4 min total (~14.6h on 8 GPUs)** — incompatible with current 6h cap
 
-**Expected first result**: H223 (askeladd, ~45min)
+**Mirror augmentation NOT on tay** — lives on `askeladd/h148-mirror-augmentation` and `fern/h183-mirror-aug-tau-y-3p0-compound` only.
 
 ---
 
-## Current Research Focus
+## Round 4 Active Fleet (PIVOTED — all 8 eval-only TTA variants)
 
-### Primary Lever: WSS_x Slope Repair
-Finding Q established TTA cannot recover the WSS_x slope flip from H185. **Training-time interventions targeting the slope** are the only known path to further WSS improvement:
-- H222 (edward): tau_x upweight 2.0 — direct channel gradient pressure
-- H221 (tanjiro): Lion→AdamW switch at EP10 — late-epoch optimizer change
-- H216 (fern): tau_y=2.0 retrain — reduce tau_y below Finding J boundary
-- H218 (nezuko): p=0.5 + tau_y=2.0 — untested grid cell combining both mitigations
+| PR | Student | Hypothesis | Mechanism | ETA |
+|---|---|---|---|---|
+| #1390 | askeladd | H223: TTA rot_x ±2° | rotation around x-axis | ~45min |
+| #1397 | alphonse | H224: TTA coordinate scale ±2% | y,z scaling | ~45min |
+| #1398 | edward | H225: TTA rot_x angle sweep {1°,2°,4°,8°} | optimal rotation angle | ~60min |
+| #1399 | fern | H226: TTA-mirror on H112 (PR #1283) | Finding N N=4 extension | ~45min |
+| #1400 | frieren | H227: TTA rot_z ±2° | rotation around z-axis | ~45min |
+| #1401 | nezuko | H228: 4-pass TTA stack (mirror + rot_x±2°) | additive stacking test | ~45min |
+| #1402 | tanjiro | H229: TTA Gaussian noise σ=0.001 | smooth equivariance | ~45min |
+| #1403 | thorfinn | H230: TTA on H183/H190/H148 | Finding Q N=5 extension | ~45min |
 
-If WSS_x slope is restored AND val_abupt is competitive → TTA stacks on top → SOTA candidate.
+**Expected first result**: ~30-45min (depends on which student dispatches first)
 
-### Secondary Lever: Continuation Strategies
-H185 EP13 is the strongest weight starting point in program history. Low-risk extensions:
-- H215 (alphonse): lr=1e-6 constant, 3 EP — optimizer-anchored refinement
-- H217 (frieren): cosine extended to EP15 — unconverged trajectory
-- H219 (thorfinn): fresh seed + within-recipe LERP — test same-recipe basin connectivity
+---
 
-### Tertiary Lever: New TTA Geometry
-- H223 (askeladd): Rotational TTA ±2° — extends TTA equivariance to rotation axis model hasn't absorbed
+## Strategic Logic
+
+The Round 4 pivot exploits a key insight from Finding Q: TTA on mirror-aug-trained models gives +4-5bp uniform gain by averaging over decorrelated noise on equivariance axes the model has absorbed.
+
+**New axes to explore** (each could give additional gain on top of H209):
+- **askeladd/edward** (H223/H225): rotation around x-axis (vertical pitch) — model NOT trained for this axis
+- **frieren** (H227): rotation around z-axis (yaw) — orthogonal axis
+- **alphonse** (H224): coordinate scale — geometric scale equivariance
+- **tanjiro** (H229): Gaussian noise — smooth equivariance (no specific axis)
+- **nezuko** (H228): 4-pass stack — tests if multiple TTA axes compound
+
+**Transfer tests** (apply existing TTA to other checkpoints):
+- **fern** (H226): TTA-mirror on non-mirror-trained H112 — extends Finding N control floor
+- **thorfinn** (H230): TTA-mirror on other mirror-trained checkpoints (H148/H183/H190) — extends Finding Q to N=5
+
+Any winner from #1390/#1397/#1398/#1400/#1401/#1402 → IMMEDIATE merge candidate
+Any non-trivial result from #1399/#1403 → strengthens program finding
 
 ---
 
@@ -72,8 +100,8 @@ H185 EP13 is the strongest weight starting point in program history. Low-risk ex
 | Q | this cycle | TTA on mirror-aug = +4-5bp gain, WSS_x slope NOT recovered |
 | R | this cycle | Linear mode connectivity absent for tay-track checkpoints (N=2 pairs) |
 | S | this cycle | delta_mirror_WSS diagnostic: p=0.5 → ~0, p=0.25 → +0.002pp |
-| T | this cycle | Permutation barrier at sub-block granularity (even 1 cross-recipe block destroys) |
-| U | this cycle | H112 basin radius < 0.005 in H183 direction — definitively closes linear-interp arm |
+| T | this cycle | Permutation barrier at sub-block granularity |
+| U | this cycle | H112 basin radius < 0.005 in H183 direction |
 
 ---
 
@@ -81,21 +109,15 @@ H185 EP13 is the strongest weight starting point in program history. Low-risk ex
 
 - No capacity additions (≥+1% param overhead → slope flattening)
 - **No ensembles** (Morgan directive). TTA is NOT ensembling.
-- DDP 8 GPUs every training run
-- z-axis tau_z LOCKED at 2.0
-- WSS_x slope sign = BASIN-DISRUPTION DIAGNOSTIC (positive = flipped = bad)
+- DDP 8 GPUs every run
+- z-axis tau_z LOCKED at the trained value
+- WSS_x slope sign = BASIN-DISRUPTION DIAGNOSTIC
 - data/loader.py, data/preload.py, data/split_manifest.json — READ-ONLY
-- EP boundaries: EP6=48902, EP9=59780, EP10=62501, EP11=65184, EP13≈70657
-
----
-
-## H185 Recipe (current SOTA backbone)
-
-Lion, lr=9e-5, β1=0.9 β2=0.99, wd=5e-4, batch=4, 13 EP cosine, tau_y=3.0, tau_z=2.0, mirror p=0.25, compound H150-β, lr-warmup=1 EP, ema-decay=0.999 | TTA via eval_tta_h209.py (2-pass y-mirror average)
+- SENPAI_TIMEOUT_MINUTES=360 hard cap — incompatible with full H185 retrain (14.6h)
 
 ---
 
 ## Human Researcher Directives
 
 - **Morgan (Issue #1056, 2026-05-28 15:27Z)**: Ensembles BANNED. "PUSH HARD". test_WSS < 5.85% target.
-- Last advisor update to Morgan: 2026-05-29 05:30Z (Round 4 fleet deployed)
+- Last advisor update to Morgan: 2026-05-29 05:45Z (Round 4 pivot — apology + reassignment)

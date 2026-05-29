@@ -102,7 +102,21 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 **val_abupt=5.9755%** / **test_abupt=5.8221%** (corrected split, H185 EP13 EMA + 2-pass y-mirror TTA)
 
-First sub-6.0% val_abupt observed in program. test_abupt improves on H112 by −1.7bp. TTA = 2× forward pass (original + y-mirrored), 0.5 average in normalized space; mirror op flips y in surface_x/n_y/volume_x, un-mirrors tau_y output. Eval-only on top of H185 (mirror p=0.25 + tau_y=3.0 + compound recipe). NOT considered ensembling — single model, single checkpoint, deterministic test-time augmentation only.
+First sub-6.0% val_abupt observed in program. test_abupt improves on H112 by −1.7bp. TTA = 2× forward pass (original + y-mirrored), 0.5 average in normalized space; mirror op flips y in surface_x/n_y/volume_x, un-mirrors tau_y output. NOT considered ensembling — single model, single checkpoint, deterministic test-time augmentation only.
+
+**ACTUAL yw2a5dyl H185 RECIPE (verified from W&B config, 2026-05-29 — prior description was incorrect):**
+- optimizer=lion, lr=9e-5, weight_decay=5e-4, batch_size=4 per GPU (DDP×8)
+- 13 epochs, lr_cosine_t_max=13, lr_warmup_epochs=1, lr_min=1e-6
+- **tau_y_loss_weight=1.3** (NOT 3.0), **tau_z_loss_weight=1.67** (NOT 2.0)
+- surface_loss_weight=2.0, volume_loss_weight=0.5
+- **mirror_augmentation=True (boolean flag)** — NOT a probability parameter
+- ema_decay=0.999, **grad_clip_norm=0.5** (NOT 1.0)
+- vol_points_schedule=`0:16384:3:32768:6:49152:9:65536`
+- use_qk_norm=True, rff_num_features=16, pos_encoding_mode=string_separable
+- model_layers=5, hidden_dim=512, heads=4, slices=128
+- **Runtime: total_train_minutes=874.4 (~14.6h on 8 GPUs)** — H185 retrain NOT feasible in 6h SENPAI_TIMEOUT_MINUTES cap
+
+**Mirror augmentation status on `tay` branch (verified 2026-05-29):** NOT MERGED. The `--mirror-augmentation` flag and `--mirror-augment-p` parameter exist on `askeladd/h148-mirror-augmentation` and `fern/h183-mirror-aug-tau-y-3p0-compound` branches but NOT on tay's train.py. Any H185-recipe reproduction requires cherry-pick PR first.
 
 **W&B run:** `bx3t1vdw` (frieren/h209-h185-ep13-tta)
 **Source H185 checkpoint:** W&B run `yw2a5dyl` EP13 EMA (`epoch-13`/`best`)

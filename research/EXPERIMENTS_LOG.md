@@ -1,3 +1,33 @@
+## 2026-05-29 05:45 — Round 4 PIVOTED: closed PRs #1389/#1391/#1392/#1393/#1394/#1395/#1396, reassigned all 7 students to eval-only TTA variants
+
+### Why closed
+
+Two systemic errors in the original Round 4 assignment, caught by students edward and thorfinn BEFORE launching:
+
+1. **Recipe spec mismatched actual W&B config of yw2a5dyl**:
+   - Cited: `tau_y=3.0, tau_z=2.0, --mirror-augment-p 0.25, --grad-clip 1.0, --enable-residual-positions, --save-best-checkpoint`
+   - Actual: `tau_y=1.3, tau_z=1.67, mirror_augmentation=True (boolean), --grad-clip-norm 0.5, --lr-cosine-t-max 13`
+   - Other flags don't exist on tay
+2. **Mirror augmentation never merged to tay** — lives on `askeladd/h148-mirror-augmentation` and `fern/h183-mirror-aug-tau-y-3p0-compound` only. H185 recipe reproduction requires cherry-pick PR first.
+3. **Budget infeasible** — yw2a5dyl `total_train_minutes=874.4 (~14.6h)`. SENPAI_TIMEOUT_MINUTES=360 (6h) cap. Full H185 retrain CANNOT FIT in budget.
+
+BASELINE.md corrected with actual yw2a5dyl recipe.
+
+### New Round 4 fleet (eval-only TTA variants, PRs #1397–#1403 + #1390 retained)
+
+| PR | Student | Hypothesis | Type | W&B group |
+|---|---|---|---|---|
+| #1390 | askeladd | H223: TTA rot_x ±2° on H185 EP13 (RETAINED from original assignment) | eval-only | h223-askeladd-rotation-tta |
+| #1397 | alphonse | H224: TTA coordinate scale perturbation ±2% on H185 EP13 | eval-only | h224-alphonse-scale-tta |
+| #1398 | edward | H225: TTA rot_x angle sweep θ ∈ {1°,2°,4°,8°} on H185 EP13 | eval-only | h225-edward-rotx-sweep |
+| #1399 | fern | H226: TTA-mirror applied to H112 baseline checkpoint (Finding N N=4 extension) | eval-only | h226-fern-tta-h112 |
+| #1400 | frieren | H227: TTA z-axis rotation ±2° on H185 EP13 (orthogonal to H223 x-axis) | eval-only | h227-frieren-rotz-tta |
+| #1401 | nezuko | H228: 4-pass TTA stack — orig + mirror + rot_x±2° on H185 EP13 | eval-only | h228-nezuko-4pass-tta |
+| #1402 | tanjiro | H229: TTA Gaussian noise σ=0.001 on H185 EP13 | eval-only | h229-tanjiro-noise-tta |
+| #1403 | thorfinn | H230: TTA-mirror on H148/H183/H190 (Finding Q N=5 extension) | eval-only | h230-thorfinn-tta-cross |
+
+All 8 sprints are ~45-60min eval-only. No training. Each builds on `eval_tta_h209.py` infrastructure. Each variant adds a new equivariance axis (rotation/scale/noise) or transfers existing TTA to other checkpoints.
+
 ## 2026-05-29 05:30 — PRs #1389–#1396: Round 4 — 8 new sprints assigned (all students WIP)
 
 ### Fleet summary
