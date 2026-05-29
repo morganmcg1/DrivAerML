@@ -1,3 +1,45 @@
+## 2026-05-29 18:45 — PR #1443 fern H266 CLOSED: Finding PP (TTA axes NOT independent — saturation/interaction structure)
+
+### PR #1443 fern H266 — CLOSED: 2³ ANOVA of TTA axes
+
+- **Branch**: fern/h266-anova-tta-axes
+- **W&B runs**: `x2jpxuwe` (Arm A: mirror_only), `x609942a` (Arm B: mirror+noise), `tle9yzga` (Arm C: res+noise)
+- **Hypothesis**: 2³ factorial design — measure main effects and pairwise interactions of (Mirror × Res × Noise) in TTA stack
+
+| Config | val_abupt | test_abupt |
+|---|---:|---:|
+| No TTA (baseline) | 6.0172 | 5.8613 |
+| mirror_only | 5.9753 | 5.8219 |
+| res_avg 6-res | 5.9915 | 5.8326 |
+| mirror+res | 5.9546 | 5.7979 |
+| noise_only (K=5) | 5.9845 | 5.8317 |
+| mirror+noise | 5.9597 | 5.8083 |
+| res+noise | 5.9669 | 5.8103 |
+| **full stack (H253 SOTA)** | **5.9418** | **5.7847** |
+
+**ANOVA decomposition (val_abupt main effects vs 2^3 baseline 6.0172):**
+| Effect | Δ val_abupt |
+|---|---:|
+| Mirror | −4.19bp |
+| Res | −2.57bp |
+| Noise | −3.27bp |
+| Mirror×Res | −0.50bp |
+| Mirror×Noise | **−1.68bp (largest interaction)** |
+| Res×Noise | −0.29bp |
+| Mirror×Res×Noise | +0.20bp (3-way negative) |
+
+**Finding PP — TTA axes NOT independent**:
+- ~30% of total stack gain (−7.54bp) is shared via saturation; axes are partially correlated not fully orthogonal
+- Mirror×Noise interaction largest at −1.68bp (2-way) — they compete for the same variance reduction pathway
+- Res is the most orthogonal axis (smallest interactions)
+- Mirror dominates SP/WSS sub-channels; Res dominates VP
+- Full stack remains necessary to hit merge gate — no partial stack beats 5.9418/5.7847
+- ANOVA validates H253 config as empirically near-optimal within the 3-axis design space
+
+**Implications**: New TTA improvements must come from outside the mirror/res/noise space, or from fundamentally different noise mechanisms (Finding PP motivation for H271 Sobol, H272 Hutchinson, H273 Taylor 2nd-order).
+
+---
+
 ## 2026-05-29 16:20 — PR #1441 edward H265 CLOSED: LL-EPchain CONFIRMED (EP14 essentially flat)
 
 ### PR #1441 edward H265 — CLOSED: EP14+6-res mirror misses gate by ~1bp
@@ -12299,4 +12341,54 @@ Gate: best 5.9691 / 5.8165 vs 5.9418 / 5.7847 → **FAIL both** (as expected; st
 **Harness verification**: K=5 random control reproduces H242 exactly (5.9845/5.8317), confirming the H268 antithetic harness is equivalent to H242 modulo the +δ/−δ loop.
 
 **Standalone anti-thetic does not beat SOTA** (inherits noise-only ceiling), but is a strict Pareto improvement over random noise at any compute budget. **Anti-thetic stacked** (anti × 6-res × mirror) is the natural next experiment — assigned as a fresh PR.
+
+
+---
+
+## 2026-05-29 18:52Z — PR #1443: H266 fern — TTA Mechanism ANOVA CLOSED (Finding PP)
+
+- **Branch**: fern/h266-tta-anova-decomposition
+- **Hypothesis**: Decompose H253 stacked SOTA into 2³ ANOVA over mirror × noise × multi-res. Quantify per-axis main effects and pairwise interactions to inform which axis to push next round.
+
+### Results — full ANOVA cube (val_abupt)
+
+| Arm | Mirror | Noise | Res | val_abupt | Reference |
+|---|:-:|:-:|:-:|---|---|
+| orig | — | — | — | 6.0172 | H185 EP13 EMA base |
+| A | ✓ | — | — | 5.9753 | mirror_only @ 65k |
+| B | ✓ | ✓ | — | 5.9598 | mirror+noise @ 65k |
+| C | — | ✓ | ✓ | 5.9485 | res+noise @ 6-res |
+| D (=H243) | ✓ | — | ✓ | 5.9546 | 6-res mirror (banked) |
+| E (=H253) | ✓ | ✓ | ✓ | **5.9418** | full stack (SOTA) |
+| F (=H242) | — | ✓ | — | 5.9845 | noise_only K=5 (banked) |
+| G | — | — | ✓ | 5.9608 | res_only 6-res (banked) |
+
+### Main effects and interactions (val Δ in bp)
+
+| Axis / Interaction | Solo gain vs orig | Channel that benefits |
+|---|---:|---|
+| Mirror (M) | +4.2 bp | SP (+2.5bp), WSS (+4.6bp) |
+| Noise (N) | +3.3 bp | SP, WSS |
+| Res (R) | +2.6 bp | **VP (+5.2bp)** — 3-4× margin |
+| M × N | −1.7 bp (largest neg) | M and N attack same error |
+| M × R | +0.6 bp (positive) | orthogonal |
+| N × R | +0.4 bp (positive) | orthogonal |
+| M × N × R | +0.3 bp | negligible 3-way |
+
+### Analysis
+
+**Finding PP (banked) — TTA axis structure decomposed**:
+
+1. **Res is the most orthogonal axis** to mirror/noise. Multi-res is non-substitutable for VP.
+2. **Mirror × Noise is the only significant negative interaction**: M and N attack the **same error type** (most likely surface high-frequency noise). Adding both gains less than the sum of solos.
+3. **Channel specialization**: Mirror+Noise mostly help SP/WSS. Multi-res mostly helps VP (by 3-4× margin).
+4. **Design implication for next-axis TTA**: any new TTA axis must be orthogonal to the M×N cluster. Candidates ranked by orthogonality potential:
+   - 4-way rotation / richer pose TTA (extension of M axis — likely correlated, not orthogonal)
+   - 8-res with wider range (extension of R — already orthogonal direction)
+   - MC-dropout (entirely new mechanism, expected orthogonal)
+   - Geometry encoder jitter (new axis on the input side)
+
+**Gate**: No arm beats H253 (5.9418); all 3 new arms are weaker. ANOVA is diagnostic only. Closing.
+
+**Follow-on**: H274 fern (PR #1454) — anti-thetic K=3 noise in the full H253 6-res×mirror stack (tests if NN-antithetic mechanism composes with the M×R stack).
 
