@@ -65,6 +65,10 @@ class EvalConfig:
     # Checkpoint source — fetch from W&B by run_id + artifact alias.
     run_id: str = "yw2a5dyl"
     checkpoint: str = "epoch-13"  # artifact alias; can also be "best"
+    # H244: optional override — when set, skip the W&B download and load
+    # this local file directly. Useful for evaluating per-epoch checkpoints
+    # produced by --save-every-epoch within a training run.
+    local_checkpoint_path: str = ""
     use_ema: bool = True  # validates that loaded checkpoint_source == "ema"
     cache_root: str = "outputs/h236_eval/_artifacts"
 
@@ -563,13 +567,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     # Download/locate the checkpoint on rank 0 only, then broadcast the path.
     cache_root = Path(cfg.cache_root)
     if state.is_main:
-        ckpt_path = download_checkpoint(
-            entity=cfg.wandb_entity,
-            project=cfg.wandb_project,
-            run_id=cfg.run_id,
-            alias=cfg.checkpoint,
-            cache_root=cache_root,
-        )
+        if cfg.local_checkpoint_path:
+            ckpt_path = Path(cfg.local_checkpoint_path)
+            if not ckpt_path.exists():
+                raise FileNotFoundError(
+                    f"local_checkpoint_path does not exist: {ckpt_path}"
+                )
+        else:
+            ckpt_path = download_checkpoint(
+                entity=cfg.wandb_entity,
+                project=cfg.wandb_project,
+                run_id=cfg.run_id,
+                alias=cfg.checkpoint,
+                cache_root=cache_root,
+            )
         ckpt_path_str = str(ckpt_path)
     else:
         ckpt_path_str = ""
