@@ -12208,3 +12208,95 @@ Sanity bit-identical to faa8ymsy — confirms eval_multi_res.py has no regressio
 **Implication for H243/H255**: wider IS better. Trend is monotone in range width. H255 (7-res {32k-164k}) should add 0.2-0.5bp more.
 
 **Follow-on assigned**: fern H255 — 7-res {32k-164k} extension.
+
+---
+
+## 2026-05-29 17:58Z — PR #1439: H263 frieren — Multi-EP SWA CLOSED (Finding LL-SWA-null)
+
+- **Branch**: frieren/h263-multi-ep-swa
+- **Hypothesis**: avg(EP14, EP15) + 6-res mirror TTA should land in a wider basin and yield TTA-time gain beyond either single-EP checkpoint.
+
+### Results
+
+| split | metric | H263 avg(EP14,EP15)+6-res | H244 EP15+6-res (baseline) | Δ (bp) | Gate |
+|---|---|---|---|---|---|
+| val | **abupt_axis_mean_rel_l2_pct** | **5.9510** | 5.9452 | **+5.8** | <5.9418 ❌ |
+| test | **abupt_axis_mean_rel_l2_pct** | **5.7956** | 5.7896 | **+6.0** | <5.7847 ❌ |
+| test | volume_pressure_rel_l2_pct | 3.3912 | 3.3882 | +3.0 | — |
+| test | surface_pressure_rel_l2_pct | 3.6647 | 3.6595 | +5.2 | — |
+| test | wall_shear_rel_l2_pct | 6.7010 | 6.6947 | +6.3 | — |
+| **single-res sanity** | avg(EP14,EP15) val_orig | **6.0138** | EP15: 6.0079, EP14: 6.0169 | linear midpoint | — |
+
+W&B runs: `xglk6msf` (sanity), `wg6n9fj5` (6-res mirror TTA).
+
+### Analysis
+
+**Finding LL-SWA-null (banked)**: SWA on adjacent (1-epoch-apart) late-cosine EMA snapshots does NOT yield a wider basin or TTA-time gain. The averaged checkpoint sits at the linear midpoint of EP14/EP15 in performance space (6.0138 ≈ midpoint of 6.0169 and 6.0079), consistent with the two snapshots living in the same convex region of the loss surface. No basin-width discount, no TTA-diversity benefit.
+
+The +6bp regression is uniform across all channels (wss_y worst at +12bp). The basin-width prediction failed because adjacent late-cosine EMAs at a decaying LR tail are essentially the same minimum + noise — averaging noise with noise gives smaller-magnitude noise, not a wider basin. SWA needs trajectory diversity (e.g., EP6 peak-LR + EP15 terminal-LR) which adjacent steps lack.
+
+**Artifact retained**: `tools/average_ema_checkpoints.py` (auto-detects state-dict key, averages fp tensors in fp32, preserves metadata) — usable for future EP6+EP15 / cross-recipe SWA experiments.
+
+---
+
+## 2026-05-29 17:58Z — PR #1432: H256 nezuko — H183 Stack Portability CLOSED (Finding HH-H183-6res-asymmetry)
+
+- **Branch**: nezuko/h256-h183-stack-portability
+- **Hypothesis**: H253 stacked recipe (6-res × mirror × weight-noise K=5) is portable from H185 EP13 to H183 EP13 EMA (run `5k58uzqc`).
+
+### Results
+
+| Config | val_abupt | test_abupt | test_VP | test_SP | test_WSS | W&B |
+|---|---|---|---|---|---|---|
+| H183 mirror_only (H235 ref) | 6.0524 | **5.7920** | — | — | — | (PR #1407) |
+| H183 3-res mirror_res_avg (H245 ref) | 6.022 | **5.7965** | — | — | — | (PR #1416) |
+| **H256 H183 6-res mirror_res_avg (sanity)** | **5.9825** | **5.8666** | 3.4686 | 3.7628 | 6.7848 | `kxj2ijto` |
+| **H256 H183 stacked 60-pass** | **5.9676** | **5.8525** | 3.4603 | 3.7553 | 6.7707 | `pezhn08t` |
+
+Gate: val 5.9676 vs 5.9418 → **+25.8bp FAIL**; test 5.8525 vs 5.7847 → **+67.8bp FAIL**.
+
+### Stack contribution decomposition on H183
+
+| Step | val Δ vs prev | test Δ vs prev |
+|---|---|---|
+| mirror_only → 3-res mirror_res_avg | −30bp ✓ | +4bp ✗ |
+| 3-res → 6-res mirror_res_avg | −40bp ✓ | **+70bp ✗** ← 6-res HARMS H183 test |
+| 6-res → 6-res + weight-noise stacked | −15bp ✓ | −14bp ✓ |
+| **Total H235 → H256 stacked** | **−85bp ✓** | **+60bp ✗** |
+
+### Analysis
+
+**Finding HH-H183-6res-asymmetry (banked)**: H183 mirror-trained recipe does NOT benefit from extended (6-res) TTA on test even though it does on val. The 6-res extension regresses H183 test by **+70bp** (5.7965 → 5.8666). Weight-noise recovers only ~14bp. The 6-res TTA test gain is **checkpoint-specific to H185** — H183 likely sits at the extrapolation edge of its training distribution at K=131072 (bias growth dominates variance reduction).
+
+Multi-res TTA portability is **NOT** model-agnostic for the deep extension. The stack design must be re-validated per base model. H183 stops at 3-res for test gain; H185 benefits all the way to 6-res. This rules out H183 as a viable alternate base for our TTA stack.
+
+**Bug-fix note**: NCCL timeout fix in `trainer_runtime.py` (timeout_minutes kwarg) is the same fix that landed in H253 via `SENPAI_NCCL_TIMEOUT_MINUTES` env var — already in tay; no cherry-pick needed.
+
+---
+
+## 2026-05-29 17:58Z — PR #1442: H268 askeladd — Anti-thetic Noise Standalone CLOSED (Finding NN-antithetic)
+
+- **Branch**: askeladd/h268-antithetic-weight-noise
+- **Hypothesis**: Anti-thetic ±δ weight-noise pairs cancel the linear-gradient Taylor term, beating K-matched random sampling at near-equal compute.
+
+### Results (`abupt_axis_mean_rel_l2_pct`, lower-is-better)
+
+| variant | passes | val | test | Δval vs orig | Δtest vs orig | W&B |
+|---|---:|---:|---:|---:|---:|---|
+| orig (clean weights) | 1 | 6.0172 | 5.8621 | — | — | — |
+| K=5 random (H242 control) | 5 | 5.9845 | 5.8317 | −0.0327 | −0.0304 | `n2j8u2lo` |
+| **K=3 antithetic** | 6 | **5.9715** | **5.8191** | −0.0457 | −0.0430 | `q54sbhwm` |
+| **K=5 antithetic** | 10 | **5.9691** | **5.8165** | −0.0481 | −0.0456 | `6wf7lf6z` |
+
+Gate: best 5.9691 / 5.8165 vs 5.9418 / 5.7847 → **FAIL both** (as expected; standalone noise inherits H242 noise-only ceiling).
+
+### Analysis
+
+**Finding NN-antithetic (banked)**: Anti-thetic K=3 (6 passes) beats random K=5 (5 passes) by +1.30bp val / +1.26bp test at near-equal compute. K=3→K=5 anti shows fast diminishing returns (+0.24bp val, +0.26bp test), confirming the linear-gradient term is near-cancelled by the first anti-thetic pair, leaving only the quadratic-curvature variance which decays slowly.
+
+**Per-channel insight**: Variance reduction concentrates where baseline variance is largest — val tau_y gets −26bp from K=5-rand → K=3-anti, vs −7bp on vol_p (already low-variance). The mechanism preferentially attacks the high-variance channels.
+
+**Harness verification**: K=5 random control reproduces H242 exactly (5.9845/5.8317), confirming the H268 antithetic harness is equivalent to H242 modulo the +δ/−δ loop.
+
+**Standalone anti-thetic does not beat SOTA** (inherits noise-only ceiling), but is a strict Pareto improvement over random noise at any compute budget. **Anti-thetic stacked** (anti × 6-res × mirror) is the natural next experiment — assigned as a fresh PR.
+
