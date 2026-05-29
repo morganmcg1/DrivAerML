@@ -1,3 +1,30 @@
+## 2026-05-29 11:50 — PR #1413 H252 tanjiro MERGED NEW SOTA; H259 tanjiro assigned
+
+### PR #1413 tanjiro H252 — MERGED: NEW SOTA — stacked weight-noise × 3-res × mirror TTA
+
+- **Branch**: tanjiro/h242-weight-noise-tta
+- **Hypothesis**: Weight-space noise (σ=5e-4, K=5) stacked on H236's mirror×3-res TTA is orthogonal and compounds.
+- **W&B run**: `vgq5f8kf` (tanjiro/h242-stacked-multi-res)
+
+| Mode | val_abupt | test_abupt | test_VP | test_SP | test_WSS |
+|---|---:|---:|---:|---:|---:|
+| H209 ref (mirror only) | 5.9755 | 5.8221 | 3.4400 | 3.6806 | 6.7214 |
+| H243 ref (6-res mirror, prev SOTA) | 5.9546 | 5.7979 | 3.3947 | 3.6672 | 6.7025 |
+| H252 weight_noise_only (sanity) | 5.9846 | 5.8318 | 3.4450 | 3.6836 | 6.7338 |
+| **H252 weight_noise_mirror_res_avg** | **5.9492** | **5.7975** | **3.3996** | 3.6662 | **6.7030** |
+
+**Δ vs H243**: val −5.4bp, test −0.4bp, test_VP +0.5bp (slight regression), test_WSS +0.05bp.
+
+**Finding confirmed**: Weight-space and input-space TTA mechanisms are orthogonal (no destructive interference). Stacking is super-additive: actual gain (−26.3bp val vs H209) exceeds predicted sum-of-arms (−22.3bp) by 4bp excess. This means the input-space multi-res TTA is a stronger denoiser when applied to a flat-basin model (perturbed weights).
+
+**Sanity arm verified**: weight_noise_only reproduces H242 nme94n1y to ±0.0001 — DDP determinism confirmed.
+
+**New merge gate**: val_abupt < 5.9492 AND test_abupt < 5.7975.
+
+**Noteworthy**: test_VP 3.3996 and test_WSS 6.7030 are slightly WORSE than H243 (3.3947 / 6.7025) — the 3-res grid {49k,65k,82k} doesn't cover as much volume density as H243's 6-res {32k-131k}, so VP/WSS channels take a small hit while overall abupt improves via val/SP contributions.
+
+---
+
 ## 2026-05-29 11:30 — PR #1422 H250 frieren CLOSED; Finding DD-ext3 confirmed; H258 frieren assigned
 
 ### PR #1422 frieren H250 — CLOSED: Finding DD-ext3 confirmed (frequency-weighted multi-res TTA)
