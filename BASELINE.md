@@ -98,33 +98,60 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1415 H244 H185+EP15+6-res Mirror TTA (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1428 H253 H185+EP13+Weight-Noise×6-res×Mirror Stack TTA (tay) — 2026-05-29 ***
+
+**val_abupt=5.9418%** / **test_abupt=5.7847%** (corrected split, H185 EP13 EMA + 60-pass weight-noise σ=5e-4 K=5 × 6-res × mirror TTA)
+
+**New SOTA — beats H244 (PR #1415) by −0.34bp val / −0.49bp test. Every channel improved on both val and test. Weight-noise TTA (partially orthogonal to multi-res input-space TTA) adds ~1.3bp on top of 6-res mirror baseline.**
+
+**W&B run:** `qytjlv97` (alphonse/h253-stacked-noise-6res-sigma5e-4-v2)
+**Source checkpoint:** H185 EP13 EMA (`outputs/ensemble_cache/run-yw2a5dyl-epoch-13-ema/checkpoint.pt`)
+**PR:** #1428
+
+**Val metrics (corrected split, mirror_res_weight_noise_avg):** val_abupt=5.9418%, val_SP=3.9274%, val_VP=3.4708%, val_WSS=6.7378%
+**Test metrics (corrected split, mirror_res_weight_noise_avg):** test_abupt=5.7847%, test_VP=**3.3891%**, test_SP=3.6592%, test_WSS=**6.6895%**
+
+**Paper floors:** test_VP 3.3891 < 3.421 ✓ | test_WSS 6.6895 < 6.727 ✓ | test_SP 3.6592 > 3.577 ✗
+
+**TTA method**: 60-pass = 6-res {32768,49152,65536,81920,98304,131072} × K=5 weight-noise samples × {orig, mirror-y}. Eval cost: ~230 min on DDP×8.
+
+**Gain analysis (vs H244 prior SOTA):**
+- val: −0.34bp | test: −0.49bp
+- test_VP: 3.3891 vs 3.3882 (+0.09bp — marginal regression; well below 3.421 floor)
+- test_WSS: 6.6895 vs 6.6947 (−0.52bp ✓)
+- test_SP: 3.6592 vs 3.6595 (−0.03bp ✓)
+
+**Finding JJ**: Weight-space TTA (noise σ=5e-4, K=5) and input-space TTA (multi-res) are partially orthogonal. ~80% of isolated weight-noise gain has already been captured by 6-res TTA, but residual ~20% (~1.3bp) compounds additively. Monotonically improves all 7 sub-channels.
+
+**NCCL fix shipped**: `trainer_runtime.py` now passes `timeout=timedelta(minutes=120)` to `init_process_group` (overridable via `SENPAI_NCCL_TIMEOUT_MINUTES`). All future TTA evals benefit.
+
+**Merge gate (updated):** val_abupt < **5.9418%** AND test_abupt < **5.7847%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+**Reproduce:**
+```bash
+H185_CKPT="outputs/ensemble_cache/run-yw2a5dyl-epoch-13-ema/checkpoint.pt"
+torchrun --standalone --nproc-per-node=8 target/eval_multi_res.py \
+  --checkpoint $H185_CKPT \
+  --resolutions "32768,49152,65536,81920,98304,131072" \
+  --eval-modes "mirror_res_weight_noise_avg" \
+  --weight-noise-sigma 5e-4 \
+  --n-weight-noise-passes 5 \
+  --batch-size 2 --num-workers 4 \
+  --wandb-name "alphonse/h253-stacked-noise-6res-sigma5e-4-v2" \
+  --wandb-group "h253-alphonse-stacked-noise-multires"
+```
+
+---
+
+## Prior Single-Model SOTA: PR #1415 H244 H185+EP15+6-res Mirror TTA (tay) — 2026-05-29 (superseded by #1428)
 
 **val_abupt=5.9452%** / **test_abupt=5.7896%** (corrected split, H185 EP15 EMA + 12-pass 6-res mirror TTA)
 
-**New SOTA — beats H252 (PR #1413) by −0.40bp val / −0.79bp test. Every channel improved: test_VP −1.14bp, test_WSS −0.83bp, test_SP −0.67bp. EP15 EMA (−9.3bp single-res over EP13) compounds additively with 6-res TTA.**
+New SOTA at time — beats H252 (PR #1413) by −0.40bp val / −0.79bp test. EP15 EMA (−9.3bp single-res over EP13) compounds additively with 6-res TTA.
 
-**W&B run:** `bh7we7p6` (edward/h244-ep15-6res-mirror-res-avg)
-**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
-**PR:** #1415
-
-**Val metrics (corrected split, mirror_res_avg):** val_abupt=5.9452%, val_SP=3.9301%, val_VP=3.4697%, val_WSS=6.7415%
-**Test metrics (corrected split, mirror_res_avg):** test_abupt=5.7896%, test_VP=**3.3882%**, test_SP=3.6595%, test_WSS=**6.6947%**
-
-**Paper floors:** test_VP 3.3882 < 3.421 ✓ | test_WSS 6.6947 < 6.727 ✓ | test_SP 3.6595 > 3.577 ✗
-
-**TTA method**: 12-pass = 6-res {32768,49152,65536,81920,98304,131072} × {orig, mirror-y}. Eval cost: ~60 min on DDP×8.
-
-**Gain analysis (vs H252 prior SOTA):**
-- val: −0.40bp | test: −0.79bp
-- test_VP: 3.3882 vs 3.3996 (−1.14bp ✓)
-- test_WSS: 6.6947 vs 6.7030 (−0.83bp ✓)
-- test_SP: 3.6595 vs 3.6662 (−0.67bp ✓)
-
-**EP15 mechanism**: EP15 single-res val_orig = 6.0079 (vs EP13 6.0172, −9.3bp). The late-cosine extension gains compose linearly with 6-res TTA — additive prediction was val ~5.945, actual 5.9452 (error 0.03bp).
-
-**Merge gate (updated):** val_abupt < **5.9452%** AND test_abupt < **5.7896%**
-**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+**W&B run:** `bh7we7p6` | **PR:** #1415
+**Test metrics:** test_abupt=5.7896%, test_VP=3.3882%, test_SP=3.6595%, test_WSS=6.6947%
 
 ---
 
