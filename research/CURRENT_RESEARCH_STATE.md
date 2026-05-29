@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 08:50Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4f: 9 active
+**Updated**: 2026-05-29 09:20Z | Branch: `tay` | **NEW SOTA: H236 multi-res TTA PR #1408 MERGED** | Round 4f: 9 active | **HIGH-EV stacking PR #1413 extended**
 
 ---
 
@@ -166,6 +166,7 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | **DD** | this cycle | **α-sweep on equal-bias TTA pairs (same-model orig+mirror) is U-shaped at α=0.5 — theoretically guaranteed. Skip α-sweeps on same-architecture TTA pairs. (alphonse H238 #1409)** |
 | **EE (prelim N=2)** | this cycle | **Multi-res TTA bonus is CHECKPOINT-INVARIANT at ~14bp. H185 (8bp mirror) +14bp; H183 (50bp mirror) +14bp. Mirror and multi-res mechanisms are independent — bonus does NOT scale with mirror sensitivity. N=3 pending (thorfinn H246).** |
 | **DD-extension** | this cycle | **Per-channel α-sweep on same-checkpoint TTA ALSO collapses to 0.5 per channel (frieren H241). H235 Δ measures prediction disagreement, NOT bias asymmetry. α-tuning is futile at both global and per-channel levels for same-checkpoint mirror TTA.** |
+| **FF (prelim)** | this cycle | **Weight-space noise σ ∈ [1e-5, 5e-4] gives MONOTONIC improvement on H185 EP13 (tanjiro H242 #1413). σ=5e-4: noise_only val 5.9845 (vs orig 6.0172, −33bp); +mirror→val 5.9674 (8bp better than H209). H185 sits in wide flat basin. Mechanism ORTHOGONAL to mirror+multi-res — stacked version (H242 extension) is highest-EV SOTA push.** |
 
 ---
 

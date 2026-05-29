@@ -1,3 +1,26 @@
+## 2026-05-29 09:20 — H242 tanjiro SEND-BACK with stacking arm + Finding FF (preliminary)
+
+### PR #1413 tanjiro H242 — SENT BACK: weight-noise TTA beats OLD gate, fails NEW, but ORTHOGONAL → stacking opportunity
+
+- **Hypothesis**: Weight-space Gaussian noise TTA on H185 EP13 EMA — small σ perturbs weights, averaging K=5 forward passes smooths the loss landscape
+- **W&B runs**: `tt5p2eif` (σ=1e-5), `7bazcz5a` (σ=5e-5), `p5wffq42` (σ=1e-4), `nme94n1y` (σ=5e-4) — group `h242-tanjiro-weight-noise-tta`
+
+| σ_rel | val_abupt | test_abupt | test_VP | test_SP | test_WSS | noise_only val | noise_only test |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0 (orig) | 6.0172 | 5.8613 | 3.5410 | 3.9673 | 6.8104 | — | — |
+| H209 ref | 5.9755 | 5.8221 | 3.4400 | 3.6806 | 6.7214 | — | — |
+| 1e-5 | 5.9858 | 5.8319 | 3.4439 | 3.9487 | 6.7761 | 6.0030 | 5.8482 |
+| 5e-5 | 5.9789 | 5.8253 | 3.4414 | 3.9447 | 6.7683 | 5.9943 | 5.8399 |
+| 1e-4 | 5.9745 ✅old | 5.8211 ✅old | 3.4395 | 3.9419 | 6.7638 | 5.9892 | 5.8350 |
+| **5e-4** | **5.9674 ✅old** | **5.8152 ✅old** | 3.4370 | 3.9370 | **6.7150** ✓floor | 5.9845 | 5.8317 |
+
+- **Outcome**: σ=5e-4 PASSES old H209 gate by 8bp val / 7bp test but FAILS new H236 gate by 6bp val / 7bp test. test_WSS=6.7150 PASSES paper floor 6.727 ✓ (only floor met of {VP, SP, WSS}).
+- **Finding FF (preliminary)**: Weight-space noise σ ∈ [1e-5, 5e-4] gives MONOTONIC improvement on H185 EP13. noise_only mode shows the local loss surface is FLAT (averaging perturbed copies is consistently better than the orig point estimate at every σ tested). H185 EP13 sits in a wide flat basin — qualitatively different from inter-recipe sharpness (Findings R/U). σ extension to {1e-3, 5e-3, 1e-2} would characterize basin edge.
+- **Mechanism is ORTHOGONAL to mirror and multi-res**: weight-space perturbation is independent of input-space TTA mechanisms. If gains stack additively: H236 (−14bp from H209) + H242 (−8bp from H209) = −22bp val / −21bp test → val 5.9535 / test 5.8011 → BOTH PASS NEW gate by 7-8bp.
+- **Action**: SEND BACK with H252 stacking arm — apply σ=5e-4 weight-noise (K=5) on top of H236's mirror × multi-res TTA. Eval-only ~75-90min. SENPAI_TIMEOUT_MINUTES=120. If passes → IMMEDIATE merge candidate.
+
+---
+
 ## 2026-05-29 08:50 — H241 frieren close + H250 frieren assigned
 
 ### PR #1412 frieren H241 — CLOSED: Finding DD-extension (per-channel), no SOTA
