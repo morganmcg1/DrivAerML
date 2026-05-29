@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 06:00Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4c: 5 new + 3 still-running TTA sprints
+**Updated**: 2026-05-29 06:15Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4c: 6 TTA sprints active (alphonse re-spun to H238)
 
 ---
 
@@ -16,13 +16,15 @@
 
 ---
 
-## Findings Just Banked (Round 4b)
+## Findings Just Banked (Round 4b/c)
 
 **Finding V** (askeladd H223, PR #1390): Rotation TTA falsified at all angles θ ∈ [0.1°, 2°] around x-axis. H185 has zero rotational invariance. Catastrophic degradation (val_abupt 26-42% at θ=1-2°) confirms rotation changes flow physics, not just frame.
 
 **Finding W** (alphonse H224, PR #1397): Coordinate scale TTA falsified at ε=±2%. Catastrophic 22.6% val_abupt. Geometric scale ↔ Reynolds regime change. Same mechanism as Finding V.
 
-**Implication**: Mirror y is the SOLE validated TTA augmentation for H185. The TTA geometric perturbation arm is FULLY EXHAUSTED. Future TTA must use non-geometric mechanisms (input subset sampling, weight averaging, etc.).
+**Finding X** (alphonse H232 abort, PR #1405 closed): Intra-trajectory SWA on yw2a5dyl IS NOT RUNNABLE — per-epoch EMA checkpoints were never persisted by train.py (single overwriting checkpoint slot). Reproducing requires a full H185 retrain (14.6h vs 6h cap). SWA arm CLOSED on the operational axis until checkpointing changes.
+
+**Implication**: Mirror y is the SOLE validated TTA augmentation for H185. The TTA geometric perturbation arm is FULLY EXHAUSTED. Weight-space averaging is BLOCKED by checkpoint-persistence. Future TTA must use non-geometric, non-weight-space mechanisms.
 
 ---
 
@@ -36,17 +38,18 @@
 | #1402 | tanjiro | H229: TTA Gaussian noise σ=0.001 | Running — no metrics yet |
 | #1403 | thorfinn | H230: TTA cross-checkpoint (H148/H183/H190) | Finished W&B (val 5.988, test 5.867 — doesn't pass gate); awaiting SENPAI-RESULT |
 
-### New assignments Round 4c (5 PRs, just opened)
+### New assignments Round 4c (5 PRs opened, 1 re-spun)
 
 | PR | Student | Hypothesis | Mechanism |
 |---|---|---|---|
 | #1404 | askeladd | H231: Mesh point subsampling TTA (80% retention, 4-pass) | input subset sampling |
-| #1405 | alphonse | H232: Intra-trajectory SWA on yw2a5dyl EP10-13 EMA | Polyak/SWA single-recipe |
+| ~~#1405~~ | alphonse | ~~H232: Intra-trajectory SWA~~ ABORTED (Finding X) → respun to **#1409 H238** | — |
 | #1406 | edward | H233: Point order permutation TTA (4-pass) | attention perm invariance test |
 | #1407 | frieren | H235: TTA-mirror cross-checkpoint sweep N≥6 | Finding Q extension bank |
 | #1408 | nezuko | H236: Multi-resolution TTA (vol_points {49k, 65k, 82k}) | resolution averaging |
+| #1409 | alphonse | H238: Weighted TTA mirror blending α-sweep {0.3-0.7} on H185 EP13 | TTA α-tuning |
 
-**Expected first result**: ~30-45min. Budget remaining: ~4h.
+**Expected first result**: ~30-45min. Budget remaining: ~3.5h.
 
 ---
 
@@ -59,7 +62,7 @@
 
 **Round 4c bets**:
 - **askeladd H231**: Mesh subsampling — IF physics is preserved by sub-sampling, may add 2-5bp like mirror TTA
-- **alphonse H232**: Single-trajectory SWA — if weights flatten the local minimum, gain a few bp on val
+- **alphonse H238** (re-spun from #1405): Weighted TTA mirror blending α-sweep — H209's α=0.5 may not be optimum; small shift could shave 1-2bp
 - **edward H233**: Permutation TTA — null result expected (model should be perm-invariant), but cheap insurance + finding-worthy if it gains anything
 - **frieren H235**: Cross-checkpoint TTA bank — won't beat SOTA but produces N≥6 publication evidence for Finding Q
 - **nezuko H236**: Multi-resolution TTA — IF model has good cross-resolution conditioning, 1-3bp gain
@@ -100,6 +103,7 @@ Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 | U | this cycle | H112 basin radius < 0.005 in H183 direction |
 | **V** | this cycle | **Rotation TTA falsified at ANY angle (Finding V banked from askeladd H223)** |
 | **W** | this cycle | **Coordinate scale TTA falsified at ε=±2% (Finding W banked from alphonse H224)** |
+| **X** | this cycle | **Intra-trajectory SWA blocked on yw2a5dyl — per-EP EMA never persisted by train.py (Finding X banked from alphonse H232 abort #1405)** |
 
 ---
 

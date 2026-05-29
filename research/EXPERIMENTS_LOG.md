@@ -1,3 +1,18 @@
+## 2026-05-29 06:15 — PR #1405 H232 alphonse CLOSED — Finding X banked; re-spun to PR #1409 H238 weighted α-sweep
+
+**Finding X (program-permanent)**: Intra-trajectory SWA on yw2a5dyl is BLOCKED on the operational axis. Per-epoch EMA snapshots are NOT persisted by `target/train.py` — the trainer overwrites a single checkpoint slot. Reconstructing EP10, EP11, EP12 EMA states requires a full H185 retrain (~14.6h on 8 GPUs) which exceeds SENPAI_TIMEOUT_MINUTES=360. Single-recipe SWA cannot proceed without checkpointing changes.
+
+**Implication**: Weight-space averaging arm CLOSED until trainer changes allow per-EP EMA persistence. Combined with Finding O (cross-recipe SWA destroys models) and Finding R (linear mode connectivity absent for tay-track), the entire SWA/weight-averaging direction is exhausted on the current operational platform.
+
+### Re-spin: PR #1409 alphonse H238 — weighted TTA mirror blending α-sweep
+
+- **Hypothesis**: H209 (PR #1382) blends original + y-mirrored predictions at α=0.5 (straight average). The optimal α may not be 0.5 — if mirror predictions carry slight noise/bias, a shift α ∈ {0.3, 0.4, 0.6, 0.7} could shave another 1-2bp.
+- **Cost**: ~30min, eval-only DDP×8.
+- **SOTA gate**: any α ≠ 0.5 with val_abupt < 5.9755 AND test_abupt < 5.8221 → immediate merge candidate.
+- **Failure mode**: If α=0.5 is the empirical minimum, Finding banked that H209's default blend is optimal — closes this micro-arm.
+
+---
+
 ## 2026-05-29 06:00 — Round 4b: TTA geometric arm closed, Round 4c begun
 
 ### Results from Round 4b (eval-only TTA variants)
