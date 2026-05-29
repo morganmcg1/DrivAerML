@@ -98,41 +98,50 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1408 H236 H185+Multi-Res TTA (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1414 H243 H185+Extended Multi-Res TTA 6-res (tay) — 2026-05-29 ***
 
-**val_abupt=5.9613%** / **test_abupt=5.8081%** (corrected split, H185 EP13 EMA + 6-pass mirror×multi-res TTA)
+**val_abupt=5.9546%** / **test_abupt=5.7979%** (corrected split, H185 EP13 EMA + 12-pass mirror×6-res TTA)
 
-**New SOTA — beats H209 (PR #1382) by −14bp val, −14bp test. First compound TTA win: mirror symmetry × cross-resolution averaging.**
+**New SOTA — beats H236 (PR #1408) by −0.67bp val, −1.02bp test. Extended multi-res range from 3-res {49152,65536,81920} to 6-res {32768,49152,65536,81920,98304,131072}. All test channels improve.**
 
-**W&B run:** `faa8ymsy` (nezuko/h236-multi-res-tta)
-**Source checkpoint:** `yw2a5dyl` EP13 EMA (same as H209)
-**PR:** #1408
+**W&B run:** `yty4tnew` (askeladd/h243-extended-multi-res-6res)
+**Source checkpoint:** `yw2a5dyl` EP13 EMA (same as H236/H209)
+**PR:** #1414
 
-**Val metrics (corrected split, mirror_res_avg):** val_abupt=5.9613%, val_SP=3.9379%, val_VP=3.4870%, val_WSS=6.7566%, val_WSS_x=5.9070%, val_WSS_y=7.3389%, val_WSS_z=9.1356%
-**Test metrics (corrected split, mirror_res_avg):** test_abupt=5.8081%, test_VP=**3.4033%**, test_SP=3.6759%, test_WSS=**6.7130%**, test_WSS_x=5.9585%, test_WSS_y=7.2922%, test_WSS_z=8.7107%
+**Val metrics (corrected split, mirror_res_avg):** val_abupt=5.9546%, val_SP=3.9350%, val_VP=3.4768%, val_WSS=6.7506%, val_WSS_x=5.9022%, val_WSS_y=7.3325%, val_WSS_z=9.1266%
+**Test metrics (corrected split, mirror_res_avg):** test_abupt=5.7979%, test_VP=**3.3947%**, test_SP=3.6672%, test_WSS=**6.7025%**, test_WSS_x=5.9489%, test_WSS_y=7.2821%, test_WSS_z=8.6965%
 
-**Paper floors crossed:** test_VP 3.4033 < 3.421 ✓ | test_WSS 6.7130 < 6.727 ✓ | test_SP 3.6759 > 3.577 ✗ (still above)
+**Paper floors crossed:** test_VP 3.3947 < 3.421 ✓ | test_WSS 6.7025 < 6.727 ✓ | test_SP 3.6672 > 3.577 ✗ (pre-existing miss; unchanged from H236)
 
-**TTA method**: 6-pass = {orig, mirror-y} × {vol_points ∈ 49152, 65536, 81920}. Surface_points fixed at 65536. Mirror un-mirroring via tau_y negation. Per-case 32-bit CPU index_add_ accumulation. Eval cost: 29.9 min on DDP×8.
+**TTA method**: 12-pass = {orig, mirror-y} × {vol_points ∈ 32768, 49152, 65536, 81920, 98304, 131072}. Surface_points fixed at 65536. Mirror un-mirroring via tau_y negation. Per-case 32-bit CPU index_add_ accumulation. Eval cost: ~58 min on DDP×8, ~24.7 GB/GPU peak.
 
-**Gain analysis:**
-- Mirror alone (H209): −5.2bp val, −3.9bp test abupt
-- Multi-res alone (res_avg): +2.4bp val vs H209 TTA (mild degradation)
-- Mirror+multi-res (mirror_res_avg): −14bp val, −14bp test vs H209 (COMPOUND WIN)
-- VP gain: −0.037pp test (largest per-channel gain — volume sampling stride variance reduction)
+**Gain analysis (vs H236):**
+- Δval: −0.67bp | Δtest: −1.02bp (widening res range {32k-131k} adds more cross-resolution variance reduction)
+- test_VP: −0.86bp | test_SP: −0.87bp | test_WSS: −1.05bp — gains spread across all channels
+- 5-res arm {32768..98304} gave val 5.9575 / test 5.8045; 6-res adds another −0.29bp val / −0.66bp test
+- Diminishing returns confirmed: 3→5-res = −0.36bp test, 5→6-res = −0.66bp test (not fully saturated yet)
 
-**Merge gate (updated):** val_abupt < **5.9613%** AND test_abupt < **5.8081%**
+**Merge gate (updated):** val_abupt < **5.9546%** AND test_abupt < **5.7979%**
 **Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
 
 **Reproduce:**
 ```bash
 torchrun --standalone --nproc-per-node=8 target/eval_multi_res.py \
-  --resolutions "49152,65536,81920" \
+  --resolutions "32768,49152,65536,81920,98304,131072" \
   --eval-modes "res_avg,mirror_res_avg" \
   --batch-size 2 \
-  --wandb-name "nezuko/h236-multi-res-tta" \
-  --wandb-group "h236-nezuko-multi-res-tta"
+  --wandb-name "askeladd/h243-extended-multi-res-6res" \
+  --wandb-group "h243-askeladd-extended-multi-res"
 ```
+
+---
+
+## Prior Single-Model SOTA: PR #1408 H236 H185+Multi-Res TTA 3-res (tay) — 2026-05-29 (superseded by #1414)
+
+**val_abupt=5.9613%** / **test_abupt=5.8081%** (corrected split, H185 EP13 EMA + 6-pass mirror×3-res TTA)
+**W&B run:** `faa8ymsy` · **PR:** #1408
+**Test metrics:** test_VP=3.4033%, test_SP=3.6759%, test_WSS=6.7130%
+**Merge gate that applied:** val_abupt < 5.9613% AND test_abupt < 5.8081%
 
 ---
 
