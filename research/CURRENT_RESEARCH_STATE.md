@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 06:15Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4c: 6 TTA sprints active (alphonse re-spun to H238)
+**Updated**: 2026-05-29 06:55Z | Branch: `tay` | **SOTA: H185+TTA PR #1382** | Round 4c: 7 sprints active (thorfinn+fern re-spun to mesh-subsample on H148/H183)
 
 ---
 
@@ -30,26 +30,30 @@
 
 ## Round 4c Active Fleet (as of 06:00Z)
 
-### Still running from Round 4b (3 PRs)
+### Round 4b closed (3 PRs)
 
-| PR | Student | Hypothesis | Status |
+| PR | Student | Hypothesis | Outcome |
 |---|---|---|---|
-| #1399 | fern | H226: TTA-mirror on H112 (Finding N extension) | Running — W&B val ≈ 7.59 confirms Finding N |
-| #1402 | tanjiro | H229: TTA Gaussian noise σ=0.001 | Running — no metrics yet |
-| #1403 | thorfinn | H230: TTA cross-checkpoint (H148/H183/H190) | Finished W&B (val 5.988, test 5.867 — doesn't pass gate); awaiting SENPAI-RESULT |
+| ~~#1399~~ | fern | H226: TTA-mirror on H112 | CLOSED — Finding N extension N=4 banked (+1.45val/+1.63test pp degradation) |
+| #1402 | tanjiro | H229: TTA Gaussian noise σ=0.001 | Running — W&B shows val_tta 10.35% (catastrophic) — pending terminal |
+| ~~#1403~~ | thorfinn | H230: TTA cross-checkpoint (H148/H183/H190) | CLOSED — Finding Q extension N=4 banked; H148+TTA passes test gate (5.8056) but fails val (6.1714) |
 
-### New assignments Round 4c (5 PRs opened, 1 re-spun)
+### Round 4c active fleet (7 PRs, 3 re-spins)
 
 | PR | Student | Hypothesis | Mechanism |
 |---|---|---|---|
-| #1404 | askeladd | H231: Mesh point subsampling TTA (80% retention, 4-pass) | input subset sampling |
+| #1404 | askeladd | H231: Mesh point subsampling TTA on H185 (80%, 4-pass) | input subset sampling |
 | ~~#1405~~ | alphonse | ~~H232: Intra-trajectory SWA~~ ABORTED (Finding X) → respun to **#1409 H238** | — |
 | #1406 | edward | H233: Point order permutation TTA (4-pass) | attention perm invariance test |
 | #1407 | frieren | H235: TTA-mirror cross-checkpoint sweep N≥6 | Finding Q extension bank |
 | #1408 | nezuko | H236: Multi-resolution TTA (vol_points {49k, 65k, 82k}) | resolution averaging |
 | #1409 | alphonse | H238: Weighted TTA mirror blending α-sweep {0.3-0.7} on H185 EP13 | TTA α-tuning |
+| #1410 | thorfinn | H239: Mesh-subsample TTA on H148 EP13 (best-test-margin) | mesh subsample, new checkpoint |
+| #1411 | fern | H240: Mesh-subsample TTA on H183 EP13 (closest-to-val-gate, 13bp gap) | mesh subsample, new checkpoint |
 
-**Expected first result**: ~30-45min. Budget remaining: ~3.5h.
+**Expected first result**: ~30min. Budget remaining: ~3h.
+
+**Mesh-subsample TTA coverage**: 3 students (askeladd #1404 on H185, thorfinn #1410 on H148, fern #1411 on H183) testing the SAME mechanism on the 3 strongest mirror-aug checkpoints. Coordinated triangle — closest-to-merge axis is fern (H183 needs only 13bp val close).
 
 ---
 
@@ -61,11 +65,13 @@
 3. A different starting checkpoint with different basin structure (Finding Q extension)
 
 **Round 4c bets**:
-- **askeladd H231**: Mesh subsampling — IF physics is preserved by sub-sampling, may add 2-5bp like mirror TTA
-- **alphonse H238** (re-spun from #1405): Weighted TTA mirror blending α-sweep — H209's α=0.5 may not be optimum; small shift could shave 1-2bp
-- **edward H233**: Permutation TTA — null result expected (model should be perm-invariant), but cheap insurance + finding-worthy if it gains anything
-- **frieren H235**: Cross-checkpoint TTA bank — won't beat SOTA but produces N≥6 publication evidence for Finding Q
-- **nezuko H236**: Multi-resolution TTA — IF model has good cross-resolution conditioning, 1-3bp gain
+- **askeladd #1404 H231**: Mesh subsampling on H185 — if physics preserved by sub-sampling, may add 2-5bp like mirror TTA
+- **alphonse #1409 H238** (re-spun from #1405): Weighted TTA mirror blending α-sweep — H209's α=0.5 may not be optimum
+- **edward #1406 H233**: Permutation TTA — null result expected (model should be perm-invariant)
+- **frieren #1407 H235**: Cross-checkpoint TTA bank — N≥6 Finding Q publication evidence (4 already in: H185/H183/H190/H148 from thorfinn H230)
+- **nezuko #1408 H236**: Multi-resolution TTA — if good cross-resolution conditioning, 1-3bp gain
+- **thorfinn #1410 H239** (re-spun from #1403): Mesh-subsample TTA on H148 EP13 — best-test-margin checkpoint + new mechanism. H148+TTA already passes test gate (5.8056), just blocked by val (6.1714)
+- **fern #1411 H240** (re-spun from #1399): Mesh-subsample TTA on H183 EP13 — closest-to-val-gate (13bp gap). Best mechanical odds of breaking through.
 
 Any winner (val < 5.9755 AND test < 5.8221) → IMMEDIATE merge candidate.
 

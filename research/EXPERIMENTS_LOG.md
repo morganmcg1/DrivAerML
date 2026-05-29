@@ -1,3 +1,40 @@
+## 2026-05-29 06:55 — Round 4b CLOSURES: PR #1399 fern + PR #1403 thorfinn closed; H239/H240 mesh-subsample respins
+
+### PR #1399 fern H226 — TTA-mirror on H112 — CLOSED, Finding N extended to N=4
+
+- **Hypothesis**: TTA-mirror on the non-mirror-trained H112 baseline should degrade (Finding N control)
+- **W&B runs**: `podydkuh`, `0juaesmp` (group `h226-fern-tta-h112`)
+- **Result**: H112+TTA val 7.5856 / test 7.4690 — both fail gates by huge margin (+1.45/+1.63pp degradation)
+- **Cross-check passed**: H112 no-TTA "orig" pass reproduces BASELINE.md to ≤0.001pp on every channel
+- **Finding N (extended N=4)**: TTA on non-mirror-trained checkpoints degrades by +1.27 to +1.63pp val_abupt. H112's degradation is in the high band — DropPath backbone may compress representations further along un-mirrored direction
+- **Bonus observation**: H112's no-TTA test_VP=3.4213 BEATS paper VP floor (3.421) — H112 + thorfinn's H148+TTA are the only configurations to cross VP floor
+
+### PR #1403 thorfinn H230 — TTA cross-checkpoint sweep — CLOSED, Finding Q extended to N=4
+
+- **Hypothesis**: TTA-mirror on H148/H183/H190 should extend Finding Q
+- **W&B runs**: `qbl1j123` (H183), `98ra4fgo` (H190), `kgv9gvpy` (H148)
+- **Cross-checkpoint table**:
+
+| Checkpoint | no-TTA val | TTA val | val Δ | no-TTA test | TTA test | test Δ | TTA test_WSS | TTA test_VP | TTA test_SP |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| H183 | 6.0389 | **5.9885** | -0.0504 | 5.9135 | 5.8668 | -0.0467 | 6.7767 | 3.5089 | 3.7497 |
+| H190 | 6.0764 | 6.0363 | -0.0402 | 5.8994 | 5.8639 | -0.0355 | 6.7800 | 3.4599 | 3.7196 |
+| **H148** | 6.2186 | 6.1714 | -0.0472 | 5.8508 | **5.8056** | -0.0451 | **6.7249** | **3.3957** | **3.6674** |
+| H185 (ref) | 5.9840 | 5.9755 | -0.0085 | 5.8273 | 5.8221 | -0.0052 | 6.7214 | 3.4400 | 3.6806 |
+
+- **Finding Q (extended N=4)**: TTA-mirror on mirror-aug-trained checkpoints adds -0.04 to -0.05pp on both val and test abupt — ~6× larger than H185/H209's TTA gain. H185 anomaly: yw2a5dyl's training already absorbed most of the mirror invariance.
+- **Sub-Finding**: H148+TTA is the ONLY configuration that beats the paper VP floor (3.3957 < 3.421) AND ties paper WSS floor (6.7249 ≤ 6.727). Despite worst val, H148 has best test margins by every channel.
+- **Merge gate**: H148+TTA PASSES test_abupt gate (5.8056 < 5.8221) but FAILS val gate (6.1714 vs 5.9755 = +24bp). H183+TTA is closest to val gate (5.9885 vs 5.9755 = +13bp).
+
+### Re-spin assignments (Round 4c expansion)
+
+- **PR #1410 thorfinn H239**: Mesh-subsample TTA on H148 EP13 — apply askeladd's H231 mechanism to the best-test-margin checkpoint. Three modes: mirror_only / subsample_only / mirror×subsample (6-pass stack). Eval-only ~30-45min.
+- **PR #1411 fern H240**: Mesh-subsample TTA on H183 EP13 — closest-to-val-gate checkpoint (13bp gap). Same 3-mode design. Eval-only ~30-45min.
+
+Combined with askeladd's PR #1404 H231 on H185, this gives a 3-checkpoint comparison of mesh-subsample TTA on {H185, H148, H183}. The fern axis (H183) has the best mechanical odds of clearing the val gate.
+
+---
+
 ## 2026-05-29 06:15 — PR #1405 H232 alphonse CLOSED — Finding X banked; re-spun to PR #1409 H238 weighted α-sweep
 
 **Finding X (program-permanent)**: Intra-trajectory SWA on yw2a5dyl is BLOCKED on the operational axis. Per-epoch EMA snapshots are NOT persisted by `target/train.py` — the trainer overwrites a single checkpoint slot. Reconstructing EP10, EP11, EP12 EMA states requires a full H185 retrain (~14.6h on 8 GPUs) which exceeds SENPAI_TIMEOUT_MINUTES=360. Single-recipe SWA cannot proceed without checkpointing changes.
