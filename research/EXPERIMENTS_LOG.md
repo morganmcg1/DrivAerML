@@ -1,3 +1,86 @@
+## 2026-05-29 05:15 — PR #1388: H214 sub-alpha sweep H112↔H183 (askeladd, **CLOSED — Finding U: basin radius < 0.005**)
+
+- **Branch**: `askeladd/h214-sub-alpha-h112-h183` (CLOSED, not merged)
+- **W&B runs**: `i6bfxjpk, v0e1v0f2, grxax2gt, 7tstwx96, nla4tffg, 3fhpky87, ysewmpgm` (7 alphas in parallel)
+- **Hypothesis**: probe H112 basin radius at fine α ∈ {0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.2}
+
+### Result table
+
+| α | val_abupt | Δ val_abupt | WSS_x slope | Functional? |
+|---:|---:|---:|---:|---|
+| 0.000 (H112 ref) | 6.1358 | baseline | −0.093 | ✓ |
+| 0.005 | **11.48** | +5.35pp (1.87×) | −0.840 | ✗ |
+| 0.010 | 12.69 | +6.56pp | −0.830 | ✗ |
+| 0.025 | 17.19 | +11.06pp | −0.795 | ✗ |
+| 0.050 | 23.13 | +17.00pp | −0.721 | ✗ |
+| 0.100 | 34.13 | +28.00pp | −0.225 | ✗ |
+| 0.150 | 45.84 | +39.71pp | **+0.112** (flip) | ✗ |
+| 0.200 | 57.19 | +51.06pp | +0.542 | ✗ |
+
+Sharp basin: H112 basin radius in H183 direction < 0.005. Disjoint basins, definitively closes linear-interp arm.
+
+### Finding U (program-permanent): H112 basin radius < 0.005
+
+Combined with O+R+T = 4-operator coverage of H112↔H183 connectivity. Permutation-symmetry barrier is structural, not a tuning artifact.
+
+WSS_x slope at small α (0.005-0.05) is MORE negative than baseline (−0.84 vs −0.09), then flips at α≈0.12. The slope diagnostic is preserved under small permutation noise — supporting evidence for Finding R/T mechanism.
+
+## 2026-05-29 05:10 — PR #1387: H213 block-wise splice H112↔H183 (tanjiro, **CLOSED — Finding T: permutation barrier sub-block**)
+
+- **Branch**: `tanjiro/h213-layer-splice-h112-h183` (CLOSED, not merged)
+- **W&B runs**: `awl4hxem, 80iaxoea, 5ragl8wb, axefwtlk, w3o4rby9` (k=0..4; k=5 reused H210 H112 sanity)
+- **Hypothesis**: First k H112 blocks + last (5−k) H183 blocks may localize basin disruption to specific depth
+
+### Result table
+
+| k | val_abupt | test_WSS | Functional? |
+|---|---:|---:|---|
+| 5 (all H112) | **6.1358** | 6.7523 | ✓ canonical |
+| 4 (1 H183 block) | **35.22** | 37.07 | ✗ DESTROYED |
+| 3 | 52.61 | 54.90 | ✗ |
+| 2 | 65.14 | 68.84 | ✗ |
+| 1 | 80.33 | 84.37 | ✗ |
+| 0 | 94.31 | 100.43 | ✗ |
+
+Monotonic k=4→k=0 (35%→94%) confirms each H112↔H183 interface adds ~constant permutation-mismatch noise.
+
+### Finding T (program-permanent): Permutation barrier operates at sub-block granularity
+
+Even ONE H183 block in the H112 stack destroys model. Block-internal coherence preserved but residual-stream interface causes catastrophic permutation mismatch. Confirms Finding O/R mechanism at finer granularity.
+
+## 2026-05-29 05:05 — PR #1386: H212 mirror invariance profile (edward, **CLOSED — Finding S: `delta_mirror_WSS` diagnostic**)
+
+- **Branch**: `edward/h212-mirror-invariance-profile` (CLOSED, not merged)
+- **W&B runs**: `89jj6f3d, wu0avbzr, cab3gi27, d4a8tq6u, 9qffxckg` (5 EP13 cohort checkpoints)
+- **Hypothesis**: profile `delta_mirror_WSS = test_WSS_mirrored − test_WSS_original` across mirror-aug regimes
+
+### Result table
+
+| Model | Recipe | delta_mirror_WSS (pp) | Regime |
+|---|---|---:|---|
+| H148 | p=0.5 | **−0.0019** | tight invariance |
+| H183 | p=0.5 + tau_y | **+0.0014** | tight |
+| H185 | mirror p=0.25 + Lion compound + tau_y=3.0 | **+0.0020** | tight |
+| H190 | p=0.25 | **+0.0209** | ~10× looser |
+| H112 | no aug | **+4.6835** | control floor |
+| H189 (H200 ref) | no aug | +4.532 | control floor |
+
+### Finding S (program-permanent): `delta_mirror_WSS` is the canonical mirror-aug regime diagnostic
+
+- 4 orders of magnitude across regimes
+- Single ~3.5min eval per model
+- **All future training experiments should log delta_mirror_WSS as a checkpoint-time diagnostic**
+
+### Per-channel breakdown (interesting physics)
+
+- For no-aug models: WSS_z is MOST affected (+6.08pp on H112), counter-intuitive given y is the symmetry axis
+- For partial-invariance (H190 p=0.25): WSS_y is MOST affected (+0.0424pp) — y-axis residual leak as expected
+- Edward's pre-registered TTA predictions before reading H192/H206/H209/H211 results: rank ordering CORRECT; underestimated H209 SOTA win by failing to account for variance-reduction floor at delta≈0
+
+### Cross-validation of Finding L
+
+H148 (p=0.5) is ~11× more mirror-invariant than H190 (p=0.25). Bimodal mirror-aug regime confirmed.
+
 ## 2026-05-29 04:35 — PR #1382: H209 TTA mirror-aug on H185 EP13 (frieren, **MERGED — NEW SOTA**)
 
 - **Branch**: `frieren/h209-tta-mirror-h185-ep13` (MERGED, advisor branch tay)
