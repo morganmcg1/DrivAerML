@@ -3,7 +3,7 @@
 **Updated**: 2026-05-29 01:42Z | Branch: `tay` | SOTA: H112 PR #1283 (single-model) / PR #1102 (K=8 ensemble)
 **Constraint**: ~12 hours of training compute remain (Issue #1056 human directive, 2026-05-27)
 
-## 🚨 H185 TEST EVAL LANDED 01:40Z — NOT A MERGE — Anti-compound on slope
+## 🚨 H185 CLOSED 02:00Z — NOT A MERGE — Anti-compound on slope
 
 **Critical finding (NEW PROGRAM-PERMANENT)**: GradNorm + mirror-aug compound produces **FLATTER** val→test slope than either alone — slope-preservation interventions ANTI-COMPOUND when stacked.
 
@@ -27,8 +27,10 @@
 
 | PR | Student | Hypothesis | step (mid-EP9/10) | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #1353 | thorfinn | H185 GradNorm × mirror-aug | step 68347 (96.2% complete) | **6.0253 LEAD −0.18pp WIDENING** | TERMINAL MERGE CANDIDATE (~02:00-03:00Z+1, ahead of original projection) |
-| #1357 | frieren | H164e RNG calibration | step ~65875 mid-EP12 | 6.05% trajectory | terminal ~01:08Z+1; test eval ~02:35Z+1 |
+| #1353 | **CLOSED** | H185 GradNorm × mirror-aug | TERMINAL | 6.0172 val PASS / 6.764 test FAIL | CLOSED: val→test slope FLATTENED to −0.046pp (+169bp vs H112), WSS_x INVERTED. Anti-compound on slope. |
+| #1357 | **CLOSED** | H164e RNG calibration | TERMINAL | 6.084 val / 6.751 test | CLOSED: N=2 RNG calibration complete. Recipe-mean WSS slope −0.187pp. SP ±0.020pp = tightest channel. |
+| #1370 | **thorfinn** | **H192 TTA mirror-aug on H112** | NEW | eval-only | ASSIGNED 02:00Z. TTA: 2× forward pass, average original + mirrored prediction. ~1-2h. |
+| #1371 | **frieren** | **H193 SWA H164e+H112 checkpoint avg** | NEW | eval-only | ASSIGNED 02:00Z. Arm A: SWA over H164e EP10-13 checkpoints. Arm B: H112+H164e weight average. ~30-60min. |
 | #1364 | nezuko | H190 mirror p=0.25 | EP9 (step 59833) | **6.1386 LEAD −0.011pp (within noise)** | terminal ~03:00Z+1 (50/50 within RNG floor) |
 | #1365 | tanjiro | H191 mirror × tau_y=2.0 | EP10 banked (step 62501) | 6.3672 +0.23pp behind | EP9+EP10 PASS @ 00:08Z; WSS_x slope intact (−0.0109); terminal ~01:55Z+1 (NULL-expected boundary probe, mechanism confirmed) |
 | #1362 | alphonse | H188 mirror × DropPath=0.15 | step 64690 mid-EP9 | 6.20% / WSS_agg 7.05% | HEALTHY heartbeat live; in band with H112 EP9 |

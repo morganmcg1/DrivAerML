@@ -10890,3 +10890,52 @@ Slope steepening on all 5 reported WSS channels (+0.036 to +0.075pp).
 3. **Per-cycle minima improve monotonically** (6.521 → 6.361 → 6.321) — SGDR mechanism-positive at cycle level. Operationally constrained by budget: T_0=4 of 13 epochs is too restart-dense. Val regression from restarts dominates slope benefit 3×.
 4. **Wave 38 closure reframed permanently**: "Any perturbation off H112 IN A CAPACITY-INCREASING OR Z-AXIS-PERTURBING DIRECTION causes slope-flattening; orthogonal-axis perturbations (y-loss-weight, data-aug, optimizer, scheduler) PRESERVE slope."
 5. **Nezuko reassigned to H167 tau_y=4.0 ESCALATE (PR #1355)**: next step on y-axis loss-weight ladder (H145 tau_y=3.0 was STEEPER, H167 tests 4.0).
+
+## 2026-05-29 02:00Z — PR #1353: H185 GradNorm-static-plateau × mirror-aug compound
+
+- thorfinn/h185-gradnorm-mirror-aug-compound
+- **Hypothesis**: Stack H171's GradNorm plateau-exact static loss recipe (DE-escalate WSS surface:volume to 2:1, scale VP 0.5×) with H148's mirror-augmentation. Two slope-preservation interventions applied together (cross-axis). Expected additive slope-steepening; tested orthogonal-axes safety hypothesis.
+- **W&B run**: `yw2a5dyl`
+
+| Metric | H185 | H112 | Δ vs H112 | Gate | Pass? |
+|---|---:|---:|---:|---:|:---:|
+| val_abupt | 6.0172 | 6.1358 | **−0.119pp** | <6.1358 | ✅ PASS |
+| test_abupt | 5.8613 | 5.839 | +0.022pp | <5.839 | ❌ FAIL |
+| test_WSS_agg | 6.7642 | 6.752 | +0.012pp | ≤6.752 | ❌ FAIL |
+| test_VP | 3.4585 | 3.421 | +0.038pp | ≤3.421 | ❌ FAIL |
+| test_SP | 3.7046 | 3.695 | +0.010pp | ≤3.577 | ❌ FAIL |
+| val→test WSS slope | −0.046pp | −0.215pp | **+0.169pp FLATTER** | — | — |
+| val→test WSS_x slope | +0.051pp | −0.093pp | **+0.144pp INVERTED** | — | — |
+
+**Decision: CLOSED C NULL.** 0/4 test gates pass. val gain REAL (2.25× RNG floor) but did NOT transfer to test.
+
+**Key program-permanent findings (HIGH IMPORTANCE)**:
+1. **Slope-preservation interventions ANTI-COMPOUND on slope**: H148 (solo) steepens slope by −0.081pp; H171 (solo) flattens by +0.066pp; compound flattens by +0.169pp = 2.5× amplification of H171's flattening. Linear prediction was −0.015pp (slight steepening). Outcome: anti-additive and anti-compound on slope.
+2. **Orthogonal-axes safety hypothesis FALSIFIED at terminal**: WSS_x basin diagnostic showed intact −0.150pp lead at EP9 but INVERTED to +0.051pp at terminal full-test eval. Basin disruption took until terminal to manifest vs H183's same-axis disruption at EP6.
+3. **Val LEAD is necessary but NOT SUFFICIENT for merge gate**: val lead consolidated and amplified (EP6 −9.3bp → terminal −11.9bp on abupt) but test side showed full sign reversal (+12bp test_WSS regression).
+4. **H185 joins slope-flattening cohort** as 5th member (H143, H144, H147, H171, H185). Cohort now covers z-axis ESCALATE, de-escalate, dynamic, orthogonal-compound — slope-flattening is NOT a z-axis-specific finding.
+
+---
+
+## 2026-05-29 02:00Z — PR #1357: H164e H112-recipe RNG draw 2 (N=2 calibration)
+
+- frieren/h164e-h112-rerun-rng-n2
+- **Hypothesis**: Independent H112 recipe rerun (different RNG seed, identical 39 flags) to calibrate the N=2 recipe RNG floor on val and slope metrics. Program-critical calibration.
+- **W&B run**: `zrv3dasr`
+
+| Metric | H164e | H112 | H164d | N=2 half-range | N=3 recipe-mean |
+|---|---:|---:|---:|---:|---:|
+| val_abupt | 6.0836 | 6.1358 | 6.1874 | ±0.052pp | 6.1356 |
+| val_WSS_agg | 6.9252 | 6.9670 | 7.0478 | ±0.061pp | 6.9800 |
+| test_WSS_agg | 6.7509 | 6.752 | 6.8756 | (N=2 test) | 6.7928 |
+| test_VP | 3.409 | 3.421 | 3.500 | | |
+| test_SP | 3.677 | 3.695 | 3.738 | | |
+
+**Decision: CLOSED (calibration, not a mechanism improvement).** H164e is the same H112 recipe, different RNG seed. 1bp test_WSS improvement is RNG noise. test_SP gate fails strict 3.577 threshold.
+
+**Key program-permanent findings (HIGHEST IMPORTANCE)**:
+1. **N=2 val→test WSS_agg slope half-range = ±0.001pp**: H164d Δ +0.043pp, H164e Δ +0.041pp (vs H112). Near-identical slope deviations across recipe draws → slope is HIGHLY REPRODUCIBLE.
+2. **H112-recipe MEAN val→test WSS_agg slope = −0.187pp** (NOT H112's reported −0.215pp). H112's reported value is on the STEEP END of recipe distribution by +0.028pp.
+3. **SP is the NEW canonical cohort-screening channel** (N=2 EP12 half-range ±0.020pp — 4× tighter than abupt). Earlier WSS_z hypothesis WRONG (WSS_z = LARGEST at ±0.082pp).
+4. **Recipe-mean test_WSS = 6.8133%**: H112's reported 6.7522 is +0.061pp favorable vs recipe-mean on test. H112 IS a favorable RNG draw on test side.
+5. **VP is one-sided distribution**: both H164d and H164e VP below H112 reported → recipe-mean VP at terminal ≈ 3.505% vs H112 3.5495%. Future cross-axis compounds have MORE VP gate margin than H112's reported value suggests.
