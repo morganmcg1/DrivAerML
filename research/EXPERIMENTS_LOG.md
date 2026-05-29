@@ -4328,3 +4328,93 @@ The PR was authored against pre-correction H147 baseline numbers. Advisor commit
 1. **Decoupled-β per-head optimizer** (custom optimizer state per param group: β=(0.95, 0.98) on WSS head + shared trunk, β2=0.985 only on VP/SP heads). Last untested β-axis lever; moderate complexity; banked for future wave.
 2. **test_SP floor as primary objective** — corrected H147 clears 3.577% by 0.014pp; H160 misses by 0.077pp. Three runs cluster in 3.56–3.66% with no clear levers. Worth dedicated research pass on SP-specific architecture (dedicated decoder, smooth-L1).
 3. **T_max=30 retest of β=0.95/0.985** — would rule out the compressed-cosine artifact hypothesis. Not pursuing: deadline pressure + structural-perturbation wave takes precedence.
+
+## 2026-05-29 23:50Z — Joint structural-wave CLOSURE: H164 + H165 + H166 (3 of 4 arms closed; H167 sole survivor)
+
+### Wave overview
+
+Four structural perturbations on the H147 SOTA stack, dispatched 17:30Z-19:00Z, all hitting EP8 terminal between 23:25-23:35Z. The wave was designed after the quadruple-arm single-knob finding (H159/H161/H162/H160) sealed the loss/optimizer-tuning channel. Each arm tested a distinct H147 structural axis — slice count, PE-density, output-head capacity, attention subspace count — with the goal of isolating which structural dimension carries the WSS-z floor (~8.49%).
+
+**Outcomes:** 3 of 4 closed non-merge with broken/marginal SP floors (slices=192, pe=12, surfw=3.0). H167 (heads 4→8) cleared all kill gates and shows jackpot-trajectory late-EP cooling — sole merge candidate; EP7 dual-gate ahead (val_WSS ≤ 6.70% OR val_WSS_z ≤ 9.00%).
+
+### PR #1444 — H164 model_slices 128→192 (frieren) — CLOSED NON-MERGE
+
+- **W&B rank0:** `2qm6c9w4` (group `h164-model-slices-192`)
+- **Runtime:** 6.77h, 87807 steps, EP8 EMA-best
+- **Hypothesis:** trunk-token-count is the WSS-z bottleneck; +50% slices unlocks finer geometric resolution.
+
+| Metric | H164 | H147 | Δ | floor | status |
+|---|---:|---:|---:|---:|---|
+| test_WSS ⭐ | **6.6296%** | 6.5409% | **+0.089pp** | — | regress |
+| test_WSS_z | 8.6319% | 8.4882% | **+0.144pp** | — | hypothesis-target axis got WORSE |
+| test_VP | 3.6072% | 3.4014% | +0.206 | 3.643 | ✓ holds |
+| test_SP | 3.6631% | 3.5634% | +0.099 | 3.577 | ❌ **BREAKS** |
+| test_ABUPT | 5.7928% | 5.6648% | +0.128 | 5.844 | ✓ holds |
+
+Val trajectory: EP1=12.76% BEAT (-0.06), EP2=7.31 (+0.05), EP3=7.03 (+0.05), EP5=6.86 (+0.11), EP8=6.798. Cooling rate -0.021/EP EP5→EP8 (vs H147 -0.075/EP) — canonical EP1-only-gain, late-EP-collapse pattern.
+
+**Mechanism falsification (frieren's writeup):** WSS-z (the hypothesis target axis) REGRESSED, not improved. If attention tokens were the bottleneck, this axis should have benefited most — instead it got worst-hit. All four heads regressed uniformly (+0.06 to +0.21pp), indicating capacity dilution rather than redistribution. SP floor broken at +0.086pp above 3.577% cap. Slice count is NOT the WSS-z bottleneck; the floor is NOT trunk-token-count-limited.
+
+### PR #1445 — H165 pe_num_features 16→12 (fern) — CLOSED NON-MERGE (PE-density axis SEALED)
+
+- **W&B rank0:** `3mpka9g9` (group `h165-pe-num-features-12`)
+- **Runtime:** 6.13h, 87807 steps, EP8 EMA-best
+- **Hypothesis:** pe=24 (H162) regressed because of dilution at 512 hidden; contracting to pe=12 may tighten projection.
+
+| Metric | H165 | H147 | Δ | floor | status |
+|---|---:|---:|---:|---:|---|
+| test_WSS ⭐ | **6.6727%** | 6.5409% | **+0.132pp** | — | regress |
+| test_WSS_z | 8.6098% | 8.4882% | +0.122 | — | regress |
+| test_VP | 3.6311% | 3.4014% | +0.230 | 3.643 | ✓ holds |
+| test_SP | 3.6633% | 3.5634% | +0.100 | 3.577 | ❌ **BREAKS** |
+| test_ABUPT | 5.8187% | 5.6648% | +0.154 | 5.844 | ✓ holds |
+
+**Joint PE-projection-density axis (sealed by H162+H165 pair):**
+
+| pe_num_features | test_WSS | Δ H147 |
+|---|---:|---:|
+| 12 (H165) | 6.6727% | +0.132pp |
+| **16 (H147 SOTA)** ⭐ | 6.5409% | — |
+| 24 (H162) | 6.7070% | +0.166pp |
+
+Both inverse directions on the PE-projection-density axis regress, asymmetrically (-0.132 vs +0.166) but consistent sign. The "dilution at 512 hidden" mechanism is falsified — contracting to 60 channels did not help either. pe=16 is a **tight local optimum on this axis** — sealed. Do not reopen without a substantively new mechanism (per-sigma allocation, learnable sigmas, non-linear PE mixing).
+
+EP1 BEAT (-0.17pp at val) — pe=12 starts with tighter spectral coverage but basis is too narrow to learn full WSS structure; gap reverses at EP2 and never closes. Volume pressure paid the biggest test cost (+0.230pp).
+
+### PR #1446 — H166 surface_out_width_factor 2.0→3.0 (nezuko) — CLOSED NON-MERGE (output-head capacity NOT the WSS-z bottleneck)
+
+- **W&B rank0:** `jmyv1byk` (group `h166-surface-out-width-3`)
+- **Runtime:** 5.91h, 87807 steps, EP8 EMA-best
+- **Hypothesis:** decoder bottleneck for WSS 3-channel output; +50% width factor unlocks WSS-z refinement.
+
+| Metric | H166 | H147 | Δ | floor | status |
+|---|---:|---:|---:|---:|---|
+| test_WSS ⭐ | **6.6052%** | 6.5409% | **+0.064pp** | — | regress (BEST of wave) |
+| test_WSS_z | 8.5642% | 8.4882% | +0.076 | — | regress |
+| test_VP | 3.5891% | 3.4014% | +0.188 | 3.643 | ✓ holds |
+| test_SP | 3.6031% | 3.5634% | +0.040 | 3.577 | ⚠ **MARGINAL (+0.026 above floor)** |
+| test_ABUPT | 5.7589% | 5.6648% | +0.094 | 5.844 | ✓ holds |
+
+H166 was the **LEAST-regressing arm of the wave on test_WSS** but still trailed by +0.064pp, and SP floor touched marginally (+0.026pp above cap). Decoder-head capacity hypothesis falsified — uniform dilution pattern (all four heads regressed ~+0.06 to +0.19pp) consistent with wider decoder absorbing trunk-feature variance into noise rather than refinement.
+
+**Cleanly rules out output-head capacity as the WSS-z bottleneck** — exactly the "highest-value informational outcome" nezuko predicted. Combined with H164 (slices=192) and H165 (pe=12), the WSS-z floor is NOT trunk-token-count-limited, NOT PE-projection-density-limited, NOT output-head-capacity-limited. Floor localizes to **attention design** (H167 heads=8 in flight) or **per-axis normalization / decoder routing** (banked for future wave).
+
+### Joint wave mechanism conclusion (multi-axis local optimum)
+
+The 4-arm structural wave + the 4-arm single-knob wave + the 5-cell β-grid together compose a **8-axis multi-perturbation falsification** of H147:
+
+| Axis family | Perturbations tested | All regressed? |
+|---|---|---|
+| Loss weight (Charbonnier weight, axes, lr, β1, β2, tau_z/y weights) | H159, H161, H160, H149/H150/H152/H153, H154, H155, H156 | ✓ |
+| PE spectral density (pe_features) | H162 (up), H165 (down) | ✓ |
+| Structural axes (slices, surface_out_width) | H164, H166 | ✓ |
+| Attention subspace count (heads) | H167 (jackpot trajectory; TBD) | TBD |
+
+3 of 3 closed structural-wave arms broke the test_SP floor (+0.026 to +0.099pp above 3.577% cap), consistent with **structural perturbations harming surface_p specifically** — likely because the perturbations change the slice→surface_p pipeline geometry. H147 is at a **tight multi-axis local optimum** where moderate single-axis perturbations on any of these channels regress test_WSS AND threaten the SP floor. **Next gain must come from either (a) attention-design axis (H167's outcome will tell), (b) coordinated multi-axis bundles, or (c) fundamentally different mechanisms (per-axis normalization, divergence-free WSS output, multi-resolution sampling).**
+
+### Next wave dispatch
+
+- **frieren H170 `gradnorm-alpha-03-h147`** — diagnostic α-axis (half untested; high tail blew up H874)
+- **fern H168 `pe-lo-sigma-h147`** — add σ=0.1 to STRING multi-sigma, pe_features=16 stays
+- **nezuko H169 `wss-charb-yz-h147`** — extend Charbonnier `axes=z→yz` keeping `weight=0.1`
+- **tanjiro H167 continuing** — EP7 dual-gate ahead, EP8 terminal ~02:00Z

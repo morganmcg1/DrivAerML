@@ -1,21 +1,44 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 23:10Z._
+_Last updated: 2026-05-29 23:50Z._
 
-**23:10Z fleet update — Structural wave reaches EP8: H164/H165/H166 all projected non-merge; H167 is the ONLY viable merge candidate.**
+**23:50Z structural-wave CLOSURE — H164/H165/H166 all CLOSED non-merge with broken/marginal SP floors. H167 EP6 jackpot-trajectory confirmed; sole merge candidate. New wave (H168/H169/H170) being dispatched to frieren/fern/nezuko.**
 
-| Run | rt | step | val_WSS | EP | projected test | merge call |
-|-----|---:|---:|---:|---|---:|---|
-| H164 frieren slices=192 | 6.46h | 87807 | **6.798%** | EP8 ~terminal | ~6.66% | **non-merge** (+0.12pp) |
-| H166 nezuko surfw=3 | 5.91h | 87807 | **6.797%** | EP8 ~terminal | ~6.66% | **non-merge** (+0.12pp) |
-| H165 fern pe=12 | 5.85h | 87807 | **6.846%** | EP8 ~terminal | ~6.71% | **non-merge** (+0.17pp) |
-| **H167 tanjiro heads=8** | 4.97h | 62000 | **6.823%** | mid-EP6 | **TBD** | **SOLE candidate** — EP7 dual-gate |
+### Wave terminal table (3 of 4 closed; H167 alive)
 
-**EP5→EP8 cooling rates collapse to ~-0.02/EP** for slices=192/surfw=3 (vs H147 average -0.075/EP) — the "EP1-only-gain, late-EP-trail" pattern confirmed across both perturbations.
+| Run | rank0 | rt | test_WSS | Δ H147 | test_SP cap | Verdict |
+|-----|---|---:|---:|---:|---:|---|
+| H164 frieren slices 128→192 | `2qm6c9w4` | 6.77h | **6.6296%** | +0.089pp | ❌ 3.6631 (+0.086) | **CLOSE PR #1444** |
+| H165 fern pe_features 16→12 | `3mpka9g9` | 6.13h | **6.6727%** | +0.132pp | ❌ 3.6633 (+0.086) | **CLOSE PR #1445** |
+| H166 nezuko surface_out 2.0→3.0 | `jmyv1byk` | 5.91h | **6.6052%** | +0.064pp | ⚠ 3.6031 (+0.026 marg) | **CLOSE PR #1446** |
+| **H167 tanjiro heads 4→8** | `9b7sdo5k` | 5.29h (mid-EP7) | TBD | TBD | TBD | **WIP — sole hope** |
 
-**H164/H166 ended val tied (6.798/6.797%)** — slices=192 and surfw=3 collapse to identical val endpoints, strong evidence that the H147 stack is at a tight architectural local optimum where moderate width/depth perturbations do not break the test ceiling. **Joint structural-wave finding banked.**
+### H167 EP6 jackpot trajectory (23:30Z tanjiro report)
 
-**H167 remains active mid-EP6.** EP5=6.823% (PASSES kill gate); val_WSS_z=9.22% razor-thin miss on jackpot 9.20%. Tanjiro continues to EP7 dual-gate (val_WSS > 6.70% OR val_WSS_z > 9.00%). If H167 maintains its EP3→EP5 -0.17pp tau_z descent through EP7-8, terminal test_WSS projects 6.55-6.58% — within striking distance of H147 6.5409%. **Highest-upside arm of the wave; preserve until terminal eval.**
+| EP | H167 val_WSS | H147 ref | Δ | val_WSS_z |
+|---|---:|---:|---:|---:|
+| 1 | 13.55% | 12.82% | +0.73 HOT | 17.42% |
+| 5 | 6.82% | 6.75% | +0.07 | 9.22% |
+| 6 | **6.7613%** | (none, H147 EP5=6.75%) | **+0.011pp behind H147 EP5** | **9.1661%** |
+
+**Gap to H147 EP5 closed to +0.011pp at H167 EP6.** EP7 dual-gate ahead: val_WSS ≤ 6.70% OR val_WSS_z ≤ 9.00% required for jackpot. Tanjiro continues to EP7 (~00:15Z) and EP8 terminal (~02:00Z). Strong late-EP cooling (-0.062pp/EP through EP6) confirms the "doubled attention subspaces enables late-EP capacity-friendly descent" hypothesis on this axis.
+
+### Joint structural-wave finding (SEALED — multi-axis local optimum)
+
+| Axis | Direction tested | test_WSS Δ | SP cap |
+|---|---|---:|---:|
+| trunk-token-count (slices) | 128→192 (H164) | +0.089 | ❌ broken |
+| PE-projection density | 16→24 (H162), 16→12 (H165) | +0.166, +0.132 | ❌ broken (H165) |
+| output-head capacity | 2.0→3.0 (H166) | +0.064 | ⚠ marginal |
+| attention subspace count | 4→8 (H167) | TBD (jackpot trajectory) | TBD |
+
+Combined with single-knob loss/optimizer falsifications (H159/H161/H162/H160 + β-grid + lr + tau-axis weights), the H147 stack sits at a **tight multi-axis local optimum**. Moderate single-axis structural perturbations on slice count, PE density, and output head width all regress test_WSS AND break the SP floor at 3.577%. **Floor is in attention design (H167) or normalization/decoder routing (next wave).**
+
+### Next wave H168-H170 (dispatching 23:55Z)
+
+- **H168 `pe-lo-sigma-h147` (fern)** — add σ=0.1 to STRING multi-sigma `[0.25,0.5,1.0,2.0,4.0]→[0.1,0.25,0.5,1.0,2.0,4.0]`; pe_features stays 16 (16 spread across 6 bands). Mechanism: finer-band PE resolves boundary-layer transition geometry at the millimeter-cm scale where tau_z is hardest. Aligns with fern's own H165 follow-up #2 (sigma values).
+- **H169 `wss-charb-yz-h147` (nezuko)** — extend WSS Charbonnier from `axes=z` to `axes=yz` keeping `weight=0.1` (NOT amplification — H161 amplification falsified). Mechanism: covers second-worst axis tau_y at identical weight, tests axis-coverage gating vs weight-amplitude. Nezuko has H161 history with this exact mechanism.
+- **H170 `gradnorm-alpha-03-h147` (frieren)** — α 0.5→0.3 on H147. Mechanism: softer restoring force → smoother per-task weight oscillation → cleaner tau_z gradient accumulation. Untested half of α axis (high tail blew up H874).
 
 **Previous 20:50Z full per-EP trajectory table (for reference):**
 
