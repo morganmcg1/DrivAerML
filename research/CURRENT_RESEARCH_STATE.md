@@ -1,24 +1,35 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 17:15Z._
+_Last updated: 2026-05-29 18:55Z._
 
-**17:15Z fleet update — Wave 41 single-knob axis CLOSED. Structural perturbation wave (H164–H167) in flight:**
+**18:55Z fleet update — Structural-perturbation wave EP1-EP3 readings in. H164 tracking H147 tightly.**
 
+| Hyp | Student | rank0 run | rt | step | latest val_WSS | likely EP | vs H147 EP | State |
+|-----|---------|-----------|-----|------|----------------|-----------|------------|-------|
+| H147 SOTA | (merged) | k6q4c3on | — | — | EP3=6.98% | reference | — | merged baseline |
+| **H164 slices=192** | frieren | 2qm6c9w4 | 2.73h | 37117 | **7.0325%** | ~EP3 | +0.05pp ✓ tight | PR #1444 status:wip — strongest arm |
+| **H166 surfw=3.0** | nezuko | jmyv1byk | 2.12h | 31720 | **7.3621%** | ~EP2 | +0.10pp slow | PR #1446 status:wip |
+| **H165 pe=12** | fern | 3mpka9g9 | 2.07h | 31184 | **7.3790%** | ~EP2 | +0.12pp slow | PR #1445 status:wip |
+| **H167 heads=8** | tanjiro | 9b7sdo5k | 1.14h | 14239 | **13.5518%** | EP1 | +0.73pp HOT | PR #1450 status:wip — HOLD-WATCH (kill ladder EP1>13.5% breached by 0.05pp; EP3 is real decision) |
+
+**Closed in previous cycles (background context):**
 | Hyp | Run | rt | Terminal test_WSS | vs H147 SOTA 6.5409% | State |
 |-----|-----|----|------|------|------|
-| H147 SOTA | k6q4c3on | — | **6.5409** | reference | merged baseline |
 | H159 vol_p_charb=0.3 (frieren prev) | z6ybgmx7+juxadtjh | 5.13h+eval | 6.6678 | +0.127 | CLOSED PR #1423 15:51Z — NON-MERGE |
 | **H160 β=0.95/0.985 (tanjiro)** | **7a14s7uo** | **6.1h terminal+eval** | **6.6247** | **+0.084** | **CLOSED PR #1424 17:15Z — NON-MERGE** |
 | H161 wss_charb=0.3 z (nezuko prev) | kvfaya2j+5ttbfh4o | terminal | 6.7402 | +0.199 | CLOSED PR #1427 15:23Z |
 | H162 pe_features=24 (fern prev) | 7vdb5zwz+0jfesb3w | 3.78h+eval | 6.7070 | +0.166 | CLOSED PR #1430 15:52Z — NON-MERGE |
-| **H164 slices 128→192 (frieren)** | (launching) | — | TBD | TBD | **ASSIGNED PR #1444** — structural axis: trunk-token-count |
-| **H165 pe_features 16→12 (fern)** | (launching) | — | TBD | TBD | **ASSIGNED PR #1445** — structural axis: spectral-density inverse |
-| **H166 surf_out_width 2.0→3.0 (nezuko)** | (launching) | — | TBD | TBD | **ASSIGNED PR #1446** — structural axis: decoder-head-width |
-| **H167 heads 4→8 (tanjiro)** | (assigning) | — | TBD | TBD | **TO ASSIGN PR #1447** — structural axis: attention-subspace-count |
 
-**Key 17:15Z reads:**
+**Key 18:55Z reads — structural wave EP1-EP3:**
+- **H164 (frieren) is the strongest arm so far.** At EP3 val_WSS=7.0325% only +0.05pp behind H147 EP3 (6.98%). If trajectory holds, predicted EP8 ≈ 6.70%, within 0.02pp of H147 EP8 ≈ 6.68%. **Trunk-token-count (slices 128→192) is at parity early.** Watch EP5 (H147 = 6.75%) for divergence.
+- **H165 (fern) pe_features=12** at EP2=7.379% (+0.12pp) and **H166 (nezuko) surf_out_width=3** at EP2=7.362% (+0.10pp) — tied behind H147. Both arms have larger parameter counts in different paths (PE basis halved for H165; decoder head widened 1.5× for H166); the +0.10-0.12pp lag is consistent with extra warmup needed for new parameter geometries. EP5 check is decisive — if either reaches val_WSS≤6.80% at EP5, structural axis wins.
+- **H167 (tanjiro) heads=8** at EP1=13.55% (+0.73pp) — HOT but expected, since 8 heads doubles attention-subspace count. The original kill ladder was EP1>13.5% but breach is razor-thin (0.05pp). HOLD-WATCH to EP3 — kill if val_WSS > 7.20%.
+
+**Key 17:15Z reads (background):**
 - **H160 NON-MERGE (tanjiro — closed 17:15Z):** test_WSS=6.6247% (+0.084pp); test_VP=3.5659% ✓ clears 3.643%; test_SP=3.6542% ❌ misses 3.577% floor by 0.077pp; test_ABUPT=5.7827% ✓ clears 5.844%; test_WSS_z=8.6665% +0.178pp vs H147. **3 of 4 caps regress; test_SP missed.** Trajectory tracked H147 within ±0.09pp at every EP1-EP8 checkpoint — β2=0.985 axis is mildly forgiving (no destabilization, unlike β1↑), but does not open new test ceiling.
 - **β-grid is CLOSED.** All five grid cells around H147 (0.95, 0.98) explored. Every perturbation off the central point loses. H147 is the joint optimum on every test metric. β1 dominates early WSS dynamics; β2 is a late-phase pressure-smoothing axis that doesn't cross test ceiling. Decoupled-β per-head optimizer is the last untested β lever; banked for future wave.
+
+**18:55Z DDP val-callback rank0 gotcha (info-only, no fix needed):** When polling structural-wave run trajectories, the multi-rank DDP val callback fires only on rank 0. The earlier active-runs query picked non-rank-0 W&B run IDs (`hsm6ljmh` = rank2 for H164, `52hvx489` = rank6 for H165, etc.) which return zero val_primary rows. Always query the rank0 run ID for trajectory reads: H164=`2qm6c9w4`, H165=`3mpka9g9`, H166=`jmyv1byk`, H167=`9b7sdo5k`. All 4 runs are healthy.
 
 **MAJOR FINDING — Quadruple-arm joint conclusion (H159+H161+H162+H160):**
 
