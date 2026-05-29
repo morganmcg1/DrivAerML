@@ -62,7 +62,7 @@ Compounded with H149/H150/H152/H153 (other β-grid cells) and H155 (lr=9e-5) and
   - H164 — model_slices 128→192 (trunk-token-count; PR #1444 frieren)
   - H165 — pe_num_features 16→12 (spectral-density inverse; PR #1445 fern; tests if H162's null was overprovisioning)
   - H166 — surface_out_width_factor 2.0→3.0 (decoder-head-width; PR #1446 nezuko)
-  - **H167 — model_heads 4→8 (attention-subspace-count; PR #1447 tanjiro; this assignment)**
+  - **H167 — model_heads 4→8 (attention-subspace-count; PR #1450 tanjiro)**
 - **OPEN candidates** for next wave (if structural wave produces no win): GradNorm-α grid, conditional slices+Charbonnier combined, decoupled-β per-head optimizer, test_SP-as-primary architectural surgery, depth ablation (6→8 layers).
 
 **CRITICAL — BASELINE.md correction (commit ea99dda was wrong):** nezuko discovered in PR #1360 that the 2026-05-28 H147 SOTA section copy-pasted H39's `yym5oa8x` test_VP/test_SP into the H147 row. Verified by W&B query of `k6q4c3on`. Correct H147 metrics: **test_VP=3.4014%** (clears 3.643% floor by 0.242pp) and **test_SP=3.5634%** (clears 3.577% floor by 0.014pp). **H147 actually CLEARS all 4 floors**, not 3-of-4. Patched in BASELINE.md this session.
