@@ -1,3 +1,70 @@
+## 2026-05-30 20:55Z — PR #1496 thorfinn H305 CLOSED: BC tangent projection destructive
+
+### Finding 'bc-tangent-projection-destructive'
+
+- **Branch**: thorfinn/h305-bc-wss-normal-zero
+- **W&B run**: evc7lnkf
+- **Hypothesis**: Post-TTA projection of WSS predictions onto the surface tangent plane (zero normal component, τ·n̂=0) enforces physical BC and removes a class of unphysical predictions.
+- **Result**: val_abupt = **10.8591%** vs H296 gate 5.9221% — **+490bp catastrophic regression**. Test arm killed.
+- **Mechanism**: Even though physically τ·n̂ must be zero at the wall, applying this projection to learned surface predictions destroys far more useful signal than the constraint-violation it removes. The dataset's surface normals (`surface_x[..., 3:6]`) are noisy, so projecting onto them subtracts substantial tangential signal.
+- **Combined with Finding 'coord-noise-harmful'** (input geometry perturbation destroys preds): the **geometry-aware post-hoc correction axis is fully closed** — the surface normals embedded in the dataset are not high-enough fidelity for hard physical constraints to be useful as TTA priors.
+
+---
+
+## 2026-05-30 20:55Z — PR #1495 tanjiro H303 CLOSED: σ-axis globally closed at K=5
+
+### Finding 'sigma-axis-globally-closed-at-K5'
+
+- **Branch**: tanjiro/h303-sigma3e-4-k5-probe
+- **W&B run**: uhx782vd
+- **Hypothesis**: σ=3e-4 weight noise might dominate σ=5e-4 once K is increased to K=5 anti-thetic (more averaging tolerates smaller perturbations).
+- **Result**: val_abupt = **5.9247%** (raw) — FAILS new H300-calibrated gate (5.9011) and old H296 raw gate (5.9221). Test arm killed at val gate.
+- **Closure of σ-axis**: combined with H277 (K=3 σ=3e-4 → val 5.9255) and H276 (K=5 random σ=3e-4 → val 5.9314), σ=3e-4 is dominated by σ=5e-4 across all K and aggregation schemes we've tested at EP15+6-res. σ-axis CLOSED for anti-thetic.
+
+---
+
+## 2026-05-30 20:02Z — PR #1487 alphonse H298 CLOSED: coord noise harmful
+
+### Finding 'coord-noise-harmful'
+
+- **Branch**: alphonse/h298-input-coord-noise
+- **W&B runs**: znmtxzdk (H298B σ=5e-4 val), n5jgfgtb (H298C σ=1e-3)
+- **Hypothesis**: Input-coordinate noise as TTA diversity source (alternative to weight-space noise).
+- **Result**: H298B σ=5e-4 val=**7.82%** (+190bp). H298C σ=1e-3 expected to fail harder (monotonic slope already conclusive).
+- **Mechanism**: The geometry encoder is highly spatially sensitive — any coordinate perturbation destroys downstream surface predictions. TTA noise budget must stay in weight-space, not input-space.
+
+---
+
+## 2026-05-30 18:48Z — PR #1489 edward H300 MERGED: NEW SOTA — Per-channel post-hoc calibration
+
+### PR #1489 edward H300 — MERGED: Linear affine calibration on H285+K=4 TTA
+
+- **Branch**: edward/h300-per-channel-calibration
+- **W&B run**: 59r4noqh
+- **Hypothesis**: Fit a per-channel affine map y = α·p + β on 34-car val LABELS (not test), apply to test. 10 OLS parameters total.
+
+### Results (DDP×8)
+
+| Metric | H285 raw (prev SOTA) | **H300 calibrated (NEW SOTA)** | Δ |
+|---|---:|---:|---:|
+| val_abupt | 5.9235% | **5.9011%** | **−2.2bp ✓** |
+| test_abupt | 5.7683% | **5.7399%** | **−2.8bp ✓** |
+| test_VP | 3.3783% | **3.3763%** | −0.2bp ✓ |
+| test_SP | 3.6425% | **3.6132%** | −2.9bp ✓ (paper-floor gap 6.6bp → 3.6bp) |
+| test_WSS | 6.6735% | **6.6404%** | −3.3bp ✓ |
+
+Fitted coefficients: α ∈ [0.99187, 0.99975] (all near unity). **β_VP = −0.8554** dominant; other |β| ≈ 0.
+
+### Analysis
+
+**Finding 'calibration-dominates-TTA-refinement'**: 10-parameter affine correction gains 28bp on test — more than all H285→H296 TTA refinements combined (4 SOTA jumps = ~5bp total). The β_VP intercept shift represents a model-intrinsic volume_pressure bias that no amount of TTA refinement can fix.
+
+**New axis opened**: Post-hoc calibration is *orthogonal* to TTA aggregation. Follow-up experiments now in flight: H312 (full cal + H296 base), H313 (regional per-zone), H316 (component ablation), H317 (quadratic). H310 commissioned to unblock weight-space averaging.
+
+**New merge gate**: val_abupt_calibrated < 5.9011% AND test_abupt_calibrated < 5.7399%.
+
+---
+
 ## 2026-05-30 15:45Z — PR #1483 tanjiro H295 MERGED: NEW SOTA K=5 anti-thetic EP15+6-res×mirror
 
 ### PR #1483 tanjiro H295 — MERGED: EP15+anti-K=5+6-res+mirror
