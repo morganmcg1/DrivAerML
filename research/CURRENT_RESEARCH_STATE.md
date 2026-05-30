@@ -1,14 +1,16 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 17:10Z | Branch: `tay` | **SOTA: H296 EP15+Anti-K4+8-res+mirror (PR #1484) — MERGED 17:05Z** | Round 4k+1
+**Updated**: 2026-05-30 17:55Z | Branch: `tay` | **SOTA: H296 EP15+Anti-K4+8-res+mirror (PR #1484) — MERGED 17:05Z** | Round 4k+1
 
-**🎉🎉 TWO SOTA JUMPS IN <2 HOURS (17:05Z update):**
+**🎉🎉 TWO SOTA JUMPS IN <2 HOURS (17:05Z):**
 - H295 (K=5+6-res, tanjiro, PR #1483) merged 15:45Z → val 5.9231 / test 5.7679
 - **H296 (K=4+8-res, fern, PR #1484) merged 17:05Z → val 5.9221 / test 5.7678** ← CURRENT SOTA
 
 **Finding TTT**: K=4+8-res Pareto-dominates K=5+6-res. Res-axis compound beats K-axis escalation at this operating point.
 
 **H297 thorfinn CLOSED (17:05Z)**: val=5.9237/test=5.7684 fails new gate. Finding "per-layer-noise-attn0-mlp-null".
+
+**NEW Finding 'coord-noise-harmful' (17:48Z)**: H298B alphonse (σ=5e-4 input-coord noise + K=4 anti weight + 6-res + mirror) → val_abupt=**7.8189%** (+190bp regression vs gate). All channels regress severely (WSS_z hits 12.38%). Input-coord perturbation breaks geometry encoder. TTA noise budget MUST stay in weight/output space, never input space. H298C (σ=1e-3) confirms slope.
 
 **New assignments (17:05Z):**
 - **Thorfinn → H305 (PR #1496)**: Physics BC enforcement — zero WSS normal component τ·n̂=0 post-TTA. Zero extra forward passes. Targets WSS_z (8.6635%, largest sub-channel gap).
@@ -39,17 +41,19 @@
 |---|---|---|---:|---|---|
 | **#1496** | **thorfinn** | **H305: BC enforcement — zero WSS normal component τ·n̂=0** | — | 🆕 assigned 17:05Z | ~21:30Z |
 | **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T sweep)** | — | 🆕 assigned 17:05Z | ~21:30Z |
-| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ∈{1e-4,5e-4,1e-3})** | **5.9585 ✗ (A)** | 🟡 H298A val FAILS (+35bp); H298B σ=5e-4 znmtxzdk running | ~19:00Z |
-| **#1488** | **askeladd** | **H299: Embedding-only noise (σ=5e-4, anti-K4)** | **5.9244 ✗** | 🟡 val FAILS gate (+1.3bp); test arm running | ~19:30Z |
-| **#1489** | **edward** | **H300: Per-channel test-time calibration** | **5.9235 ✗** | 🟡 val FAILS gate (+1.4bp vs new gate); test arm running | ~19:30Z |
-| **#1491** | **nezuko** | **H301: Per-channel best-of-K (heterogeneous aggregation)** | **5.9262 ✗** | 🟡 val FAILS gate (+4.1bp, hurts); test arm running | ~19:30Z |
-| **#1492** | **frieren** | **H302: Asymmetric modality resolution (surf-7 × vol-6, K=4 anti)** | — | 🟢 b3724r40 running (~2h in) | ~20:52Z |
-| **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | 🟢 primary run launching (smoke done) | ~21:30Z |
+| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ∈{1e-4,5e-4,1e-3})** | **B: 7.8189 ✗✗** | 🔴 H298B σ=5e-4 done (+190bp DEAD); H298C σ=1e-3 n5jgfgtb running | ~19:50Z |
+| **#1488** | **askeladd** | **H299: Embedding-only noise (σ=5e-4, anti-K4)** | **5.9244 ✗** | 🟡 val FAILS gate (+2.3bp); test arm running | ~21:00Z |
+| **#1489** | **edward** | **H300: Per-channel test-time calibration** | **5.9235 ✗** | 🟡 val FAILS gate (+1.4bp vs new gate); test arm running | ~21:00Z |
+| **#1491** | **nezuko** | **H301: Per-channel best-of-K (heterogeneous aggregation)** | **5.9262 ✗** | 🟡 val FAILS gate (+4.1bp, hurts); test arm running | ~21:00Z |
+| **#1492** | **frieren** | **H302: Asymmetric modality resolution (surf-7 × vol-6, K=4 anti)** | — | 🟢 b3724r40 running shared-loop primary | ~20:52Z |
+| **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | ⚠️ STILL 5 smokes only (debug=True, 2-car); nudged 17:48Z to launch full primary | ~21:30Z if launches now |
 
-**Hot watch**:
-- **3 likely-close test arms** (askeladd/edward/nezuko H299/H300/H301): all val failed new gate; test arms at ~19:30Z → close all 3, bank Findings, assign H307/H308
-- **Alphonse H298**: coord-noise sweep; if H298B also fails (likely) → close, assign H307
-- **H305/H306**: physics BC enforcement and per-point confidence weighting — both novel, zero/low-cost modifications to existing TTA pipeline.
+**Hot watch (17:55Z)**:
+- **Alphonse H298 DEAD direction**: H298B val=7.8189% catastrophic. H298C will confirm slope (~19:50Z) → close PR #1487, assign fresh H309. Coord-noise direction permanently closed.
+- **3 likely-close test arms** (askeladd/edward/nezuko H299/H300/H301): all val failed new gate; test arms at ~21:00Z → close all 3, bank Findings, assign H307/H308/H309.
+- **Tanjiro H303 LAUNCH WATCH**: 5 debug smokes only, no full primary. Nudged 17:48Z; if no launch by 18:48Z escalate.
+- **Thorfinn H305 / Fern H306**: physics BC enforcement and per-point confidence weighting — both running, ETA ~21:30Z.
+- **Frieren H302**: shared-loop primary running, ETA ~20:52Z.
 
 ---
 
