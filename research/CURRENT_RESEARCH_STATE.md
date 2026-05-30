@@ -1,6 +1,8 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 17:55Z | Branch: `tay` | **SOTA: H296 EP15+Anti-K4+8-res+mirror (PR #1484) — MERGED 17:05Z** | Round 4k+1
+**Updated**: 2026-05-30 18:40Z | Branch: `tay` | **SOTA: H296 → H300 INCOMING (test 5.7678 → 5.7399, -28bp)** | Round 4k+1
+
+🚨 **MAJOR SOTA BREAKTHROUGH INCOMING (18:36Z)**: Edward H300 per-channel affine calibration delivers test_abupt=**5.7399** (-28bp vs H296 SOTA gate). val_cal=5.9011 (-21bp). All 5 channels Pareto-improve. SP -30bp (gap to floor closes 67→36bp), WSS_z -44bp (largest channel improvement). Awaiting edward terminal SENPAI-RESULT marker; merge imminent. **THIS OPENS A NEW ORTHOGONAL RESEARCH AXIS: post-hoc calibration.**
 
 **🎉🎉 TWO SOTA JUMPS IN <2 HOURS (17:05Z):**
 - H295 (K=5+6-res, tanjiro, PR #1483) merged 15:45Z → val 5.9231 / test 5.7679
