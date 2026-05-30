@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-30 14:00Z**
+- **2026-05-30 14:45Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=~5.80% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
@@ -41,51 +41,51 @@ H147 val terminal at EP30 = 6.5451 WSS. test_WSS=6.5409 (~0.004pp lower). H147 v
 
 ---
 
-## Current research focus: wave-2 — GradNorm budget-release mechanisms (CORRECTED)
+## Current research focus: wave-2 closing + wave-3 dispatch
 
-Wave-2 explored whether GradNorm budget-release mechanisms could protect SP while WSS catches up. **Corrected wave-2 verdict: NONE of H172/H174/H175 produced any val-level advantage over H147** — all show stable parallel trails on every metric. Only H173 produced a genuine test-level signal, but with VP floor breach.
+Wave-2 full closure expected by ~20:00Z (H176 main run terminal). Wave-3 dispatched: H178 (fern, PR #1493).
 
-### Active runs (14:00Z status)
+### Active runs (14:45Z status)
 
-**H172 (tanjiro, PR #1469) — EMA decay 0.9999:**
-- Step 141880 (mid-EP13, runtime 9.72h, state=running but should stop at EP12)
-- EP12: WSS=6.6981 (+0.124pp vs H147 6.5742), VP=**3.6633 (REVERSED back down)** (+0.189pp), SP=3.9367 (+0.111pp), ABU=5.9702 (+0.141pp)
-- VP reversal at EP12 removes immediate floor-breach risk (val_VP 3.66 only +0.020 above cap 3.643)
-- Trail trajectory: EP6 +0.246pp → EP10 +0.103pp (EMA-crossover signature) → EP12 +0.124pp (gap unchanged)
-- Direction: **NON-MERGE on WSS** — gap won't close to MERGE in 2-3 more EPs
-- Pre-authorized STOP at EP12 + stop-nudge posted 14:00Z
+**H172 (tanjiro, PR #1469) — EMA decay 0.9999 — OVERRUNNING:**
+- Step 152859 (EP14 imminent at 153650, rt 10.47h, state=running)
+- EP12 stop authorized 13:32Z, stop-nudge posted 14:05Z — tanjiro unresponsive; run will auto-terminate at configured epoch cap (likely EP15)
+- EP12 val (last complete EP): WSS=6.6981 (+0.124pp vs H147 6.5742), VP=3.6633 (+0.189pp), SP=3.9367 (+0.111pp), ABU=5.9702 (+0.141pp)
+- Best-checkpoint auto-select active; terminal test eval pending natural completion ~11.5-12h total
+- Direction: **NON-MERGE on WSS** — gap won't close; waiting for SENPAI-RESULT
+- Note: VP reversed back down at EP12 (3.6633, down from EP11 peak) — floor breach risk reduced
 
-**H174 (fern, PR #1478) — PE sigmas shifted-right density-preserved — FINISHED EP8:**
-- Step 87807 (EP8 terminal, runtime 6.16h, state=finished)
-- EP8: WSS=6.8989 (+0.249pp vs H147 6.6498), VP=3.7988 (+0.240pp), SP=4.0760 (+0.211pp), ABU=6.1692 (+0.267pp)
-- Monotonic widening: EP1 +0.106pp → EP8 +0.249pp on WSS
-- Direction: **NON-MERGE on WSS** — test_VP and test_SP likely FLOOR BREACH
-- EP8 terminal ack posted 14:00Z; awaiting SENPAI-RESULT + test eval
+**H175 (nezuko, PR #1480) — wss_charb yz @ 0.05 — TERMINAL:**
+- EP8 terminal at step 87807 (rt 6.16h, state=finished, rank0 `o5jmdw3q`)
+- EP8 val: WSS=6.7722 (+0.122pp), VP=3.6843 (+0.125pp), SP=3.9442 (+0.079pp)
+- **Test results (W&B): test_WSS=6.6370 (+0.096pp TRAILS), test_VP=3.5813 (PASS ✓), test_SP=3.6445 (BREACH +0.068pp ✗), test_ABU=5.7940 (PASS ✓)**
+- Direction: **NON-MERGE on WSS + SP floor BREACH** — terminal ack posted 14:45Z, closing PR pending SENPAI-RESULT from nezuko
 
-**H175 (nezuko, PR #1480) — wss_charb yz @ 0.05 (magnitude-preserved coverage):**
-- Step 82346 (running past EP7 76831, EP8 terminal ETA ~14:15Z)
-- EP7: WSS=6.7878 (+0.108pp vs H147 6.6798), VP=3.7017 (+0.098pp), SP=3.9521 (+0.067pp), ABU=6.0373 (+0.100pp)
-- **Tightest parallel trail of wave-2** — WSS gap oscillating around +0.10pp from EP4 onward
-- Test projection EP8: test_WSS 6.65-6.75% TRAILS H147 SOTA by +0.11-0.21pp
-- Direction: **NON-MERGE on WSS** — but test floors likely PASS
+**H176 (frieren, PR #1486) — vol_p_floor 0.10 midpoint — EP1 IN FLIGHT:**
+- Main 8-EP run launched 14:07Z; rank0 `xupvpsxg` at step 7007 (EP1 ~64%, rt 0.46h)
+- All 8 DDP ranks running; EP1 boundary ~14:55Z (val only on rank0)
+- Terminal harvest ETA ~20:30Z
+- **Wave-2's critical remaining mechanism test** — key question: does test_VP stay under floor at terminal with floor=0.10 vs floor=0.05?
+- Kill ladder: EP2 ≤7.50, EP3 ≤7.15, EP4 ≤7.00, EP5 ≤6.90, EP6 ≤6.85, EP8 ≤6.75; SP kill val_SP > 4.20
 
-**H176 (frieren, PR #1486) — vol_p_floor 0.10 (midpoint) — SMOKE EP1 PASS:**
-- Smoke EP1 finished at step 10975 (rt 1.01h on rank0); main 8-EP authorized 14:00Z
-- EP1 val (rank0 esku9ynv): WSS=12.8812 (+0.066pp vs H147 12.8153), VP=14.5251 (+0.408pp), **SP=8.5610 (-0.340pp BELOW H147!)**, ABU=13.1050 (+0.059pp)
-- **SP-protection mechanism ACTIVE at floor=0.10** — H173 signature present at half the budget displacement
-- Main 8-EP launch ETA ~14:05Z, terminal harvest ~20:00Z
-- **Wave-2's only remaining viable mechanism test** — key question: does test_VP stay under floor at terminal?
+**H178 (fern, PR #1493) — vol_p_floor 0.05 + 16-EP slow cosine — SMOKE PENDING:**
+- Dispatched 14:45Z, branch `dl24-fern/h178-vol-p-floor-005-slow-cosine-16ep`
+- Hypothesis: H173 mechanism at 16-EP cosine tests whether VP starvation was timing artifact (not fundamental VP-SP trade-off)
+- Smoke EP1 first; main 16-EP launch (~12h) after smoke PASS
+- Key GradNorm signal: w_vol_p trajectory EP1-8 vs H173 baseline; VP recovery window EP9-14
+- Terminal ETA (if smoke+main): ~02:00Z 2026-05-31
 
 ---
 
 ## Wave-2 corrected conclusions (post H147-baseline-correction)
 
-1. **H173 result is wave-2's only genuine test-level improvement** — test_SP=3.5458 BEAT H147 SOTA 3.5634 by -0.018pp. test_VP=3.7793 BREACHED floor 3.643 by +0.136pp. Mechanism: vol_p floor 0.05 frees ~0.10 budget for GradNorm autonomous SP-guardian elevation (w_cp +0.09 above H147), but VP starves.
-2. **H172/H174/H175 trail H147 on val throughout (parallel shift, no advantage)** — corrected from prior "mechanism reversal" narratives. EMA, PE-density-shift, and Charbonnier-yz @ 0.05 mechanisms all produce STABLE parallel trails of varying magnitude:
-   - H175 smallest trail (+0.05-0.11pp across metrics)
-   - H172 medium trail (+0.10-0.26pp)
-   - H174 largest trail (+0.08-0.24pp, widening late-cosine)
-3. **Resource conservation law's positive direction is narrower than thought** — only the vol_p floor mechanism (H173) produces actual test-level SP improvement. EMA / PE-density / Charbonnier-coverage do NOT activate SP-protection at val.
+1. **H173 result is wave-2's only genuine test-level improvement** — test_SP=3.5458% BEAT H147 SOTA 3.5634% by -0.018pp. test_VP=3.7793% BREACHED floor 3.643% by +0.136pp. Mechanism: vol_p floor 0.05 frees ~0.10 budget for GradNorm autonomous SP-guardian elevation (w_cp +0.09 above H147), but VP starves.
+2. **H172/H174/H175 trail H147 on val throughout (parallel shift, no advantage)**:
+   - H174 (PE-σ density shift): ALL 3 test floor caps BREACHED (test_VP +0.012, test_SP +0.110, test_ABU +0.028) + WSS regress — CLOSED NON-MERGE
+   - H175 (Charbonnier yz @ 0.05): test_VP PASS, test_ABU PASS, **test_SP BREACH +0.068pp**, WSS regress — CLOSING NON-MERGE
+   - H172 (EMA 0.9999): terminal pending, all EP readings trail H147 by +0.10-0.25pp — NON-MERGE
+3. **Resource conservation law:** Any perturbation that adds optimization pressure on WSS pathway costs SP floor. The vol_p floor mechanism (H173 family) is the ONLY wave-2 axis that moves w_cp in the SP-protective direction.
+4. **VP starvation timing hypothesis** (to be tested by H178): H173's 8-EP cosine may not give GradNorm enough time to recover VP after initial SP-protection surge. 16-EP cosine may provide VP-recovery window in EP9-14.
 
 ---
 
@@ -101,8 +101,9 @@ Wave-2 explored whether GradNorm budget-release mechanisms could protect SP whil
 
 ## Wave-3 design queue (post-wave-2 harvest, prioritized by corrected findings)
 
-1. **H176** (in progress, frieren) — vol_p_floor 0.10 midpoint, 8-EP screen. Pivot decision at ~20:00Z.
-2. **H177 candidate** — SP-guardian elevation via DIRECT w_cp initialization at fixed w_vol_p=0.15. Disentangles SP-protection mechanism from vol_p starvation. If H176 also breaches VP, this becomes the primary candidate.
-3. **H178 candidate** — H173 mechanism (vol_p floor 0.05) at 16-EP slow cosine. Tests whether longer cosine allows VP to recover after early SP-protection. Per H173 student follow-up #3.
-4. **H179 candidate** — H175 mechanism (wss_charb yz @ 0.05) stacked with H173 mechanism (vol_p_floor 0.10) — combined Charbonnier coverage + GradNorm budget relaxation. WARNING: corrected wave-2 finding shows H175 alone produces no advantage; stacking may not help.
-5. **H180 candidate** — Researcher-agent new structural hypothesis (pending wave-2 harvest).
+1. **H178** (dispatched, fern PR #1493) — vol_p_floor 0.05 at 16-EP slow cosine. Tests VP-starvation timing hypothesis from H173.
+2. **H176** (in progress, frieren PR #1486) — vol_p_floor 0.10 midpoint at 8-EP screen. Orthogonal to H178 (floor midpoint vs cosine length).
+3. **H177 candidate** — SP-guardian elevation via DIRECT w_cp initialization at fixed w_vol_p=0.15. Disentangles SP-protection mechanism from vol_p starvation. Primary if both H176 AND H178 confirm VP breach is unavoidable at floor=0.05.
+4. **H179 candidate** — H175 mechanism (wss_charb yz @ 0.05) stacked with H173 mechanism (vol_p_floor 0.10) — combined Charbonnier coverage + GradNorm budget relaxation. WARNING: corrected wave-2 finding shows H175 alone produces no advantage; stacking may not help on test_SP.
+5. **H180 candidate** — Researcher-agent structural hypothesis (pending wave-2 full harvest at ~20:00Z).
+6. **Nezuko assignment pending** — after H175 close; will dispatch wave-3 next cycle.
