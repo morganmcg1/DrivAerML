@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 18:55Z | Branch: `tay` | **SOTA: H300 per-channel calibration — MERGED 18:48Z** | Round 4k+2
+**Updated**: 2026-05-30 20:10Z | Branch: `tay` | **SOTA: H300 per-channel calibration — MERGED 18:48Z** | Round 4k+2
 
 ## Today's SOTA progression (3 merges in 4 hours):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
@@ -27,33 +27,37 @@
 
 ---
 
-## Active Fleet (as of 18:55Z — 8 students active)
+## Active Fleet (as of 20:10Z — 8 students active, all assigned)
 
 | PR | Student | Hypothesis | val_abupt | Status | ETA |
 |---|---|---|---:|---|---|
-| **#1498** | **edward** | **H312: H296 (K=4+8-res+mirror) + calibration** | — | 🆕 assigned 18:48Z | ~01:30Z |
-| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | — | 🟢 spsor9f8 primary running (launched 18:26Z) | ~01:00Z |
-| **#1496** | **thorfinn** | **H305: BC enforcement — zero WSS normal component τ·n̂=0** | — | 🟢 evc7lnkf running (17:45Z, first run crashed) | ~00:30Z |
-| **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | 🟢 uhx782vd primary launched 18:05Z | ~00:30Z |
-| **#1492** | **frieren** | **H302: Asymmetric modality resolution (surf-denser × vol-baseline, K=4)** | 5.9259% (interim) | 🟡 b3724r40 running rt=191min | ~20:52Z |
-| **#1491** | **nezuko** | **H301: Per-channel best-of-K (heterogeneous aggregation)** | 5.9262% ✗ | 🟡 val FAILS gate (+4.1bp); test arm pending | ~21:00Z |
-| **#1487** | **alphonse** | **H298C: Input-coord noise σ=1e-3 (confirming dead direction)** | — | 🔴 n5jgfgtb running — will fail harder than H298B (val=7.82%) | ~19:50Z |
+| **#1502** | **alphonse** | **H316: Calibration component ablation — bias-only vs scale-only vs full** | — | 🆕 assigned 20:08Z | ~03:00Z (3 arms ~5h each) |
+| **#1501** | **nezuko** | **H315: TTA aggregation operator sweep — median & trimmed-mean** | — | 🆕 assigned 19:54Z (pod picking up) | ~01:30Z |
+| **#1500** | **frieren** | **H314: Student-t weight-space noise for TTA diversity (df=4)** | — | 🟢 ga7cwm4a primary running (launched 20:15Z) | ~01:15Z |
+| **#1499** | **askeladd** | **H313: Regional per-zone post-hoc affine calibration** | — | 🆕 assigned 19:52Z (pod picking up) | ~01:30Z |
+| **#1498** | **edward** | **H312: H296 (K=4+8-res+mirror) + full calibration** | — | 🟢 enf61qrr running (19:00Z, rt=68min @ 20:08Z) | ~00:00Z |
+| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | — | 🟡 spsor9f8 CRASHED 19:04Z; retry dsgl7bn8 running (19:28Z, rt=49min @ 20:18Z) | ~00:30Z |
+| **#1496** | **thorfinn** | **H305: BC enforcement — zero WSS normal component τ·n̂=0** | — | 🟢 evc7lnkf running 152min — no metrics logged yet | ~22:30Z |
+| **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | 🟢 uhx782vd primary running rt=132min (no metrics yet) | ~22:30Z |
 
-(Askeladd H299 closed 18:48Z — Finding UUU-embed-noise-null)
+**Closed this loop (20:00-20:10Z)**:
+- **PR #1487 alphonse H298** — CLOSED 20:02Z. Finding 'coord-noise-harmful' confirmed (H298B val=7.82%, monotonic slope).
+- **PR #1491 nezuko H301** — CLOSED 19:38Z (concurrent advisor). val=5.9262 fails new gate.
+- **PR #1492 frieren H302** — CLOSED 19:24Z (concurrent advisor). b3724r40 crashed in eval with val=5.9259 (fails new gate).
+- **PR #1488 askeladd H299** — CLOSED 18:48Z. Finding UUU-embed-noise-null.
 
-**Hot watch (18:55Z)**:
-- **Alphonse H298C** (~19:50Z) → close H298, assign H310 (2nd EP15 seed retrain for weight-space averaging)
-- **Frieren H302** (~20:52Z) → likely fails raw gate; apply calibration overlay before closing decision
-- **Nezuko H301** (~21:00Z) → test arm landing; apply calibration overlay before closing decision
-- **Thorfinn H305 / Tanjiro H303** (~00:30Z) → SOTA candidates if they pass calibrated gate
-- **Edward H312** (~01:30Z) → highest-probability next SOTA (H296+cal, expected −0.5bp vs H300)
-- **Fern H306** (~01:00Z) → per-point confidence weighting, uncertain if additive with calibration
+**Hot watch (20:10Z)**:
+- **Edward H312** (~00:00Z) → highest-probability next SOTA (K=4+8-res + full cal, expected slightly below H300's 5.7399)
+- **Fern H306 retry dsgl7bn8** (~00:30Z) → per-point confidence weighting, may stack with calibration
+- **Tanjiro H303 / Thorfinn H305** (~22:30Z) → 4.5h since launch but no first-eval-row logged yet; verify they aren't stuck
+- **Frieren H314 ga7cwm4a** (~01:15Z) → Student-t df=4 noise; tests heavy-tail TTA diversity
+- **Askeladd H313 / Nezuko H315** (~01:30Z once pods launch) → new orthogonal axes (regional calibration, robust aggregation)
+- **Alphonse H316** (~03:00Z) → ablation reveals which DOF of H300's 10 calibration params does the 28bp work
 
-**Queue for next idle students (alphonse idle ~19:50Z, nezuko ~21:00Z)**:
-- **H310**: commission 2nd EP15 seed retrain from different seed (~5h training) → enables H307 weight-space averaging
-- **H313**: quadratic per-channel calibration (add α₂x² term, same 34-car val fit) — richer bias correction
-- **H314**: H301 (best-of-K) + calibration overlay — if H301 raw test < 5.77, combine
-- **H315**: H302 (asym ladders) + calibration overlay if interesting raw number
+**Queue for next idle students**:
+- **H310**: commission 2nd EP15 seed retrain from different seed (~5h training) → unblocks H307 weight-space averaging
+- **H317**: Quadratic per-channel calibration (15 params instead of 10) if alphonse H316 shows full > bias-only
+- **H318**: Calibration on H299 (embedding-only noise) — same recipe with cal overlay; would test if Finding UUU's null result reverses under post-hoc correction
 
 ---
 
