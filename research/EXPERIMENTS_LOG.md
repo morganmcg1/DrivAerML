@@ -1,3 +1,37 @@
+## 2026-05-30 05:10Z — PR #1459 frieren H279 CLOSED: Finding DDD + EEE — Sobol×EP15 super-additive but anti dominates Sobol
+
+### PR #1459 frieren H279 — CLOSED: EP15+Sobol-K=5+6-res+mirror fails H275 SOTA gate
+
+- **Branch**: frieren/h279-ep15-sobol-K5-stack
+- **Hypothesis**: Sobol QMC K=5 + EP15 — does QMC coverage benefit transfer to the new SOTA checkpoint?
+- **W&B run**: `3aksvbho`
+
+| Metric | H279 (yours) | H275 SOTA | Δ vs SOTA |
+|---|---:|---:|---:|
+| val_abupt | 5.9291% | 5.9243% | **+4.8bp WORSE** |
+| test_abupt | 5.7734% | 5.7690% | **+4.4bp WORSE** |
+| test_WSS | 6.6792% | 6.6743% | +4.9bp WORSE |
+| test_SP | 3.6448% | 3.6427% | +2.1bp WORSE |
+| test_VP | 3.3809% | 3.3788% | +2.1bp WORSE |
+
+**Frieren used stale H271 gate** (pre-H275 merge) and reported as SOTA. After re-evaluation against H275 SOTA gate: fails val by 4.8bp / test by 4.4bp.
+
+**Finding DDD-Sobol-EP15-super-additive** (BANKED): Frieren's clean decomposition shows Sobol×EP15 compounds super-additively in random K=5:
+- Sobol vs random at EP13 (H271 vs H253): test −5.0bp
+- Sobol vs random at EP15 (H279 vs H267): test **−9.1bp** (nearly double)
+- EP15 vs EP13 at random (H267 vs H253): test −2.2bp
+- EP15 vs EP13 at Sobol (H279 vs H271): test **−6.3bp** (3× the random gain)
+
+The two effects reinforce each other rather than competing. Consistent with EP15 having a broader basin where low-discrepancy probing is even more sample-efficient.
+
+**Finding EEE-anti-dominates-Sobol-at-EP15** (BANKED): H279 (Sobol-K=5, val 5.9291) vs H275 (anti-K=3, val 5.9243) → **anti-thetic K=3 still beats Sobol K=5 at EP15 by 4.8bp val / 4.4bp test**, despite Sobol using 5 fwds and anti using 6 fwds. Anti's linear-Taylor-term cancellation mechanism dominates Sobol's QMC coverage benefit at BOTH EP13 (Finding VV/WW) AND EP15.
+
+**Key cross-pollination implication for Edward H284 (in-flight)**: His Sobol×anti×EP15 compound at K=3 currently has val 5.9242 (essentially tied with H275). If test_arm < 5.7690 → super-additive triple-mechanism, new SOTA. If > 5.7690 → Sobol+anti saturates at K=3, Finding EEE generalizes.
+
+Wall time: ~185 min (run history: 3 prior crashes/aborts, then clean run at 01:52Z → 04:57Z). NCCL timeout patch + correct `--sobol-B-seed` flag enabled clean completion.
+
+---
+
 ## 2026-05-30 04:25Z — PR #1461 fern H281 CLOSED: Finding AAA extends to EP13 (σ=3e-4 worse than σ=5e-4 in anti-thetic, both EPs)
 
 ### PR #1461 fern H281 — CLOSED: EP13+anti-K=3+σ=3e-4+6-res+mirror fails H275 gate

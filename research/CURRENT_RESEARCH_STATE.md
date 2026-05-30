@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 04:25Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
+**Updated**: 2026-05-30 05:10Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
 
 ---
 
@@ -21,7 +21,7 @@
 
 ---
 
-## Active Fleet (as of 04:25Z — 8 students active)
+## Active Fleet (as of 05:10Z — 8 students active)
 
 | PR | Student | Hypothesis | Status | val | ETA |
 |---|---|---|---|---|---|
@@ -30,7 +30,7 @@
 | **#1471** | **alphonse** | **H286: Aggregation operator sweep on H275 SOTA** | 🆕 assigned (mean/median/trimmed/Huber) | — | ~06:30Z |
 | **#1472** | **askeladd** | **H287: EP14 checkpoint axis test** | 🆕 assigned (EP14 vs EP15 adjacent) | — | ~06:30Z |
 | **#1473** | **fern** | **H288: 8-res densification on H275 SOTA** | 🆕 just assigned (8-res grid: +40960+57344) | — | ~07:30Z |
-| **#1459** | **frieren** | **H279: EP15+Sobol-K5+6-res+mirror** | 🟠 retry2 running (val 5.9291 fails gate, 3 prior crashes) | 5.9291 | ~04:40Z |
+| **#1475** | **frieren** | **H289: EP12 checkpoint axis test** | 🆕 just assigned (EP12 vs EP15 — completes 4-pt EP-curve) | — | ~08:00Z |
 | **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟠 pre-eval after 2 crashes (compute-heavy; alive, GPUs 100%) | — | ~06:30Z |
 | **#1466** | **thorfinn** | **H283: EP15+σ=3e-4+Sobol K=5+6-res+mirror** | 🟡 running (NCCL-relaunched 02:11Z) | — | ~05:25Z |
 
@@ -39,8 +39,8 @@
 **Hot watch**: 
 - **Edward H284** is the PRIMARY SOTA candidate — val 5.9242 ties SOTA gate (within 0.01bp), Sobol×anti×EP15 triple compound. Test arm decides merge vs close. ETA ~04:50Z.
 - Tanjiro H285 K=4 EP15 is the secondary candidate (next ~07:10Z).
-- Frieren H279 val 5.9291 (+4.8bp over SOTA gate) — unlikely SOTA but informative for Sobol×EP15 mechanism characterization.
 - Nezuko H280 had 2 prior crashes (likely NCCL); current retry has been pre-eval for 2.5h. Worth monitoring closely if she crashes again.
+- Frieren H279 CLOSED (Sobol K=5 EP15 val 5.9291 +4.8bp over SOTA gate) — banked Findings DDD-Sobol-EP15-super-additive and EEE-anti-dominates-Sobol-at-EP15.
 - Fern H281 closed with Finding AAA confirmed at EP13 (σ=3e-4 worse than σ=5e-4 in anti-thetic on BOTH EP13 and EP15). σ-axis fully closed for anti-thetic stack.
 
 ---
@@ -49,6 +49,7 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1459 frieren H279 | EP15+Sobol-K5+6-res+mirror | **Findings DDD-Sobol-EP15-super-additive + EEE-anti-dominates-Sobol-at-EP15** (close, val 5.9291 +4.8bp / test 5.7734 +4.4bp fails H275 gate; anti structurally dominates Sobol at both EPs) | 5.9291 | 5.7734 |
 | #1461 fern H281 | EP13+σ=3e-4+anti-K=3 stacked | **Finding AAA confirmed at EP13** (close, σ=3e-4 worse than σ=5e-4 on EP13+anti too — σ-axis CLOSED for anti family on both EPs) | 5.9342 | 5.7785 |
 | #1465 alphonse H282 | EP13+anti-K=2 stacked | **Finding BBB-K-curve-floor-EP13** (close, K=2 floor: +9.7bp val vs H275 SOTA) | 5.9340 | 5.7783 |
 | #1458 askeladd H278 | EP13+anti-K=4 stacked | **Finding BBB-K-curve-saturates-at-K3-EP13** (close, K=4 only −0.6bp over K=3, both fail H275 gate) | 5.9316 | 5.7758 |
@@ -65,10 +66,12 @@
 
 ---
 
-## Findings Bank (31 banked, AAA extended to both EPs)
+## Findings Bank (33 banked, DDD+EEE added 05:10Z)
 
 | ID | Source | Summary |
 |---|---|---|
+| **EEE-anti-dominates-Sobol-at-EP15** | H279 frieren (closed 05:00Z) vs H275 edward (merged) | Anti-K=3 beats Sobol-K=5 at EP15 by +4.8bp val / +4.4bp test (despite Sobol using 5 vs anti using 6 forwards). Anti's linear-cancellation structurally dominates Sobol's QMC coverage at BOTH EP13 (Finding VV/WW) and EP15. Anti is the right paradigm; Sobol is asymptotically suboptimal |
+| **DDD-Sobol-EP15-super-additive** | H279 frieren (closed 05:00Z) vs H271 frieren (merged) | Sobol×EP15 nearly doubles benefit vs Sobol×EP13 (−9.1bp test vs −5.0bp). EP15 vs EP13 also amplifies under Sobol (−6.3bp test vs −2.2bp under random). EP15 flat minimum interacts super-additively with QMC coverage as well — mirroring Finding ZZ for anti |
 | **BBB-K-curve-saturates-at-K3-EP13** | H282 alphonse + H278 askeladd (closed 03:35Z) | Full anti-thetic K-curve at EP13: K=2→K=3 is +1.8bp, K=3→K=4 is only −0.6bp (noise floor). K-axis closed at EP13. Linear Taylor cancellation captures most benefit at K=1 pair; further K adds diminishing K-averaging. Cross-EP: H275 K=3 EP15 beats H278 K=4 EP13 by 7.3bp → checkpoint axis dominates K-axis |
 | **AAA-sigma-flat-antithetic** | H277 tanjiro + H281 fern (closed 02:50Z & 04:25Z) | σ=3e-4 uniformly slightly WORSE than σ=5e-4 in anti-thetic family on BOTH EP13 (+9.9bp val) and EP15 (+1.2bp val). σ axis fully closed for anti-thetic stack family — linear Taylor cancellation already exhausts the σ-dependent benefit. Bigger gap at EP13 due to less flat loss surface |
 | **ZZ-EP15-anti-super-additive** | H275 edward (merged 01:17Z) | EP15×anti-K=3 is super-additive: +0.28bp val / +0.51bp test bonus vs pure-additive expectation. Flatter EP15 EMA minimum makes Taylor linear-term cancellation more meaningful. All channels improve (WSS −6.2bp, SP −8.8bp, VP −5.8bp) vs H274 |
@@ -89,13 +92,16 @@
 ## Next-Round Hypothesis Queue
 
 After current round resolves (new gate val < 5.9243 / test < 5.7690):
-1. **Sobol × anti × EP15**: H284 edward (ETA ~05:00Z) — triple-mechanism compound, primary SOTA candidate
+1. **Sobol × anti × EP15**: H284 edward (ETA ~04:50Z) — triple-mechanism compound, primary SOTA candidate
 2. **Anti-thetic K-scaling at EP15**: H285 tanjiro K=4 (ETA ~07:10Z)
 3. **Aggregation operator**: H286 alphonse (just assigned) — mean vs median vs trimmed vs Huber at H275 SOTA recipe; untested mechanism axis
-4. **Checkpoint axis**: H287 askeladd (just assigned) — EP14 adjacent to SOTA EP15; 3rd point on EP-curve
-5. **K-axis at EP13 CLOSED (Finding BBB)**: Do not assign further K variations at EP13 anti-thetic. K=3 is the sweet spot.
-6. **σ axis CLOSED at EP15+anti (Finding AAA)**: σ=5e-4 is optimal; no further σ variations on anti-thetic stack.
-7. **SP floor**: 3.6427 → 3.577 = 6.5bp gap — H283 thorfinn (σ+Sobol) and H281 fern (σ+anti, val 5.934 already failing) test SP channels.
+4. **Checkpoint axis EP14**: H287 askeladd (just assigned) — EP14 adjacent to SOTA EP15; 3rd point on EP-curve
+5. **8-res densification**: H288 fern (just assigned) — denser res grid (+40960+57344) at H275 SOTA recipe
+6. **Checkpoint axis EP12**: H289 frieren (just assigned) — completes 4-pt EP-curve (EP12/EP13/EP14/EP15) for paper figure
+7. **K-axis at EP13 CLOSED (Finding BBB)**: Do not assign further K variations at EP13 anti-thetic. K=3 is the sweet spot.
+8. **σ axis CLOSED at EP15+anti (Finding AAA)**: σ=5e-4 is optimal; no further σ variations on anti-thetic stack.
+9. **Sobol×EP15 CLOSED (Finding EEE)**: Anti-K=3 dominates Sobol-K=5 at both EPs; do not test more Sobol-only variants on EP15 stack.
+10. **SP floor**: 3.6427 → 3.577 = 6.5bp gap — H283 thorfinn (σ+Sobol) likely closes σ at Sobol family too.
 
 ---
 
@@ -115,7 +121,7 @@ After current round resolves (new gate val < 5.9243 / test < 5.7690):
 | EP15 + σ=3e-4 + Sobol K=5 + 6-res + mirror | 🟡 H283 thorfinn (running) |
 | EP15 + σ=3e-4 + anti-thetic K=3 + 6-res + mirror | ✗ H277 5.9255/5.7705 — Finding AAA (σ=3e-4 flat/unfavorable under anti-thetic) |
 | EP15 + anti-thetic K=4 pairs (8p) + 6-res + mirror | 🟡 H285 tanjiro (running) |
-| EP15 + Sobol QMC K=5 + 6-res + mirror | 🟡 H279 frieren (running) |
+| EP15 + Sobol QMC K=5 + 6-res + mirror | ✗ H279 5.9291/5.7734 — Findings DDD-Sobol-EP15-super-additive + EEE-anti-dominates-Sobol-at-EP15 (fails H275 gate +4.8/+4.4bp; anti beats Sobol at EP15 too) |
 | EP13 + Sobol × anti-thetic K=5 (10p) + 6-res + mirror | 🟡 H280 nezuko (running) |
 | EP15 + Sobol × anti-thetic K=3 + 6-res + mirror | 🟡 H284 edward (running) |
 | EP13 + anti-thetic K=3 + σ=3e-4 + 6-res + mirror | ✗ H281 5.9342/5.7785 — Finding AAA confirmed at EP13 (+9.9bp val vs SOTA) |
