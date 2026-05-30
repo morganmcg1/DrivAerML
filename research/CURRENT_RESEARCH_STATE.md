@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-30 13:00Z**
+- **2026-05-30 14:00Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=~5.80% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
@@ -45,38 +45,36 @@ H147 val terminal at EP30 = 6.5451 WSS. test_WSS=6.5409 (~0.004pp lower). H147 v
 
 Wave-2 explored whether GradNorm budget-release mechanisms could protect SP while WSS catches up. **Corrected wave-2 verdict: NONE of H172/H174/H175 produced any val-level advantage over H147** — all show stable parallel trails on every metric. Only H173 produced a genuine test-level signal, but with VP floor breach.
 
-### Active runs (13:00Z status)
+### Active runs (14:00Z status)
 
 **H172 (tanjiro, PR #1469) — EMA decay 0.9999:**
-- Step 120735 (EP11, runtime 9.3h)
-- EP11: WSS=6.7133 (+0.121pp vs H147 6.5926), VP=3.7436 (+0.263pp), SP=3.9439 (+0.115pp), ABU=5.9979 (+0.154pp)
-- Trailing H147 throughout — EP6 gap +0.246pp, narrowed to EP10 +0.103pp ("EMA crossover" signature), widening again at EP11 (+0.121pp)
-- VP REVERSED EP10→EP11 (3.6975 → 3.7436, +0.046pp rising)
-- Projection at EP12 stop: test_WSS 6.62-6.67% = TRAILS H147 SOTA by +0.08-0.13pp
-- **Direction: NON-MERGE on WSS** (the primary metric)
-- Pre-authorized stop at EP12
+- Step 141880 (mid-EP13, runtime 9.72h, state=running but should stop at EP12)
+- EP12: WSS=6.6981 (+0.124pp vs H147 6.5742), VP=**3.6633 (REVERSED back down)** (+0.189pp), SP=3.9367 (+0.111pp), ABU=5.9702 (+0.141pp)
+- VP reversal at EP12 removes immediate floor-breach risk (val_VP 3.66 only +0.020 above cap 3.643)
+- Trail trajectory: EP6 +0.246pp → EP10 +0.103pp (EMA-crossover signature) → EP12 +0.124pp (gap unchanged)
+- Direction: **NON-MERGE on WSS** — gap won't close to MERGE in 2-3 more EPs
+- Pre-authorized STOP at EP12 + stop-nudge posted 14:00Z
 
-**H174 (fern, PR #1478) — PE sigmas shifted-right density-preserved:**
-- Step 76831 (EP7, runtime 5.2h)
-- EP7: WSS=6.9023 (+0.222pp vs H147 6.6798), VP=3.8047 (+0.201pp), SP=4.0686 (+0.184pp), ABU=6.1726 (+0.235pp)
-- **CORRECTED: SP signal NEVER had advantage** — has been +0.08 to +0.18pp ABOVE H147 from EP1 throughout, widening late-cosine
-- Mechanism: PE-sigma rightward shift produces stable PARALLEL TRAIL on all metrics, gap widens late-cosine
-- Direction: NON-MERGE (likely test_SP floor breach)
+**H174 (fern, PR #1478) — PE sigmas shifted-right density-preserved — FINISHED EP8:**
+- Step 87807 (EP8 terminal, runtime 6.16h, state=finished)
+- EP8: WSS=6.8989 (+0.249pp vs H147 6.6498), VP=3.7988 (+0.240pp), SP=4.0760 (+0.211pp), ABU=6.1692 (+0.267pp)
+- Monotonic widening: EP1 +0.106pp → EP8 +0.249pp on WSS
+- Direction: **NON-MERGE on WSS** — test_VP and test_SP likely FLOOR BREACH
+- EP8 terminal ack posted 14:00Z; awaiting SENPAI-RESULT + test eval
 
 **H175 (nezuko, PR #1480) — wss_charb yz @ 0.05 (magnitude-preserved coverage):**
-- Step 65855 (EP6, runtime 4.5h)
-- EP6: WSS=6.8182 (+0.097pp vs H147 6.7215), VP=3.7407 (+0.086pp), SP=3.9589 (+0.048pp), ABU=6.0670 (+0.085pp)
-- **CORRECTED: SP signal NEVER had advantage** — has been +0.02 to +0.11pp ABOVE H147 from EP1 throughout (parallel trail, NOT sustained-below narrative)
-- Mechanism: Charbonnier yz @ 0.05 = 0.10 total produces tightest parallel trail of wave-2 but still no payoff
-- Projection at EP8 terminal: test_WSS 6.65-6.75% = TRAILS H147 SOTA by +0.11-0.21pp
-- Direction: NON-MERGE on WSS
+- Step 82346 (running past EP7 76831, EP8 terminal ETA ~14:15Z)
+- EP7: WSS=6.7878 (+0.108pp vs H147 6.6798), VP=3.7017 (+0.098pp), SP=3.9521 (+0.067pp), ABU=6.0373 (+0.100pp)
+- **Tightest parallel trail of wave-2** — WSS gap oscillating around +0.10pp from EP4 onward
+- Test projection EP8: test_WSS 6.65-6.75% TRAILS H147 SOTA by +0.11-0.21pp
+- Direction: **NON-MERGE on WSS** — but test floors likely PASS
 
-**H176 (frieren, PR #1486) — vol_p_floor 0.10 (midpoint) — JUST LAUNCHED:**
-- Smoke at step ~4140 (38% through EP1), 8 ranks running, runtime 0.07h
-- 8-EP H173-style screen with single-parameter change `gradnorm_min_w_vol_p: 0.05 → 0.10`
-- Approved by advisor after frieren caught 3 PR-command/PR-prose inconsistencies and resolved toward prose intent
-- Smoke EP1 ETA ~13:55Z; if clean, main 8-EP launch ETA ~14:00Z, terminal harvest ~20:00Z
-- **Wave-2's only remaining viable mechanism test** — tests whether SP-protection mechanism survives at less aggressive floor
+**H176 (frieren, PR #1486) — vol_p_floor 0.10 (midpoint) — SMOKE EP1 PASS:**
+- Smoke EP1 finished at step 10975 (rt 1.01h on rank0); main 8-EP authorized 14:00Z
+- EP1 val (rank0 esku9ynv): WSS=12.8812 (+0.066pp vs H147 12.8153), VP=14.5251 (+0.408pp), **SP=8.5610 (-0.340pp BELOW H147!)**, ABU=13.1050 (+0.059pp)
+- **SP-protection mechanism ACTIVE at floor=0.10** — H173 signature present at half the budget displacement
+- Main 8-EP launch ETA ~14:05Z, terminal harvest ~20:00Z
+- **Wave-2's only remaining viable mechanism test** — key question: does test_VP stay under floor at terminal?
 
 ---
 
