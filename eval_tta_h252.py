@@ -89,6 +89,16 @@ class EvalConfig:
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
 
+    # H299: per-layer sigma overrides. Sentinel -1.0 means "unset"; set any
+    # of these to a non-negative value to enter per-group mode, where every
+    # parameter gets its sigma from its group classifier (embedding / attn /
+    # mlp / other) and `weight_noise_sigma` is ignored. Unset groups in
+    # per-group mode default to 0.0.
+    weight_noise_sigma_embedding: float = -1.0
+    weight_noise_sigma_attn: float = -1.0
+    weight_noise_sigma_mlp: float = -1.0
+    weight_noise_sigma_other: float = -1.0
+
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
     output_dir: str = "outputs/h252_eval"
@@ -239,6 +249,82 @@ def chunk_global_indices(view_index: int, view_count: int, n_full: int) -> torch
 # --- weight-noise helpers ---
 
 
+# H299: parameter-group classification for per-layer weight-noise stratification.
+# First-match-wins; embedding is checked first so RFF / string-sep / pos-embed /
+# coord-bias paths never fall into the attn or mlp buckets even though the
+# bias MLPs structurally contain "mlp"-like names internally.
+_EMBEDDING_KEYS = (
+    "pos_emb", "string_sep", "rff", "position", "embed",
+    "surface_bias.net", "volume_bias.net", "coord_emb",
+)
+_ATTN_KEYS = (
+    "attn", "attention", "q_proj", "k_proj", "v_proj", "out_proj", "qkv",
+)
+_MLP_KEYS = (
+    "mlp", "ffn", "fc1", "fc2", "gate_proj", "up_proj", "down_proj",
+)
+
+
+def get_param_group(name: str) -> str:
+    lname = name.lower()
+    if any(k in lname for k in _EMBEDDING_KEYS):
+        return "embedding"
+    if any(k in lname for k in _ATTN_KEYS):
+        return "attn"
+    if any(k in lname for k in _MLP_KEYS):
+        return "mlp"
+    return "other"
+
+
+def resolve_per_group_sigmas(cfg: EvalConfig) -> tuple[dict[str, float], bool]:
+    """Return (sigmas_per_group, per_group_mode).
+
+    Sentinel -1.0 means "unset". If ANY of the four per-group flags is set
+    (>=0), enter per-group mode with 0.0 for the still-unset groups; the
+    legacy single `weight_noise_sigma` is ignored. Otherwise fall back to
+    the legacy single sigma replicated across all four groups.
+    """
+    raw = {
+        "embedding": cfg.weight_noise_sigma_embedding,
+        "attn": cfg.weight_noise_sigma_attn,
+        "mlp": cfg.weight_noise_sigma_mlp,
+        "other": cfg.weight_noise_sigma_other,
+    }
+    per_group_mode = any(v >= 0.0 for v in raw.values())
+    if per_group_mode:
+        return {g: max(0.0, v) for g, v in raw.items()}, True
+    return {g: cfg.weight_noise_sigma for g in raw.keys()}, False
+
+
+def build_sigma_per_name(
+    param_names: Iterable[str],
+    sigmas_per_group: dict[str, float],
+) -> dict[str, float]:
+    return {name: sigmas_per_group[get_param_group(name)] for name in param_names}
+
+
+def summarize_param_groups(
+    clean: dict[str, torch.Tensor],
+    sigmas_per_group: dict[str, float],
+) -> dict[str, dict]:
+    summary: dict[str, dict] = {
+        g: {"n_tensors": 0, "n_elements": 0, "sigma": sigmas_per_group[g], "examples": []}
+        for g in ("embedding", "attn", "mlp", "other")
+    }
+    total_elements = 0
+    for name, t in clean.items():
+        g = get_param_group(name)
+        summary[g]["n_tensors"] += 1
+        summary[g]["n_elements"] += int(t.numel())
+        if len(summary[g]["examples"]) < 4:
+            summary[g]["examples"].append(name)
+        total_elements += int(t.numel())
+    for d in summary.values():
+        d["fraction"] = (d["n_elements"] / total_elements) if total_elements else 0.0
+    summary["_total_elements"] = total_elements
+    return summary
+
+
 @torch.no_grad()
 def snapshot_clean_params(module: nn.Module) -> dict[str, torch.Tensor]:
     snap: dict[str, torch.Tensor] = {}
@@ -259,15 +345,18 @@ def restore_clean_params(module: nn.Module, clean: dict[str, torch.Tensor]) -> N
 def perturb_relative_(
     module: nn.Module,
     clean: dict[str, torch.Tensor],
-    sigma: float,
+    sigma_per_param: dict[str, float],
     seed: int,
     device: torch.device,
     sign: float = 1.0,
 ) -> None:
-    """p <- clean_p + sign * randn(seed) * sigma * |clean_p|, identical across DDP ranks.
+    """p <- clean_p + sign * randn(seed) * sigma_per_param[name] * |clean_p|, DDP-identical.
 
     With matched ``seed`` and ``sign=±1.0`` calls, produces an anti-thetic pair
-    whose linear Taylor term cancels in the average (Finding NN / H274).
+    whose linear Taylor term cancels in the average (Finding NN / H274). For
+    H299 per-layer stratification, sigma can differ by parameter (typically
+    by group: embedding / attn / mlp / other). Params with sigma == 0 are
+    restored to their clean value without consuming any random draws.
     """
     gen = torch.Generator(device=device)
     gen.manual_seed(seed)
@@ -275,9 +364,13 @@ def perturb_relative_(
         if not p.dtype.is_floating_point:
             continue
         clean_p = clean[name]
-        noise = torch.randn(p.shape, generator=gen, device=device, dtype=p.dtype)
-        noise.mul_(sigma * sign).mul_(clean_p.abs())
-        p.data.copy_(clean_p).add_(noise)
+        sigma = sigma_per_param.get(name, 0.0)
+        if sigma > 0.0:
+            noise = torch.randn(p.shape, generator=gen, device=device, dtype=p.dtype)
+            noise.mul_(sigma * sign).mul_(clean_p.abs())
+            p.data.copy_(clean_p).add_(noise)
+        else:
+            p.data.copy_(clean_p)
 
 
 # --- per-case stacked TTA ---
@@ -296,7 +389,8 @@ def process_case_stacked(
     use_mirror: bool,
     clean: dict[str, torch.Tensor],
     K_passes: int,
-    sigma: float,
+    sigma_per_param: dict[str, float],
+    max_sigma: float,
     seed_base: int,
     antithetic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
@@ -308,6 +402,10 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    H299: ``sigma_per_param`` maps each parameter name to its noise sigma. If
+    every entry is 0 (or ``max_sigma == 0``), the loop reduces to the clean
+    model evaluation.
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -330,7 +428,7 @@ def process_case_stacked(
 
     # Build the (noise_idx, sign) schedule. Anti-thetic pairs share a seed so
     # +ε / −ε use the SAME draw of ε (otherwise it would just be 2K i.i.d.).
-    if antithetic and sigma > 0.0:
+    if antithetic and max_sigma > 0.0:
         schedule = [(k, sign) for k in range(K_passes) for sign in (+1.0, -1.0)]
     else:
         schedule = [(k, +1.0) for k in range(K_passes)]
@@ -338,10 +436,15 @@ def process_case_stacked(
     for k, sign in schedule:
         # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
         t_p = time.time()
-        if sigma > 0.0:
+        if max_sigma > 0.0:
             seed = (seed_base + k) * 100003
             perturb_relative_(
-                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
+                eval_module,
+                clean,
+                sigma_per_param=sigma_per_param,
+                seed=seed,
+                device=device,
+                sign=sign,
             )
         else:
             restore_clean_params(eval_module, clean)
@@ -448,7 +551,7 @@ def process_case_stacked(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
+    k_eff = K_passes * (2 if (antithetic and max_sigma > 0.0) else 1)
     n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
@@ -542,7 +645,8 @@ def evaluate_split_stacked(
     use_mirror: bool,
     clean: dict[str, torch.Tensor],
     K_passes: int,
-    sigma: float,
+    sigma_per_param: dict[str, float],
+    max_sigma: float,
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
@@ -574,7 +678,8 @@ def evaluate_split_stacked(
             use_mirror=use_mirror,
             clean=clean,
             K_passes=K_passes,
-            sigma=sigma,
+            sigma_per_param=sigma_per_param,
+            max_sigma=max_sigma,
             seed_base=seed_base,
             antithetic=antithetic,
         )
@@ -665,14 +770,25 @@ def main(argv: Iterable[str] | None = None) -> None:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
+    sigmas_per_group, per_group_mode = resolve_per_group_sigmas(cfg)
+    max_sigma = max(sigmas_per_group.values())
+
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
         print(f"Resolutions: {resolutions}")
         print(f"Modes: {modes}")
         k_eff_print = cfg.weight_noise_passes * (2 if cfg.antithetic_noise else 1)
+        if per_group_mode:
+            sigma_str = (
+                f"per-group: emb={sigmas_per_group['embedding']} "
+                f"attn={sigmas_per_group['attn']} mlp={sigmas_per_group['mlp']} "
+                f"other={sigmas_per_group['other']} (max={max_sigma})"
+            )
+        else:
+            sigma_str = f"single sigma_rel={cfg.weight_noise_sigma} (max={max_sigma})"
         print(
-            f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
+            f"Weight-noise TTA: {sigma_str} "
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
             f"seed_base={cfg.weight_noise_seed_base}"
@@ -713,9 +829,24 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     eval_module = unwrap_model(model)
     clean = snapshot_clean_params(eval_module)
+    sigma_per_param = build_sigma_per_name(clean.keys(), sigmas_per_group)
     if state.is_main:
         n_perturbed = sum(t.numel() for t in clean.values())
         print(f"Snapshotted {len(clean)} fp tensors ({n_perturbed:,} elements)")
+        group_summary = summarize_param_groups(clean, sigmas_per_group)
+        total = group_summary["_total_elements"]
+        print("Param-group breakdown (H299 stratification):")
+        for g in ("embedding", "attn", "mlp", "other"):
+            d = group_summary[g]
+            ex = ", ".join(d["examples"][:3])
+            print(
+                f"  {g:9s}: sigma={d['sigma']:.3e}  "
+                f"n_tensors={d['n_tensors']:4d}  "
+                f"n_elements={d['n_elements']:>12,}  "
+                f"frac={d['fraction']*100:5.2f}%  "
+                f"examples=[{ex}]"
+            )
+        print(f"  TOTAL n_elements={total:,}")
 
     val_case_ids = store.case_ids("val")
     test_case_ids = store.case_ids("test")
@@ -745,6 +876,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "n_val_cases": len(val_case_ids),
                 "n_test_cases": len(test_case_ids),
                 "ckpt_source": ckpt_source,
+                "per_group_mode": per_group_mode,
+                "sigma_embedding": sigmas_per_group["embedding"],
+                "sigma_attn": sigmas_per_group["attn"],
+                "sigma_mlp": sigmas_per_group["mlp"],
+                "sigma_other": sigmas_per_group["other"],
+                "max_sigma": max_sigma,
+                "param_group_breakdown": {
+                    g: {
+                        "n_tensors": group_summary[g]["n_tensors"],
+                        "n_elements": group_summary[g]["n_elements"],
+                        "fraction": group_summary[g]["fraction"],
+                        "sigma": group_summary[g]["sigma"],
+                    }
+                    for g in ("embedding", "attn", "mlp", "other")
+                },
             },
             tags=[
                 "h252",
@@ -783,11 +929,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                 k_eff_print = cfg.weight_noise_passes * (
                     2 if cfg.antithetic_noise else 1
                 )
+                if per_group_mode:
+                    sigma_dbg = (
+                        f"emb={sigmas_per_group['embedding']}"
+                        f"/attn={sigmas_per_group['attn']}"
+                        f"/mlp={sigmas_per_group['mlp']}"
+                        f"/other={sigmas_per_group['other']}"
+                    )
+                else:
+                    sigma_dbg = f"{cfg.weight_noise_sigma}"
                 print(
                     f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
                     f"mirror={use_mirror} K={cfg.weight_noise_passes} "
                     f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-                    f"sigma={cfg.weight_noise_sigma} ===",
+                    f"sigma={sigma_dbg} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -803,7 +958,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_mirror=use_mirror,
                 clean=clean,
                 K_passes=cfg.weight_noise_passes,
-                sigma=cfg.weight_noise_sigma,
+                sigma_per_param=sigma_per_param,
+                max_sigma=max_sigma,
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
