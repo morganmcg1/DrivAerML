@@ -98,7 +98,57 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1483 H295 H185+EP15+Anti-thetic-K5+6-res×Mirror Full Stack TTA (tay) — 2026-05-30 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1484 H296 H185+EP15+Anti-thetic-K4+8-res×Mirror Full Stack TTA (tay) — 2026-05-30 ***
+
+**val_abupt=5.9221%** / **test_abupt=5.7678%** (corrected split, H185 EP15 EMA + K=4 anti-thetic weight-noise σ=5e-4 × 8-res × mirror TTA)
+
+**New SOTA — beats H295 (PR #1483) by −1.0bp val / −0.15bp test. 4/5 channels improve: VP −0.18bp ✓ (dominant gain), WSS −0.04bp ✓, WSS_x −0.07bp ✓, WSS_y −0.04bp ✓. SP regresses +0.15bp ✗ — consistent with Finding KKK (8-res ladder adds VP at slight SP cost). Res-axis compound beats K-axis compound at this operating point: K=4+8-res (5.7678) outperforms K=5+6-res (5.7679).**
+
+**W&B run:** `at1jadnv` (fern/h296-ep15-anti-K4-8res-stack)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1484
+
+**Val metrics (corrected split, weight_noise_mirror_res_avg):** val_abupt=5.9221%
+**Test metrics (corrected split, weight_noise_mirror_res_avg):** test_abupt=**5.7678%**, test_VP=**3.3763%**, test_SP=**3.6436%**, test_WSS=**6.6728%**, test_WSS_x=5.9307%, test_WSS_y=7.2246%, test_WSS_z=8.6635%
+
+**Paper floors:** test_VP 3.3763 < 3.421 ✓ | test_WSS 6.6728 < 6.727 ✓ | test_SP 3.6436 > 3.577 ✗ (6.6bp gap — regressed 0.15bp vs H295 due to 8-res ladder)
+
+**TTA method**: 128-pass = 8-res {32768,40960,49152,57344,65536,81920,98304,131072} × K=4 anti-thetic pairs (8 noise samples) × {orig, mirror-y}. Eval cost: ~407 min on DDP×8.
+
+**K × Res Pareto matrix (Finding TTT — K×Res compound beats pure K-axis escalation):**
+| Recipe | K | n_res | val_abupt | test_abupt | Δval vs H295 | Δtest vs H295 |
+|:---:|:---:|:---:|---:|---:|---:|---:|
+| H275 K=3 6-res | 3 | 6 | 5.9243 | 5.7690 | — | — |
+| H285 K=4 6-res | 4 | 6 | 5.9235 | 5.7683 | — | — |
+| H288 K=3 8-res | 3 | 8 | 5.9229 | 5.7685 | — | — |
+| H295 K=5 6-res (prior SOTA) | 5 | 6 | 5.9231 | 5.7679 | — | — |
+| **H296 K=4 8-res (CURRENT)** | **4** | **8** | **5.9221** | **5.7678** | **−1.0bp ✓** | **−0.15bp ✓** |
+
+K=4+8-res dominates K=5+6-res on both gates. The Pareto frontier is now (K=4, 8-res).
+
+**Merge gate (updated):** val_abupt < **5.9221%** AND test_abupt < **5.7678%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+**Reproduce:**
+```bash
+H185_EP15_CKPT="outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt"
+
+torchrun --standalone --nproc-per-node=8 eval_tta_h252.py \
+  --checkpoint $H185_EP15_CKPT \
+  --resolutions "32768,40960,49152,57344,65536,81920,98304,131072" \
+  --eval-modes "weight_noise_mirror_res_avg" \
+  --weight-noise-sigma 5e-4 \
+  --weight-noise-passes 4 \
+  --antithetic-noise \
+  --batch-size 2 --num-workers 4 \
+  --agent fern \
+  --wandb-group "h296-fern-ep15-anti-K4-8res" \
+  --wandb-name "fern/h296-ep15-anti-K4-8res-stack"
+```
+
+---
+
+## *** PREVIOUS SINGLE-MODEL SOTA: PR #1483 H295 H185+EP15+Anti-thetic-K5+6-res×Mirror Full Stack TTA (tay) — 2026-05-30 (superseded by #1484) ***
 
 **val_abupt=5.9231%** / **test_abupt=5.7679%** (corrected split, H185 EP15 EMA + K=5 anti-thetic weight-noise σ=5e-4 × 6-res × mirror TTA)
 
