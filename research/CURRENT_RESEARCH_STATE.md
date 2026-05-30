@@ -1,8 +1,35 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-30 02:00Z._
+_Last updated: 2026-05-30 03:05Z._
 
-**02:00Z structural-wave FULLY CLOSED (4 of 4 falsified) — H167 terminal NON-MERGE confirms joint multi-axis architectural local optimum. H171 mirror-y-train-aug dispatched to tanjiro (Plateau-Protocol data-tier shift). H168/H170 EP2 trail pattern emerging; H169 main EP1 healthy.**
+**03:05Z update — H171 CLOSED no-execute (tanjiro premise check: H147 already runs mirror-y aug at p=0.5). H172 EMA-model-weights dispatched to tanjiro (PR #1469). Wave-2 EP3 reads: H168 flat slope (7.07%, marginal), H169 SEVERE MISS (+5.65pp at EP2, early-kill watch), H170 fast slope (7.38%, most promising). Fleet fully staffed.**
+
+### Wave-2 EP3 status (03:00Z W&B reads)
+
+| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_VP | val_SP | Slope | Watch |
+|---|---|---|---:|---:|---:|---|---:|---:|---|---|
+| H168 `pe-lo-sigma` fern | #1462 | t9h0inur | 2.26h | EP3 | **7.070%** | +0.09pp above H147 EP3=6.98 | 4.42% | 4.18% | −0.025/1k (FLAT) | EP5 kill-gate close: EP5 est ~6.9–7.0% |
+| H169 `wss-charb-yz` nezuko | #1463 | aco66tdm | 1.35h | EP2 | **12.909%** | +5.65pp above H147 EP2=7.26 ⚠️ | 13.88% | 9.02% | n/a | **SEVERE MISS** — early-kill watch |
+| H170 `gradnorm-alpha-03` frieren | #1464 | nkc26gvj | 2.12h | EP3 | **7.375%** | +0.40pp above H147 EP3=6.98 | 4.98% | 4.28% | −0.497/1k (FAST) | Most promising slope; watch EP4-5 |
+| H172 `ema-weights` tanjiro | #1469 | TBD | 0h | smoke | — | — | — | — | — | NEW — just dispatched |
+
+**H169 alert:** Prior run rha7q5tp crashed at EP1 val_WSS=12.86%; aco66tdm (restart) shows same pattern at EP2=12.91%. val_VP=13.88% (+9.5pp above expected) = loss balance completely collapsed. Charbonnier yz at weight 0.1 doubled the effective WSS contribution covering two axes simultaneously. EP3 must drop below 9% val_WSS AND below 6% val_VP or self-abort is warranted. Advisor sent early-kill warning to nezuko.
+
+**H170 note:** Pod had 1 restart 9h ago; current 8-run set is a fresh restart. Slope −0.497%/1k is ~20x faster than H168 — approximately 1.5k steps from now should bring H170 below H147 EP3=6.98% baseline. This is the arm to watch.
+
+### H171 premise-check finding (tanjiro, 02:00Z)
+
+Tanjiro's premise check before launch: verified that H147 SOTA `k6q4c3on` (PR #1344) uses `use_y_symmetry_aug=True, y_symmetry_aug_prob=0.5`. The "add `--mirror_y_train_aug_prob=0.5`" delta in H171 would reproduce H147, not test a new hypothesis. Tanjiro held the launch with ZERO compute spent. PR #1468 closed as no-execute.
+
+**Cross-track evidence re-evaluated:** drivaerml-ddp8 track H275 used 6-res × mirror anti-thetic-K3 at INFERENCE (TTA), not train-time aug. TTA-at-inference falls under "NO MORE ENSEMBLES" directive scope (inference multi-pass averaging). Not pursuing.
+
+### H172 dispatch: EMA model weights (tanjiro, PR #1469)
+
+**Mechanism:** Maintain shadow EMA of model parameters during training (decay=0.9999); use EMA weights at val/test inference. Smooths out the noise of the final Lion optimizer basin. Orthogonal to ALL 17+ prior experiments in this fleet — first pure-regularizer intervention. Strong cross-domain validation (diffusion, GAN, vision transformers).
+
+**Why this targets WSS:** Wall shear stress is a subtle high-frequency signal from near-surface gradient computation. EMA weights represent a smoother basin average that generalizes better to unseen test geometries. H147's test_WSS ceiling at 6.54% is exactly the type of test-set generalization gap EMA attacks.
+
+**Premise check instruction:** Tanjiro to verify `grep -n "ema\|EMA\|shadow\|polyak" target/train.py` — if `--ema_decay` already exists, use it. (Note: H147 uses `ema_decay=0.999` for checkpoint selection EMA, but this is eval-EMA applied to final weights; the H172 experiment is *training-time* EMA shadow used at inference, different mechanism.)
 
 ### Wave-1 FINAL: All 4 structural perturbations fail (test_SP floor breach)
 
@@ -21,16 +48,18 @@ _Last updated: 2026-05-30 02:00Z._
 3. Generalization-level — stronger EMA, EMA-checkpoint eval (queued)
 4. Regularization-level — DropPath, stochastic depth (queued)
 
-### Wave-2 in flight (02:00Z W&B snapshot)
+### Wave-2 in flight (03:05Z W&B snapshot — UPDATED)
 
-| Run | Student | rank0 | Phase | val_WSS | EP context vs H147 |
-|---|---|---|---|---:|---|
-| H168 `pe-lo-sigma` | fern | `t9h0inur` | EP2 | 7.3396% | H147 EP2=7.26%, +0.08 trail pattern (matches structural wave shape) |
-| H169 `wss-charb-yz` main | nezuko | `aco66tdm` | EP1 | 12.9085% | H147 EP1=12.82%, +0.09 (mild trail; smoke rank0 crashed, ranks 1-7 OK, main relaunched cleanly) |
-| H170 `gradnorm-alpha-03` | frieren | `nkc26gvj` | EP2 | 7.3752% | H147 EP2=7.26%, +0.12 trail pattern |
-| **H171 `mirror-y-train-aug`** | **tanjiro** | TBD | dispatched | — | smoke-first then 8-EP main; PR #1468 |
+| Run | Student | rank0 | Phase | val_WSS | EP context vs H147 | Status |
+|---|---|---|---|---:|---|---|
+| H168 `pe-lo-sigma` | fern | `t9h0inur` | EP3 | **7.070%** | H147 EP3=6.98%, +0.09 flat slope (−0.025/1k) | stale_wip heartbeat sent; EP5 kill-gate at risk |
+| H169 `wss-charb-yz` main | nezuko | `aco66tdm` | EP2 | **12.909%** | H147 EP2=7.26%, **+5.65pp ⚠️ SEVERE** | early-kill warning sent; EP3 must drop below 9% |
+| H170 `gradnorm-alpha-03` | frieren | `nkc26gvj` | EP3 | **7.375%** | H147 EP3=6.98%, +0.40pp but FAST slope (−0.497/1k) | pod restart 9h ago, fresh set running; most promising |
+| **H172 `ema-weights`** | **tanjiro** | TBD | dispatched | — | smoke-first then 8-EP main; PR #1469 | just dispatched |
 
-**Trail-pattern watch:** Both H168 and H170 are showing the same "EP1 close-or-better-than-H147, EP2 gap reverses to +0.08-0.12" shape as the structural wave. If terminal results follow the wave pattern (small WSS regression + SP floor breach), the local-optimum finding extends to representation hyperparams (PE sigma) AND training dynamics (gradnorm alpha) — broadening the falsification class significantly. Decisive EP at ~04:30Z for EP5 kill gate.
+**H171 no-execute finding:** H147 ALREADY uses `use_y_symmetry_aug=True, y_symmetry_aug_prob=0.5`. Tanjiro's premise check caught this before launch. Cross-track evidence (drivaerml-ddp8 H275 inference TTA) does NOT justify train-time aug (already on) or inference TTA (blocked by ensemble directive). PR #1468 closed no-execute.
+
+**Trail-pattern watch for H168/H170:** If EP5 follows structural-wave trail pattern (slow drift to +0.10-0.15pp at EP5 → terminal test_SP floor breach), local-optimum finding extends to PE-init AND gradnorm-α axes — every single-knob intervention, including training dynamics, falsified. H170's fast slope is the outlier to watch — if −0.497/1k slope holds it could close the gap by EP4 despite EP3 deficit.
 
 ### Earlier Wave-1 evidence (for reference)
 
