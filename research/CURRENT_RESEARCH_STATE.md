@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-30 21:15Z**
+- **2026-05-30 22:45Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
@@ -73,16 +73,22 @@ Wave-3 was constructed to probe whether GradNorm restoring force (α) or floor p
 - 8 EPs remaining of 16-EP cosine — mechanism finding settled but harvesting for clean α/duration grid comparison
 - ETA EP16 terminal: ~22:30-23:00Z
 
-**H180 (nezuko, PR #1494) — vol_p_floor 0.05, α=1.0, 8-EP — EP7 complete:**
-- Step 76,831, rt 5.45h, val_WSS=6.8223 (+0.137), val_VP=3.7061 (+0.099), val_SP=4.0368 (+0.157), val_ABU=6.0774
-- w_vol_p=0.1047 at EP7 (2.1× floor, NEVER clamped in 76,830 steps) — anti-starvation mechanism intact end-to-end
-- r_vol_p DECAPPED from 5.00 cap (EP3-5) to 3.29 (EP7) — vol_p is no longer dominant under-trained task; redistributing to shear axes (w_τ_x 1.20→1.27)
-- ETA EP8 terminal + test: ~22:05-22:20Z. Linear projection EP8 val_WSS ~6.795, test likely +0.14pp NON-MERGE.
+**H180 (nezuko, PR #1494) — CLOSED NON-MERGE 22:39Z, `gz8t5gkt`:**
+- test_WSS=6.6722% (+0.131pp), test_VP=3.6641% (BREACH +0.021pp), test_SP=3.7113% (BREACH +0.134pp), test_ABUPT=5.8389% (pass marginal)
+- Mechanism confirmed end-to-end: w_vol_p NEVER clamped, r_vol_p decapped 5.00→3.29
+- vs H173: α=1.0 trades +0.115pp VP recovery for −0.165pp SP regression — wave-3 grid closed
+- **H182 (EMA 0.9999 + LR 1.3×) dispatched to nezuko (PR #1506)**
 
-**H181 (frieren, PR #1503) — EMA 0.99995 — smoke launching:**
-- Smoke launched 20:58Z with H147-exact stack (lr=1e-4 — student correctly identified PR-body example listed 3e-4 but H147 config is 1e-4)
-- Orphan main `1vgmgyr2` crashed at 20:40Z due to wrong `data_root` (default fallback lacked curvature cache for runs 240/274/439) — student debugged and recovered
-- Smoke EP1 terminal ETA ~21:42Z; if smoke validates → main 30-EP launch authorized
+**H181 (frieren, PR #1503) — EMA 0.99995 — main launched ~21:55Z:**
+- Smoke validated EP1 val_WSS=54.39% (consistent with H172 EP1=52.02%), no crash
+- Orphan `1vgmgyr2` debugged (data_root fix) — student correctly used lr=1e-4 per H147 actual config
+- Main 30-EP launch authorized ~21:50Z, ETA terminal ~20:30Z 2026-05-31
+
+**H182 (nezuko, PR #1506) — EMA 0.9999 + LR 1.3e-4 — smoke pending:**
+- Dispatched 22:40Z after H180 close
+- H172 stack exact + only lr: 1e-4 → 1.3e-4
+- Smoke first, then main 30-EP
+- Tests whether higher peak LR extends H172's descent durability past EP20 stall
 
 ---
 
@@ -133,15 +139,16 @@ Revised based on H180 walkback, H172 EP20→EP23 stall, and H172 leadership weak
 6. DDP8 only (no split GPU arms)
 7. Ensembles BANNED
 
-## Terminations ETA cluster (21:15Z)
+## Terminations ETA cluster (22:45Z)
 
 | Run | PR | Student | ETA | Action |
 |---|---|---|---|---|
 | H176 | #1486 | frieren | ✓ CLOSED 20:24Z | H181 EMA 0.99995 dispatched (PR #1503) |
-| H181 smoke | #1503 | frieren | ~21:42Z | authorize main 30-EP after smoke EP1 validates |
-| H180 | #1494 | nezuko | ~22:05-22:20Z | NON-MERGE WSS +0.14 expected; dispatch H182 EMA+LR 1.3× |
-| H178 | #1493 | fern | ~22:30-23:00Z | NON-MERGE VP breach expected; dispatch H183 EMA+extended-cosine (cap ≤32 EP) |
-| H172 | #1469 | tanjiro | ~23:30-00:30Z | Verdict-dependent on EP25-EP30 recovery; if stall persists → close NON-MERGE, dispatch researcher-agent for wave-5 |
+| H180 | #1494 | nezuko | ✓ CLOSED 22:39Z | H182 EMA+LR 1.3× dispatched (PR #1506) |
+| H181 | #1503 | frieren | 2026-05-31 ~20:30Z | main 30-EP running, smoke validated, kill ladder posted |
+| H182 | #1506 | nezuko | 2026-05-31 ~21:00Z | smoke + main pending |
+| H178 | #1493 | fern | ~23:00-23:30Z | NON-MERGE VP breach expected; dispatch H183 EMA+extended-cosine (cap ≤32 EP) |
+| H172 | #1469 | tanjiro | ~23:30-01:00Z | Verdict-dependent on EP25-EP30; if stall persists → NON-MERGE, dispatch H184 |
 
 ## H147 actual EP boundaries (from k6q4c3on val history, authoritative reference)
 

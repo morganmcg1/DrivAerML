@@ -4808,3 +4808,64 @@ NON-MERGE: VP floor cap breach is a hard constraint violation. SP-protection mec
 NON-MERGE. Wave-3 GradNorm-α/floor grid verdict sealed: none of α=0.5 floor=0.05 (H173), α=0.5 floor=0.10 (H176), α=0.5 floor=0.05 16-EP (H178 in flight), α=1.0 floor=0.05 (H180 in flight) produces a H147-beater. The productive lever in wave-3 was H172's EMA decay 0.9999 (val_WSS 6.6521 at EP20, materially below H147 EP6 ref).
 
 Wave-4 H181 (EMA decay 0.99995, longer averaging window) dispatched to frieren (PR #1503).
+
+## 2026-05-30 22:39Z — PR #1494: H180 vol_p floor 0.05 + GradNorm α=1.0 (nezuko)
+
+- **Branch:** dl24-nezuko/h180-vol-p-floor-005-alpha-10
+- **W&B run:** `gz8t5gkt` (rank0 terminal, 8-EP, 5.85h)
+- **Hypothesis:** α=1.0 (doubled restoring force toward vol_p) + floor=0.05 prevents the H173 w_vol_p → floor clamp pathology while preserving H173's SP-protection mechanism. Test whether VP recovery at parity can be sustained without the clamp artifact.
+
+### Results
+
+| metric | H180 test | H147 SOTA | Δ vs H147 | H173 test | floor cap | status |
+|---|---:|---:|---:|---:|---:|---|
+| test_WSS | 6.6722% | 6.5409% | **+0.131pp** | 6.6081% | — | ❌ NON-MERGE on primary |
+| test_VP | 3.6641% | 3.4014% | +0.263pp | 3.7793% | 3.643% | ❌ BREACH +0.021pp |
+| test_SP | 3.7113% | 3.5634% | +0.148pp | 3.5458% | 3.577% | ❌ BREACH +0.134pp |
+| test_ABUPT | 5.8389% | 5.6648% | +0.174pp | — | 5.844% | ✅ PASS (marginal) |
+
+### GradNorm trace (EP1-EP8)
+
+| EP | step | w_vol_p | w_cp | w_τ_x | w_τ_y | w_τ_z | r_vol_p | clamp_active |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10974 | 0.2107 | 0.7534 | 1.1527 | 1.3579 | 1.5253 | 3.009 | 0 |
+| 2 | 21950 | 0.2349 | 0.6524 | 1.2284 | 1.2987 | 1.5856 | 3.622 | 0 |
+| 3 | 32926 | 0.1464 | 0.6216 | 1.2005 | 1.4055 | 1.6260 | 5.000 cap | 0 |
+| 4 | 43902 | 0.1515 | 0.5899 | 1.1699 | 1.4616 | 1.6272 | 5.000 cap | 0 |
+| 7 | 76831 | 0.1047 | 0.5803 | 1.2700 | 1.4900 | 1.5500 | 3.290 | 0 |
+| 8 | 87807 | ~0.095 | ~0.570 | ~1.28 | ~1.50 | ~1.54 | ~3.15 | 0 |
+
+**w_vol_p NEVER clamped in 87,807 steps.** r_vol_p decapped from 5.00 (EP3-4) to 3.29 (EP7) → vol_p no longer dominant under-trained task. Budget redistributed to shear axes (w_τ_x 1.20→1.27, w_τ_y dominant at 1.49-1.53).
+
+### Analysis
+
+**Mechanism confirmed end-to-end:** α=1.0 + floor=0.05 prevents the H173 clamping pathology (w_vol_p never clamped) while allowing autonomous relaxation. The anti-starvation mechanism worked as designed — the floor is decorative, never load-bearing.
+
+**The cost is structural:** α=1.0 doubles the restoring force toward vol_p throughout training. This keeps VP near parity with H147 but structurally limits how much weight budget WSS can capture from reallocation. Result: persistent +0.09-0.17pp WSS regression across all 8 EPs.
+
+**Direct vs H173 comparison (only α differs, same floor=0.05):**
+
+| metric | H180 (α=1.0) | H173 (α=0.5) | Δ H180 − H173 | interpretation |
+|---|---:|---:|---:|---|
+| test_WSS | 6.6722% | 6.6081% | **+0.064pp** | α=1.0 regresses WSS vs α=0.5 |
+| test_VP | 3.6641% | 3.7793% | **−0.115pp** | α=1.0 recovers VP (still marginal breach) |
+| test_SP | 3.7113% | 3.5458% | **+0.165pp** | α=1.0 loses H173's SP-protection |
+
+**H180 net effect:** trades +0.115pp VP recovery for −0.165pp SP regression. Both VP and SP hover near/over their floor caps. No net SOTA path.
+
+**Mechanism finding (wave-3 deliverable):** α=1.0 is the cleanest anti-clamp implementation for w_vol_p, but the WSS cost makes it a mechanism diagnostic rather than a SOTA lever.
+
+### Conclusion
+
+NON-MERGE. Two floor cap breaches (VP marginal +0.021, SP +0.134) + WSS regression (+0.131pp vs H147 SOTA). Wave-3 GradNorm-α/floor grid is now closed:
+
+| H | α | floor | cosine_EPs | test_WSS Δ | result |
+|---|---:|---:|---:|---:|---|
+| H173 | 0.5 | 0.05 | 8 | +0.067 | VP breach from clamping |
+| H176 | 0.5 | 0.10 | 8 | +0.138 | VP+SP breach (worst-of-both) |
+| H178 | 0.5 | 0.05 | 16 | pending | VP starvation persists at EP8 |
+| H180 | 1.0 | 0.05 | 8 | +0.131 | VP parity but SP breach + WSS regression |
+
+None of the 4 arms produces a H147-beater. EMA-0.9999 (H172, wave-3) remains the only mechanism that materially undercut H147 mid-train references, but H172's descent stalled EP20→EP23.
+
+Wave-4 H182 (EMA 0.9999 + LR 1.3×) dispatched to nezuko (PR #1506).
