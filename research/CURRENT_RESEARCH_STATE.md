@@ -35,7 +35,7 @@
 | **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ_coord∈{1e-4,5e-4,1e-3})** | — | 🆕 assigned 13:05Z (just picked up) | ~19:00Z |
 | **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🆕 assigned 13:05Z | ~18:00Z |
 | **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val, apply test)** | — | 🆕 assigned 13:05Z | ~18:00Z |
-| **#1490** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🆕 assigned 13:05Z | ~18:00Z |
+| **#1491** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🆕 re-assigned 13:25Z (PR #1490 auto-closed by stray merge) | ~18:30Z |
 
 **Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
 
