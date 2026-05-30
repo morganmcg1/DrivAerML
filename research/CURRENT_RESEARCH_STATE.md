@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 07:20Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
+**Updated**: 2026-05-30 08:10Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
 
 ---
 
@@ -21,28 +21,27 @@
 
 ---
 
-## Active Fleet (as of 07:20Z — 8 students active)
+## Active Fleet (as of 08:10Z — 8 students active)
 
 | PR | Student | Hypothesis | Status | val | ETA |
 |---|---|---|---|---|---|
-| **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 🆕 just assigned (upper-res anchors: +163840+196608) | — | ~10:30Z |
-| **#1470** | **tanjiro** | **H285: EP15+anti-K=4 pairs (8p)+6-res+mirror** | 🔥 val 5.9235 BEATS GATE (-0.8bp), test pending | **5.9235** | ~08:30Z |
-| **#1471** | **alphonse** | **H286: Aggregation operator sweep on H275 SOTA** | 🟡 running, 1h+ no val metrics (cache phase) | — | ~09:30Z |
-| **#1472** | **askeladd** | **H287: EP14 checkpoint axis test** | 🆕 assigned (EP14 vs EP15 adjacent) | — | ~06:30Z |
-| **#1473** | **fern** | **H288: 8-res mid densification** | 🔥 val **5.9229** (best in fleet, −1.4bp), test pending | **5.9229** | ~08:30Z |
-| **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K} at EP15+anti-K3** | 🆕 just assigned (low-res anchors: +16384+24576) | — | ~09:30Z |
-| **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟠 pre-eval after 2 crashes (compute-heavy; alive, GPUs 100%) | — | ~06:30Z |
-| **#1476** | **thorfinn** | **H290: EP15+multi-σ{3e-4,5e-4,7e-4}+anti-K=3** | 🆕 just assigned (σ-diversity across anti-thetic pairs) | — | ~08:00Z |
+| **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 🔬 smoke passed, primary not yet launched (OOM check on 196K) | — | ~11:00Z |
+| **#1470** | **tanjiro** | **H285: EP15+anti-K=4 pairs (8p)+6-res+mirror** | 🔥 val 5.9235 BEATS GATE (−0.8bp), test arm running (~2h remaining) | **5.9235** | ~09:30Z |
+| **#1471** | **alphonse** | **H286: Aggregation operator sweep on H275 SOTA** | 🟡 fixed loader-spawn bug, running full sweep since 05:36Z, ETA ~09:00Z | — | ~09:00Z |
+| **#1482** | **askeladd** | **H294: Student-t df=3 noise at EP15+anti-K3+6-res** | 🆕 just assigned (noise-family heavy-tail test) | — | ~11:30Z |
+| **#1473** | **fern** | **H288: 8-res mid densification** | 🔥 val **5.9229** (BEST IN FLEET, −1.4bp), test arm running (~1.5h remaining) | **5.9229** | ~09:30Z |
+| **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K} at EP15+anti-K3** | 🟡 running 1.5h, no val metrics yet (early) | — | ~10:00Z |
+| **#1481** | **nezuko** | **H293: Laplace noise at EP15+anti-K3+6-res** | 🆕 just assigned (noise-family medium-heavy-tail test) | — | ~11:30Z |
+| **#1476** | **thorfinn** | **H290: EP15+multi-σ{3e-4,5e-4,7e-4}+anti-K=3** | 🟡 primary running ~1.5h+ (2 runs, possible dual-run anomaly), no metrics yet | — | ~10:30Z |
 
 **Gate**: val < **5.9243** AND test < **5.7690** (H275 SOTA merged 01:17Z)
 
 **Hot watch**: 
-- **Fern H288** is NOW the PRIMARY SOTA candidate — val 5.9229 BEATS gate by 1.4bp (best in fleet). 8-res mid densification. Test arm ~08:30Z.
-- **Tanjiro H285 K=4** is secondary SOTA candidate — val 5.9235 −0.8bp. K=4 at EP15 may extend K-curve. Test arm ~08:30Z.
-- **Edward H284 CLOSED** (val 5.9242/test 5.7697 fails gate +0.7bp) — banked Finding GGG-Sobol-anti-non-stacking. Sobol×anti at K=3 EP15 is non-additive.
-- Alphonse H286 in aggregation cache phase (no metrics yet, but heartbeat fresh, GPUs active). Expect val metrics ~09:30Z.
-- Nezuko H280 still running (2.5h+). Sobol×anti K=5 EP13 — val 5.9313, will likely fail gate.
-- Askeladd H287 EP14 val 5.9326 — already at EP13 level, confirms EP15 is a sharp jump (Finding FFF).
+- **Fern H288** is PRIMARY SOTA candidate — val 5.9229 BEATS gate by 1.4bp (BEST IN FLEET). Test arm running, ETA ~09:30Z.
+- **Tanjiro H285 K=4** is secondary SOTA candidate — val 5.9235 −0.8bp. Test arm running, ETA ~09:30Z.
+- **Alphonse H286** running since 05:36Z with per-mirror loader bug FIXED. Val metrics expected ~09:00Z.
+- **Edward H292**: student still in OOM-verification phase (196608 res). Primary not yet launched.
+- **Thorfinn H290**: possible dual-run anomaly (2 concurrent slzcnzs7/1rg2kll5). No metrics yet — either just started or stuck in pre-eval.
 
 ---
 
@@ -50,6 +49,8 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1472 askeladd H287 | EP14 checkpoint anti-K3 | **Finding III-EP-axis-fully-exhausted** (EP14 val 5.9326/test 5.7764 fails gate; EP13≈EP14<EP15(peak)>EP16; all accessible checkpoints below EP15 confirmed worse across all 3 channels) | 5.9326 | 5.7764 |
+| #1460 nezuko H280 | EP13+Sobol-anti-K5+6-res | **Finding HHH-EP13-no-rescue-with-K5-Sobol** (EP13+K5+Sobol val 5.9313/test 5.7753 fails gate; all channels match-or-degrade vs SOTA; doubled-K Sobol diversity cannot compensate for EP13 vs EP15; EP-axis closed above AND below) | 5.9313 | 5.7753 |
 | #1475 frieren H289 | EP16 checkpoint axis (closed w/o running) | **Finding FFF-EP-axis-closed-at-H275-recipe** (checkpoint EP12/EP16 unavailable; H244 3-res evals confirm EP15 peak, EP16 slight regression; EP-axis fully exhausted with available checkpoints) | n/a | n/a |
 | #1466 thorfinn H283 | EP15+σ=3e-4+Sobol-K5+6-res+mirror | **Finding XX-Sobol-confirmed** (close, val 5.9274 +3.1bp / test 5.7725 +3.5bp fails H275 gate; σ-axis closed across all noise families at EP15) | 5.9274 | 5.7725 |
 | #1459 frieren H279 | EP15+Sobol-K5+6-res+mirror | **Findings DDD-Sobol-EP15-super-additive + EEE-anti-dominates-Sobol-at-EP15** (close, val 5.9291 +4.8bp / test 5.7734 +4.4bp fails H275 gate; anti structurally dominates Sobol at both EPs) | 5.9291 | 5.7734 |
@@ -69,10 +70,12 @@
 
 ---
 
-## Findings Bank (35 banked, GGG added 07:20Z)
+## Findings Bank (37 banked, HHH+III added 08:10Z)
 
 | ID | Source | Summary |
 |---|---|---|
+| **III-EP-axis-fully-exhausted** | H287 askeladd (closed 08:10Z) | EP14+anti-K3+6-res val 5.9326/test 5.7764 fails gate. Combined with FFF (EP16), HHH (EP13), EP12 unavailable: EP-curve at H275 recipe fully closed as EP13≈EP14<EP15(peak)>EP16. No checkpoint variation can improve SOTA without new training. |
+| **HHH-EP13-no-rescue-with-K5-Sobol** | H280 nezuko (closed 08:10Z) | EP13+Sobol-anti-K5+6-res val 5.9313/test 5.7753 fails gate. Doubled-K diversity + Sobol cannot rescue EP13 checkpoint. Combined with Finding FFF (EP16) and III (EP14): EP-axis fully exhausted on both sides of EP15 peak. |
 | **GGG-Sobol-anti-non-stacking-at-K3-EP15** | H284 edward (closed 07:20Z) | Sobol×anti compound at K=3 EP15 is non-additive: val −0.012bp / test +0.065bp ≈ zero net movement vs H275. Anti-K=3 already kills the dominant linear Taylor variance; Sobol QMC targets the SAME variance budget. Both mechanisms not orthogonal at K=3. |
 | **FFF-EP-axis-closed-at-H275-recipe** | H289 frieren (closed 06:05Z, no runs) | EP-axis exhausted at H275 recipe family. Only EP13/14/15 checkpoints available. H244 3-res evals show EP14 5.9613→EP15 5.9516 (peak)→EP16 5.9548 (regression). EP15 is unimodal peak. `best_epoch=15` in H244 config confirms. Do not test further EP variations at this recipe without new training. |
 | **EEE-anti-dominates-Sobol-at-EP15** | H279 frieren (closed 05:00Z) vs H275 edward (merged) | Anti-K=3 beats Sobol-K=5 at EP15 by +4.8bp val / +4.4bp test (despite Sobol using 5 vs anti using 6 forwards). Anti's linear-cancellation structurally dominates Sobol's QMC coverage at BOTH EP13 (Finding VV/WW) and EP15. Anti is the right paradigm; Sobol is asymptotically suboptimal |
@@ -96,18 +99,29 @@
 
 ## Next-Round Hypothesis Queue
 
-After current round resolves (new gate val < 5.9243 / test < 5.7690):
-1. **Sobol × anti × EP15**: H284 edward (ETA ~04:50Z) — triple-mechanism compound, primary SOTA candidate
-2. **Anti-thetic K-scaling at EP15**: H285 tanjiro K=4 (ETA ~07:10Z)
-3. **Aggregation operator**: H286 alphonse (just assigned) — mean vs median vs trimmed vs Huber at H275 SOTA recipe; untested mechanism axis
-4. **Checkpoint axis EP14**: H287 askeladd (just assigned) — EP14 adjacent to SOTA EP15; 3rd point on EP-curve
-5. **8-res densification**: H288 fern (just assigned) — denser res grid (+40960+57344) at H275 SOTA recipe
-6. **Checkpoint axis EP12**: H289 frieren (just assigned) — completes 4-pt EP-curve (EP12/EP13/EP14/EP15) for paper figure
-7. **K-axis at EP13 CLOSED (Finding BBB)**: Do not assign further K variations at EP13 anti-thetic. K=3 is the sweet spot.
-8. **σ axis CLOSED at EP15+anti (Finding AAA)**: σ=5e-4 is optimal; no further σ variations on anti-thetic stack.
-9. **Sobol×EP15 CLOSED (Finding EEE)**: Anti-K=3 dominates Sobol-K=5 at both EPs; do not test more Sobol-only variants on EP15 stack.
-10. **σ axis CLOSED at EP15 (ALL noise families)**: Finding XX-Sobol-confirmed from H283 closes single-σ recipes. Multi-σ diversity (H290 thorfinn) is the ONE remaining σ-adjacent test.
-11. **SP floor**: 3.6427 → 3.577 = 6.5bp gap — H290 thorfinn multi-σ is the primary test for SP/VP/WSS simultaneous improvement.
+AXES FULLY CLOSED (do not revisit without new training):
+- **EP axis**: EP12 unavailable, EP13/EP14 fail gate, EP15=SOTA, EP16 hurts. Findings FFF+HHH+III close this completely.
+- **σ axis (single-σ)**: σ=5e-4 optimal. Findings AAA+XX-Sobol close this.
+- **Sobol×EP15 axis**: Anti beats Sobol at both EPs. Findings DDD+EEE close this.
+- **Sobol×anti K=3 compound**: Non-additive. Finding GGG closes this.
+
+IN-FLIGHT (do not duplicate):
+- **Resolution lower ladder** (frieren H291) — 8-res {16K-131K}
+- **Resolution upper ladder** (edward H292) — 8-res {32K-192K}
+- **K-scaling K=4** (tanjiro H285 in test phase) — val 5.9235 SOTA candidate
+- **8-res mid densification** (fern H288 in test phase) — val 5.9229 PRIMARY SOTA candidate
+- **Aggregation operators** (alphonse H286) — mean/median/trimmed/Huber sweep
+- **Multi-σ diversity** (thorfinn H290) — σ={3e-4,5e-4,7e-4} per anti pair
+- **Laplace noise** (nezuko H293) — noise family heavy-tail moderate
+- **Student-t noise df=3** (askeladd H294) — noise family heavy-tail max finite-var
+
+PRIORITY NEXT ROUND (when students become idle):
+1. Student-t df=1.5 (Cauchy-like, infinite variance but check stability) — if H294 wins
+2. Per-layer noise stratification — target conv vs attention separately
+3. Y-mirror augmentation (double-mirror x+y) — lateral symmetry exploitation
+4. Best-of-K (min-loss per channel) selection — orthogonal to mean aggregation
+5. Noise anisotropy — per-tensor σ proportional to gradient magnitude
+6. SP floor (3.6427→3.577, 6.5bp gap) is the binding Morgan target; need wins on SP specifically
 
 ---
 
@@ -128,11 +142,13 @@ After current round resolves (new gate val < 5.9243 / test < 5.7690):
 | EP15 + σ=3e-4 + anti-thetic K=3 + 6-res + mirror | ✗ H277 5.9255/5.7705 — Finding AAA (σ=3e-4 flat/unfavorable under anti-thetic) |
 | EP15 + anti-thetic K=4 pairs (8p) + 6-res + mirror | 🟡 H285 tanjiro (running) |
 | EP15 + Sobol QMC K=5 + 6-res + mirror | ✗ H279 5.9291/5.7734 — Findings DDD-Sobol-EP15-super-additive + EEE-anti-dominates-Sobol-at-EP15 (fails H275 gate +4.8/+4.4bp; anti beats Sobol at EP15 too) |
-| EP13 + Sobol × anti-thetic K=5 (10p) + 6-res + mirror | 🟡 H280 nezuko (running) |
-| EP15 + Sobol × anti-thetic K=3 + 6-res + mirror | 🟡 H284 edward (running) |
+| EP13 + Sobol × anti-thetic K=5 (10p) + 6-res + mirror | ✗ H280 5.9313/5.7753 — Finding HHH (EP13+K5+Sobol fails gate; EP-axis closed below too) |
+| EP15 + Sobol × anti-thetic K=3 + 6-res + mirror | ✗ H284 5.9242/5.7697 — Finding GGG (Sobol×anti non-additive at K=3; anti exhausts linear variance) |
 | EP13 + anti-thetic K=3 + σ=3e-4 + 6-res + mirror | ✗ H281 5.9342/5.7785 — Finding AAA confirmed at EP13 (+9.9bp val vs SOTA) |
 | EP15 + aggregation operator sweep (mean/median/trimmed/Huber) | 🆕 H286 alphonse (assigned) |
-| EP14 + anti-thetic K=3 + 6-res + mirror | 🆕 H287 askeladd (assigned) |
+| EP14 + anti-thetic K=3 + 6-res + mirror | ✗ H287 5.9326/5.7764 — Finding III (EP14 fails gate; EP-axis fully exhausted) |
+| EP15 + Laplace noise + anti-K=3 + 6-res + mirror | 🆕 H293 nezuko (just assigned, PR #1481) |
+| EP15 + Student-t df=3 noise + anti-K=3 + 6-res + mirror | 🆕 H294 askeladd (just assigned, PR #1482) |
 | EP15 + anti-K=3 + 8-res densified (+40960+57344) + mirror | 🆕 H288 fern (just assigned) |
 | EP15 + anti-K=3 + 8-res LOWER (+16384+24576) + mirror | 🆕 H291 frieren (just assigned) |
 | EP15 + anti-K=3 + 8-res UPPER (+163840+196608) + mirror | 🆕 H292 edward (just assigned) |

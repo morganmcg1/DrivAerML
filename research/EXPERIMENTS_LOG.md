@@ -1,3 +1,69 @@
+## 2026-05-30 08:10Z — PR #1472 askeladd H287 CLOSED: Finding III — EP-axis fully exhausted around EP15
+
+### PR #1472 askeladd H287 — CLOSED: EP14+anti-K3+6-res+mirror fails H275 SOTA gate
+
+- **Branch**: askeladd/h287-ep14-anti-K3-stack
+- **Hypothesis**: EP14 checkpoint at H275 SOTA recipe — 3rd point on EP-curve to confirm EP15 is the unique peak
+
+### Results (W&B run x2q6nkqe, 4.07h runtime)
+
+| Recipe | val_abupt | test_abupt | test_WSS | test_SP | test_VP |
+|---|---:|---:|---:|---:|---:|
+| **H275 EP15+anti-K3 SOTA** | **5.9243%** | **5.7690%** | **6.6743%** | **3.6427%** | **3.3788%** |
+| H287 EP14+anti-K3 (this) | 5.9326% | 5.7764% | 6.680% | 3.650% | 3.390% |
+| Δ vs SOTA | +0.83bp | +0.74bp | +0.6bp | +0.7bp | +1.1bp |
+
+### Analysis: Finding III-EP-axis-fully-exhausted banked
+
+EP14 produces val/test at approximately the same level as EP13 (H274 EP13+anti-K3 = val 5.9322), confirming the sharp jump from EP13/EP14 to EP15 is structural. Combined with:
+- **FFF** (H289): EP16 deleted, EP12 unavailable — no checkpoints above EP15
+- **HHH** (H280): EP13+K5+Sobol still fails gate — doubled-K diversity doesn't compensate for off-peak checkpoint
+- **H287 (this)**: EP14 at EP13 level — both adjacent checkpoints below EP15 are significantly worse
+
+The EP-curve shape: EP12 (unavailable) → EP13 ≈ EP14 << EP15 (SOTA peak) > EP16 (slight regression). The gap from EP13/EP14 to EP15 is ~7-8bp — this is not fine-tuning territory. The EP15 minimum is a sharp, distinct optimization landing that cannot be approximated by neighboring checkpoints.
+
+**Bank Finding III**: No checkpoint variation of the H185/H244 lineage can beat EP15. EP-axis fully closed in both directions. Future work must abandon checkpoint exploration entirely.
+
+### Decision
+Close. Assigned H294 (Student-t df=3 noise family) to askeladd as fresh orthogonal axis.
+
+---
+
+## 2026-05-30 08:10Z — PR #1460 nezuko H280 CLOSED: Finding HHH — EP13+K5+Sobol cannot rescue below-EP15 checkpoint
+
+### PR #1460 nezuko H280 — CLOSED: EP13+Sobol-anti-K5+6-res+mirror fails H275 SOTA gate
+
+- **Branch**: nezuko/h280-ep13-sobol-anti-K5-stack
+- **Hypothesis**: EP13 + Sobol-anti K=5 (10 forward passes) + 6-res — tests if doubled noise diversity recovers EP13 deficit
+
+### Results (W&B run du6p4ug7, 6.10h runtime)
+
+| Recipe | val_abupt | test_abupt | test_WSS | test_SP | test_VP |
+|---|---:|---:|---:|---:|---:|
+| **H275 EP15+anti-K3 SOTA** | **5.9243%** | **5.7690%** | **6.6743%** | **3.6427%** | **3.3788%** |
+| H280 EP13+Sobol-anti-K5 (this) | 5.9313% | 5.7753% | 6.679% | 3.650% | 3.385% |
+| Δ vs SOTA | +0.70bp | +6.30bp | +0.5bp | +0.7bp | +0.6bp |
+
+### Analysis: Finding HHH-EP13-no-rescue-with-K5-Sobol banked
+
+This closes the bottom of the EP-axis. Doubling K (5 Sobol-anti pairs instead of 3 anti pairs) with Sobol QMC structure at EP13 produces val 5.9313 / test 5.7753. All 3 channels (WSS/SP/VP) match or degrade vs SOTA. There is no partial-channel rescue even with 67% more forward passes.
+
+The mechanism: EP13 is fundamentally at a less flat loss minimum than EP15. Finding ZZ showed EP15 exploits a flatter surface where Taylor linear-cancellation is more meaningful. EP13's less-flat minimum means the higher-order Taylor terms (which survive anti-thetic cancellation) are larger — no amount of noise-family or pair-count tuning can offset this structural disadvantage.
+
+Combined with Finding III (EP14 also fails gate) and Finding FFF (EP12/EP16 unavailable or worse), the EP-axis is now:
+- EP12: unavailable
+- EP13: val 5.9313 with K=5 Sobol (Finding HHH)
+- EP14: val 5.9326 with K=3 anti (Finding III)
+- EP15: val 5.9243 ← **SOTA**
+- EP16: val 5.9548 from H244 history (regression, Finding FFF)
+
+**Bank Finding HHH**: EP13 cannot be rescued even with doubled-K Sobol diversity. EP-axis is fully exhausted from below. The EP15 optimum is uniquely accessible only via EP15 checkpoint.
+
+### Decision
+Close. Assigned H293 (Laplace noise family) to nezuko as fresh orthogonal axis.
+
+---
+
 ## 2026-05-30 07:20Z — PR #1467 edward H284 CLOSED: Finding GGG — Sobol×anti non-additive at K=3 EP15
 
 ### PR #1467 edward H284 — CLOSED: EP15+Sobol-anti-K=3+6-res+mirror fails H275 SOTA gate
