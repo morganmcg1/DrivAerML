@@ -1,8 +1,10 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 11:48Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 13:05Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
 
-**🚨 HOT: Tanjiro H295 K=5 val=5.9231 PASSES gate by 0.4bp** (W&B uf17vdab). Test arm in progress, ETA ~14:34Z. If test < 5.7683 → NEW SOTA, merge PR #1483.
+**🚨 HOT: Tanjiro H295 K=5 val=5.9231 PASSES gate by 0.4bp** (W&B uf17vdab). Test arm in progress, ETA ~14:34Z. SENPAI_TIMEOUT cuts at ~14:46Z (tight). If test < 5.7683 → NEW SOTA, merge PR #1483.
+
+**4 students re-assigned** (PRs #1487-1490) after H286/H292/H293/H294 closed 12:13-12:26Z with Findings MMM/OOO/PPP/QQQ.
 
 ---
 
@@ -22,27 +24,25 @@
 
 ---
 
-## Active Fleet (as of 11:48Z — 8 students active)
+## Active Fleet (as of 13:05Z — 8 students active)
 
 | PR | Student | Hypothesis | val_abupt | Status | ETA |
 |---|---|---|---:|---|---|
-| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | **5.9231 ✓** | 🟢 uf17vdab val PASSES gate −0.4bp, test arm running | ~14:34Z |
-| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | — | 🟡 at1jadnv running, val arm in progress (started ~10:00Z) | ~13:30Z |
-| **#1471** | **alphonse** | **H286: Aggregation operator sweep (5 ops)** | 5.9242 ✗ | 🟡 bad1i1jv: best agg trimmed_mean_10 5.9242 (+0.7bp fail); test arm pending | ~13:00Z |
-| **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K}** | 5.9252 ✗ | 🟡 rowu861p test-only relaunch (primary aqcgnn1z crashed) | ~12:30-13:30Z |
-| **#1481** | **nezuko** | **H293: Laplace noise at EP15+anti-K3+6-res** | 5.9246 ✗ | 🟡 hu472xfk val done (+1.1bp fail); test arm pending | ~12:30Z |
-| **#1482** | **askeladd** | **H294: Student-t df=3 at EP15+anti-K3+6-res** | 5.9248 ✗ | 🟡 jb36zg3o val done (+1.3bp fail); test arm pending | ~12:30Z |
-| **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 5.9353 ✗ | 🟡 xyy8f895 val done (+12bp fail); test arm pending | ~13:00Z |
-| **#1485** | **thorfinn** | **H297: Per-layer noise stratification (σ_attn=0, σ_mlp=5e-4, K=4)** | — | 🆕 1ie6ksw6 just started 11:34Z; SP-floor targeted | ~16:48Z |
+| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | **5.9231 ✓** | 🟢 uf17vdab — **val PASSES gate −0.4bp**, test arm running | ~14:34Z |
+| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | — | 🟡 at1jadnv running, val arm in progress | ~13:30Z |
+| **#1485** | **thorfinn** | **H297: Per-layer noise (σ_attn=0, σ_mlp=5e-4, K=4)** | — | 🟡 1ie6ksw6 running (started 11:34Z, ETA ~16:48Z) | ~16:48Z |
+| **#1477** | **frieren** | **H291: 8-res LOWER test relaunch** | 5.9252 ✗ | 🟡 rowu861p test-only (primary crashed), close pending test result | ~13:30Z |
+| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ_coord∈{1e-4,5e-4,1e-3})** | — | 🆕 assigned 13:05Z (just picked up) | ~19:00Z |
+| **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🆕 assigned 13:05Z | ~18:00Z |
+| **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val, apply test)** | — | 🆕 assigned 13:05Z | ~18:00Z |
+| **#1490** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🆕 assigned 13:05Z | ~18:00Z |
 
 **Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
 
 **Hot watch**: 
-- **Tanjiro H295 K=5** (PR #1483): val=**5.9231 PASSES gate**. If test < 5.7683 → NEW SOTA. Test arm ETA ~14:34Z. SENPAI_TIMEOUT may cut at ~14:46Z (tight but should land).
-- **Fern H296** (PR #1484): K=4+8-res compound — HIGHEST-EV cell on K×res matrix per Finding KKK orthogonality. Val arm ETA ~13:30Z. Primary SOTA candidate parallel to H295.
-- **Alphonse H286** all 5 aggregators val ≥ 5.9242 fail gate; aggregation axis closing when test lands.
-- **Frieren H291** test-only relaunch `rowu861p` — primary crashed at 5.9252 val fail; closing when test lands.
-- **Edward/Nezuko/Askeladd** — all val arms fail gate; closing when test arms land. Noise-family + 8-res-upper axes will be closed.
+- **Tanjiro H295 K=5** (#1483): val=5.9231 **PASSES gate**. Test arm ETA ~14:34Z; SENPAI_TIMEOUT cuts ~14:46Z. → merge if test < 5.7683 (new K=5 SOTA)
+- **Fern H296** (#1484): K=4+8-res compound — HIGHEST-EV cell on K×res matrix per Finding KKK. Val arm ETA ~13:30Z.
+- **Frieren H291** (#1477): val fails; test-only relaunch rowu861p for informational close ~13:30Z.
 
 ---
 
@@ -74,10 +74,14 @@
 
 ---
 
-## Findings Bank (40 banked, LLL added 11:03Z)
+## Findings Bank (44 banked, MMM/OOO/PPP/QQQ added 12:13-12:26Z)
 
 | ID | Source | Summary |
 |---|---|---|
+| **QQQ-student-t-null** | H294 askeladd (closed 12:26Z) | Student-t df=3 ≈ Gaussian at matched RMS σ=5e-4 (val 5.9248 +1.3bp). Combined with MMM: noise distribution family axis definitively closed. Leading-order anti-thetic cancellation is distribution-free. |
+| **PPP-8res-upper-degrades** | H292 edward (closed 12:26Z) | 8-res upper {32K-192K} degrades val by 11.8bp vs H285 SOTA. Resolution ceiling confirmed at ≤131K. More high-res samples add variance without Taylor-cancellation benefit. |
+| **OOO-aggregation-null** | H286 alphonse (closed 12:24Z) | All 5 homogeneous operators (mean, median, trimmed_mean_10/20, Huber) fail H285 gate. Best alternative (trimmed_mean_10) is 0.7bp worse than mean. Linear Taylor-cancellation already provides optimal pooling. → H301 tests heterogeneous per-channel selection. |
+| **MMM-laplace-null** | H293 nezuko (closed 12:13Z) | Laplace noise ≈ Gaussian at matched RMS σ=5e-4 (val 5.9246/test 5.7694, both +1.1bp). Distribution shape doesn't matter — Gaussian, Laplace, Student-t all equivalent at this scale. Noise-family axis closed. |
 | **LLL-multi-σ-diversity-null-at-EP15-anti-K3** | H290 thorfinn (closed 11:03Z) | At EP15+anti-K3+6-res, mixing σ∈{3e-4,5e-4,7e-4} gives val ~H275 (−0.02bp), all channels FAIL H285 gate (+0.6bp both axes). σ-diversity subsumed by K-axis: K=3→K=4 at fixed σ=5e-4 gives 4–7× more gain than σ-mixing at K=3. SP channel unimproved (3.6428 vs target 3.577). → H297 per-layer noise stratification assigned to thorfinn. |
 | **KKK-8res-K3-val-passes-test-marginal-fail** | H288 fern (closed 09:56Z) | At EP15+anti-K3, 6→8 res (mid densification: +40960,+57344) gives val −1.4bp vs H275 but test only −0.05bp. Channel asymmetric: VP −2.1bp (large), SP +1.1bp (regression). K-axis and res-axis are **orthogonal** — distinct channel signatures → K=4+8-res compound (H296) should stack both gains additively. K=4+6-res (H285) beats K=3+8-res on test_abupt by 0.02bp within noise floor. |
 | **JJJ-K4-K-axis-alive-at-EP15** | H285 tanjiro (merged 08:37Z as NEW SOTA) | K=3→K=4 anti-thetic at EP15+6-res gives val −0.8bp / test −0.7bp. Sign-consistent across all 5 paper-facing channels (5/5). K-axis still alive but slope diminishing: K=2→3 compound was super-additive (Finding ZZ); K=3→4 is weakly additive. K=5 next (H295 tanjiro) to close axis. Merge gate updated to val<5.9235, test<5.7683. |

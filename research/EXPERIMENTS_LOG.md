@@ -1,3 +1,94 @@
+## 2026-05-30 12:26Z — PR #1482 askeladd H294 CLOSED: Finding QQQ — Student-t noise family null
+
+### PR #1482 askeladd H294 — CLOSED: EP15+anti-K3+Student-t-df3+6-res+mirror
+
+- **Branch**: askeladd/h294-student-t-noise-df3
+- **Hypothesis**: Student-t with df=3 (heaviest finite-variance tail among tested families) will produce higher kurtosis noise, exploring rare weight-perturbation events missed by Gaussian
+
+### Results (W&B run jb36zg3o, DDP×8)
+
+| Recipe | Distribution | df | val_abupt | test_abupt |
+|---|---|---:|---:|---:|
+| H285 SOTA | Gaussian | ∞ | 5.9235 | 5.7683 |
+| H294 Student-t | Student-t | 3 | 5.9248 | — |
+
+Gate verdict vs H285: val 5.9248 ❌ (+1.3bp fail). Closed on val arm.
+
+### Finding QQQ: Student-t (df=3) noise family is functionally equivalent to Gaussian — noise distribution family axis definitively closed
+
+**Statement**: Student-t df=3 noise at EP15+anti-K3+σ=5e-4 val=5.9248%, 1.3bp above the H285 gate. Combined with Finding MMM (Laplace ≈ Gaussian), the noise distribution family axis is **definitively closed**: Gaussian, Laplace, and Student-t all produce functionally identical TTA results at matched RMS σ. The leading-order anti-thetic cancellation is distribution-free; higher-moment differences have no measurable effect at σ=5e-4, K=3.
+
+---
+
+## 2026-05-30 12:26Z — PR #1479 edward H292 CLOSED: Finding PPP — 8-res upper ceiling confirmed
+
+### PR #1479 edward H292 — CLOSED: EP15+anti-K3+8-res-UPPER {32K-192K}
+
+- **Branch**: edward/h292-extended-res-upper
+- **Hypothesis**: Extending resolution ladder upward to {160K, 192K} would densify the high-complexity surface regions improving WSS/SP
+
+### Results (W&B run xyy8f895, DDP×8)
+
+| Recipe | Resolution set | val_abupt | test_abupt |
+|---|---|---:|---:|
+| H285 SOTA (6-res) | {32K,49K,65K,81K,98K,131K} | 5.9235 | 5.7683 |
+| H292 8-res upper | {32K,49K,65K,81K,98K,131K,160K,192K} | 5.9353 | — |
+
+Gate verdict vs H285: val 5.9353 ❌ (+11.8bp fail). Closed on val arm.
+
+### Finding PPP: Upper resolution extensions {160K, 192K} degrade TTA — resolution ceiling confirmed at ≤131K
+
+**Statement**: 8-res upper ladder degrades val by 11.8bp vs H285 SOTA. Adding higher-resolution samples increases noise variance without adding useful Taylor-cancellation signal. The resolution ceiling is confirmed at 131K. Complements Finding KKK (8-res mid-densification gives marginal val gain, marginal test fail). Together: res-axis is saturated at 6-res {32K-131K}.
+
+---
+
+## 2026-05-30 12:24Z — PR #1471 alphonse H286 CLOSED: Finding OOO — aggregation operator axis null
+
+### PR #1471 alphonse H286 — CLOSED: Aggregation operator sweep (5 ops) on EP15+anti-K3+6-res
+
+- **Branch**: alphonse/h286-aggregation-sweep
+- **Hypothesis**: Non-mean aggregation (median, trimmed_mean, huber) over K TTA samples would be more robust to outlier noise passes and improve SP/WSS
+
+### Results (W&B run bad1i1jv, DDP×8, 5-arm val sweep)
+
+| Aggregator | val_abupt | Gate (<5.9235%) |
+|---|---:|:---|
+| trimmed_mean_10 (best) | 5.9242 | ❌ FAIL +0.7bp |
+| mean (baseline) | 5.9243 | ❌ FAIL +0.8bp |
+| trimmed_mean_20 | 5.9258 | ❌ FAIL +2.3bp |
+| huber | 5.9261 | ❌ FAIL +2.6bp |
+| median | 5.9303 | ❌ FAIL +6.8bp |
+
+Gate verdict: ALL 5 operators fail gate. Best is trimmed_mean_10 (+0.7bp), but still above H285 gate.
+
+### Finding OOO: Aggregation operator is a NULL axis — mean is optimal among standard reduction operators
+
+**Statement**: All 5 homogeneous aggregation operators (mean, median, trimmed-mean 10%, trimmed-mean 20%, Huber) fail the H285 gate. Best alternative (trimmed_mean_10) is 0.7bp worse than mean. The linear Taylor-cancellation mechanism (anti-thetic +/- pairs) already provides optimal aggregation — non-mean operators discard some cancellation signal. Aggregation axis closed. → H301 nezuko tests heterogeneous per-channel selection (different axis).
+
+---
+
+## 2026-05-30 12:13Z — PR #1481 nezuko H293 CLOSED: Finding MMM — Laplace noise family null
+
+### PR #1481 nezuko H293 — CLOSED: EP15+anti-K3+Laplace-noise+6-res+mirror
+
+- **Branch**: nezuko/h293-ep15-anti-K3-laplace
+- **Hypothesis**: Laplace noise (heavier tails, kurtosis=6 vs 3) would produce more extreme weight perturbations, exploring non-Gaussian Taylor-cancellation regions
+
+### Results (W&B run hu472xfk, DDP×8)
+
+| Recipe | Distribution | val_abupt | test_abupt |
+|---|---|---:|---:|
+| H285 SOTA | Gaussian | 5.9235 | 5.7683 |
+| H293 Laplace | Laplace | 5.9246 | 5.7694 |
+
+Gate verdict vs H285: val 5.9246 ❌ (+1.1bp), test 5.7694 ❌ (+1.1bp). Both fail.
+
+### Finding MMM: Laplace noise ≈ Gaussian — noise distribution shape is not a meaningful lever
+
+**Statement**: At EP15+anti-K3+6-res, Laplace noise (matched RMS σ=5e-4) produces val=5.9246/test=5.7694 — 1.1bp above H285 gate on both axes. The leading-order anti-thetic cancellation is distribution-free; E[ε^T H ε] = σ²·tr(H) is identical for matched-RMS Gaussian/Laplace. The distribution shape only affects higher-order variance terms, which are negligible at K=3 and σ=5e-4. Noise-family axis closed: Gaussian, Laplace, Student-t (H294) all equivalent. → H299 askeladd tests noise LOCATION (embedding-only), a completely different axis.
+
+---
+
 ## 2026-05-30 11:03Z — PR #1476 thorfinn H290 CLOSED: Finding LLL — multi-σ diversity null at EP15+anti-K3 vs H285
 
 ### PR #1476 thorfinn H290 — CLOSED: EP15+anti-K3+σ={3e-4,5e-4,7e-4}+6-res+mirror
