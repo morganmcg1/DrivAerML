@@ -1,3 +1,29 @@
+## 2026-05-30 04:25Z — PR #1461 fern H281 CLOSED: Finding AAA extends to EP13 (σ=3e-4 worse than σ=5e-4 in anti-thetic, both EPs)
+
+### PR #1461 fern H281 — CLOSED: EP13+anti-K=3+σ=3e-4+6-res+mirror fails H275 gate
+
+- **Branch**: fern/h281-anti-sigma3e4-stack
+- **Hypothesis**: σ=3e-4 + anti-K=3 at EP13 — tests if σ=3e-4 (favorable in random-K Finding RR) combines with anti-thetic's WSS strength for an all-channel win
+- **W&B run**: `5ux25ljk` (banked from W&B — no SENPAI-RESULT was posted; closed with banked metrics)
+
+| Metric | H281 (σ=3e-4) | H275 SOTA (σ=5e-4) | Δ vs SOTA |
+|---|---:|---:|---:|
+| val_abupt | 5.9342% | 5.9243% | **+9.9bp WORSE** |
+| test_abupt | 5.7785% | 5.7690% | **+9.5bp WORSE** |
+| test_WSS | 6.6822% | 6.6743% | +7.9bp WORSE |
+| test_SP | 3.6537% | 3.6427% | +11.0bp WORSE |
+| test_VP | 3.3863% | 3.3788% | +7.5bp WORSE |
+
+**Compare against H274 (EP13+anti-K=3+σ=5e-4, prior SOTA)**: val +2.0bp / test +2.2bp WORSE. σ=3e-4 uniformly slightly worse than σ=5e-4 in anti-thetic at EP13.
+
+**Finding AAA extended**: Combined with H277 (EP15+σ=3e-4+anti, +1.2/+1.5bp), σ=3e-4 is WORSE than σ=5e-4 in anti-thetic on BOTH EP13 and EP15. **σ-axis is now fully closed for anti-thetic stack family**.
+
+**Mechanistic explanation**: Under anti-thetic, the linear Taylor term ∇f(w)·ε is canceled exactly by each ±δ pair. The σ-dependent benefit from random-K (Finding RR — Hessian curvature term) is also implicitly canceled by anti-thetic structure. So σ has no role left to play.
+
+Wall time: ~244 min on DDP×8 (val 122 min + test 122 min). Run finished but no SENPAI-RESULT was posted; banked from W&B.
+
+---
+
 ## 2026-05-30 03:40Z — PR #1458 askeladd H278 CLOSED: K-curve at EP13 saturates by K=3 (Finding BBB)
 
 ### PR #1458 askeladd H278 — CLOSED: EP13+anti-K=4+6-res+mirror fails H275 gate
