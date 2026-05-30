@@ -49,11 +49,18 @@
 | **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | ⚠️ STILL 5 smokes only (debug=True, 2-car); nudged 17:48Z to launch full primary | ~21:30Z if launches now |
 
 **Hot watch (17:55Z)**:
-- **Alphonse H298 DEAD direction**: H298B val=7.8189% catastrophic. H298C will confirm slope (~19:50Z) → close PR #1487, assign fresh H309. Coord-noise direction permanently closed.
-- **3 likely-close test arms** (askeladd/edward/nezuko H299/H300/H301): all val failed new gate; test arms at ~21:00Z → close all 3, bank Findings, assign H307/H308/H309.
+- **Alphonse H298 DEAD direction**: H298B val=7.8189% catastrophic. H298C will confirm slope (~19:50Z) → close PR #1487, assign H310 (2nd EP15 seed). Coord-noise direction permanently closed.
+- **3 likely-close test arms** (askeladd/edward/nezuko H299/H300/H301): all val failed new gate; test arms at ~21:00Z → close all 3, bank Findings, assign H308/H309/H311.
 - **Tanjiro H303 LAUNCH WATCH**: 5 debug smokes only, no full primary. Nudged 17:48Z; if no launch by 18:48Z escalate.
-- **Thorfinn H305 / Fern H306**: physics BC enforcement and per-point confidence weighting — both running, ETA ~21:30Z.
+- **Thorfinn H305 / Fern H306**: physics BC enforcement and per-point confidence weighting — both running, ETA ~21:30Z. Thorfinn has 2 runs (likely re-launch due to ckpt path issue).
 - **Frieren H302**: shared-loop primary running, ETA ~20:52Z.
+
+**Queue for next idle students**:
+- **H307 BLOCKED**: weight-space interpolation needs 2+ EP15 ckpts; only `0gjfv45i` exists → unblock via H310.
+- **H308**: surface-volume consistency loss at TTA time (cross-modal anchoring).
+- **H309**: per-channel best-K (heterogeneous K_eff per output) OR surface-only TTA (skip volume noise where unhelpful).
+- **H310 (HIGH PRIORITY)**: commission 2nd EP15 seed retrain (~5h training) → enables H307 weight-space averaging / Model Soups. NOT ensembling (single forward at eval).
+- **H311**: physics-informed test-time refinement on tau_z (highest-error channel) via tangent-plane regularization (orthogonal to H305 hard projection).
 
 ---
 
