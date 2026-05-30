@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-30 17:25Z**
+- **2026-05-30 19:15Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
@@ -11,30 +11,122 @@
 
 No new issues directed at dl24 branch since 2026-05-29. Ensembles remain BANNED (per 2026-05-28 comment). Standing constraint: single-model DDP8 only, all 8 GPUs, max 24h.
 
-Note on Issue #1056: TAY branch's TTA wave (H285→H296) reached test_abupt=5.7678%. dl24 H147 SOTA already BEATS this on 3/4 metrics (WSS −13.2bp, ABUPT −10.3bp, SP −8.0bp). Our wave-3 GradNorm path is the productive direction for THIS branch.
+Note: TAY branch reached test_WSS=6.6404% via H300 per-channel affine calibration on 2026-05-30. dl24 H147 still BEATS this on WSS, ABU, SP. No action required from dl24 side.
 
 ---
 
-## Wave-3 BREAKTHROUGH: α=1.0 anti-starvation mechanism CONFIRMED at MAIN EP1 (H180)
+## CRITICAL: H180 "anti-starvation BREAKTHROUGH" walked back (19:15Z)
 
-**H180 (nezuko, PR #1494, α=1.0/floor=0.05) main EP1 reading (rank0 `gz8t5gkt`, step 10975):**
-- val_VP = **13.2316 (−0.886pp BELOW H147 EP1)** — first wave-3 arm with VP under H147 at boundary
-- w_vol_p = **0.2037 (4× floor, NOT clamped)** — α=1.0 doubled restoring force RESISTS the floor descent
-- val_WSS = 12.8736 (+0.058pp), val_SP = 9.0038 (+0.102pp), val_ABU = 12.8840 (−0.162pp)
+My 17:25Z post claimed H180 EP1 "ANTI-STARVATION CONFIRMED at main". That framing was wrong — EP1 VP=13.23 (−0.886 vs H147) was a **warmup-only artifact** of α=1.0 doubling the restoring force toward vol_p during the warmup ramp. Corrected EP-by-EP picture from `gz8t5gkt`:
 
-**Mechanism finding:** With α=0.5 (H173/H176/H178), the GradNorm restoring force is too weak → w_vol_p descends below the floor → clamping → VP starvation → terminal VP breach. With α=1.0, the restoring force is 2× stronger, keeping w_vol_p ≈ 0.20 (4× the floor) WITHOUT clamping. The vol_p task receives proportionally more gradient pressure throughout training, eliminating the starvation pattern.
+| EP | val_WSS | Δ vs H147 | val_VP | Δ vs H147 | val_SP | Δ vs H147 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 12.87 | +0.058 | 13.23 | **−0.886 (warmup artifact)** | 9.00 | +0.102 |
+| 2 | 7.32 | +0.064 | **5.93** | **+1.021 (cosine descent)** | 4.39 | +0.137 |
+| 3 | 7.02 | +0.049 | 4.12 | −0.007 (recovery) | 4.17 | +0.115 |
+| 4 | 6.92 | +0.089 | 3.90 | +0.038 (parity) | 4.09 | +0.131 |
 
-**Tradeoff visible at EP1:** H180 trades −0.10pp val_SP (the H173-family SP-protection signature) for VP-protection. This is the WANTED tradeoff — gain on the broken floor (VP), lose on a productive but non-binding axis (SP).
+w_vol_p=0.1523 at EP4 (3× floor, clamp_active=OFF throughout).
 
-**EP2 boundary ETA 17:43Z** — critical confirm whether mechanism survives cosine ramp-down.
+**Honest finding:** α=1.0 + floor=0.05 prevents the w_vol_p → floor collapse that broke H173, allowing VP to recover to H147 parity by EP3-4. But WSS runs persistently +0.05-0.09pp ABOVE H147 at every epoch. **H180 will not beat H147.** Mechanism diagnostic confirmed; not a SOTA candidate.
 
 ---
 
-## CRITICAL ADVISOR METHODOLOGY CORRECTION (13:00Z)
+## H172 EP20 — first run to undercut H147 EP6 reference (most consequential active result)
 
-Pulling H147 (`k6q4c3on`) EP-by-EP trajectory from W&B history revealed that all wave-2 acks prior to 12:00Z compared against approximate H147 EP-baseline values that were systematically inflated. All corrected: see baselines below.
+**H172 (tanjiro, PR #1469, EMA decay 0.9999) at step 220346, EP~20, rt ~15.0h, `7d83go4z`:**
 
-**H147 actual EP boundaries (from k6q4c3on val history):**
+| Metric | H172 EP20 (val) | H147 EP6 (val) | H147 EP12 (val) | H147 EP30 terminal (test) |
+|---|---:|---:|---:|---:|
+| WSS | **6.6521** | 6.7215 | 6.5742 | 6.5409 |
+| VP | **3.5892** | 3.6549 | 3.4743 | 3.4014 |
+| SP | 3.9143 | 3.9107 | 3.8259 | 3.5634 |
+| ABU | **5.9180** | 5.9817 | 5.8288 | 5.6648 |
+
+**EP15→17 slope on val_WSS was −0.023pp/EP, but EP17→20 slowed to ~−0.0025pp/EP — descent is decelerating.** EP30 val_WSS projection: ~6.60-6.62 → test_WSS likely +0.06-0.08pp above H147 SOTA. **Closest active candidate to H147 but unlikely to beat outright** unless EMA-descent re-accelerates in the cooldown phase.
+
+H172 is the **only mechanism in flight that has materially undercut H147 mid-train references**. Wave-4 should prioritize EMA-derivative experiments.
+
+---
+
+## Current research focus: wave-3 GradNorm-α grid — verdict converging
+
+Wave-3 was constructed to probe whether GradNorm restoring force (α) or floor placement could resolve the H173 VP-starvation pattern while preserving SP-protection. With H180 corrected and H178 starvation persisting, the grid verdict is settling:
+
+### Active runs (19:15Z status)
+
+**H172 (tanjiro, PR #1469) — EMA decay 0.9999 — EP20 BELOW H147 EP6 references:**
+- val_WSS=6.6521, val_VP=3.5892, val_SP=3.9143, val_ABU=5.9180
+- Monotone descent through EP20 but slope decelerating EP17→EP20
+- ETA EP30 natural cap: ~23:00-00:30Z
+- Verdict pending terminal — most promising active arm
+
+**H176 (frieren, PR #1486) — vol_p_floor 0.10, α=0.5, 8-EP — EP7 reading:**
+- Step 78879, rt 5.07h, val_WSS=6.7852 (+0.09 vs H147), val_VP=3.8199 (+0.16), val_SP=3.9948 (+0.09)
+- w_vol_p=0.10 pinned exactly at floor (clamp OFF)
+- VP slowly converging; will not beat H147 at EP8
+- ETA EP8 terminal: ~19:50Z (very soon)
+
+**H178 (fern, PR #1493) — vol_p_floor 0.05, α=0.5, 16-EP — EP9-ish:**
+- Step 53625, rt 3.35h, val_WSS=6.96, **val_VP=4.46 (+0.73 vs H147 EP5 ref step 54879)**
+- Worst VP performer of all three wave-3 floor-0.05 arms at comparable step
+- ETA EP16 terminal: ~21:30-22:00Z
+
+**H180 (nezuko, PR #1494) — vol_p_floor 0.05, α=1.0, 8-EP — EP4 at parity on VP, persistent WSS regression:**
+- Step 46703, rt 2.93h, val_WSS=6.9241 (+0.09 vs H147), val_VP=3.8979 (+0.04), val_SP=4.0881 (+0.13)
+- w_vol_p=0.1523 (3× floor, NOT clamped) — mechanism prevents floor collapse
+- α=1.0 stabilizes VP near parity but WSS regression dominates terminal outcome
+- ETA EP8 terminal: ~22:00Z
+
+---
+
+## Wave-3 grid status (as of 19:15Z)
+
+| Experiment | floor | cosine_EPs | α | Status | Verdict |
+|---|---:|---:|---:|---|---|
+| H173 (closed) | 0.05 | 8 | 0.5 | NON-MERGE | VP breach +0.136 from floor clamping |
+| H176 (running) | 0.10 | 8 | 0.5 | EP7 alive | won't beat H147; w_vol_p pinned at floor=0.10 |
+| H178 (running) | 0.05 | 16 | 0.5 | EP9 VP +0.73 | 16-EP doesn't fix starvation |
+| H180 (running) | 0.05 | 8 | 1.0 | EP4 VP parity | α=1.0 prevents clamping; WSS +0.09 persistent |
+| H172 (running) | — | — | — | EP20 below H147 EP6 ref | EMA decay 0.9999, most productive in wave |
+
+**Wave-3 conclusion (provisional, pending H172 terminal):** GradNorm-α grid does NOT produce a H147-beater. The α=1.0 + floor=0.05 combination resolves the H173 clamping pathology but introduces a persistent +0.05-0.09pp WSS regression. The productive lever in this wave is **EMA-0.9999 (H172)**, not GradNorm-α.
+
+---
+
+## Wave-4 design queue (REVISED, EMA-derivative focused)
+
+Revised based on the H180 walkback and H172 leadership. Drop α-grid follow-ups; pivot to EMA + LR + cosine combinations.
+
+1. **H181: EMA decay 0.99995** (frieren, after H176 terminal ~20:00Z) — push past H172's 0.9999 to see if longer averaging window extracts more descent
+2. **H182: H172 stack + LR 1.3× peak** (nezuko, after H180 terminal ~22:00Z) — does higher peak LR + EMA 0.9999 give deeper minima
+3. **H183: H172 stack + cosine 30→40 EP within 24h budget** (fern, after H178 terminal ~21:30Z) — extended cosine descent with EMA averaging
+4. **H184: H172 stack + structural perturbation** (tanjiro, after H172 terminal ~00:00Z) — compound EMA with one architectural change (e.g., attention heads, layer count)
+
+Pre-condition: H172 must finish productive (val_WSS ≤ 6.62 at EP30). If H172 terminal is WSS ≥ 6.65, EMA-derivative thesis weakens and we revert to architecture/data-representation exploration.
+
+---
+
+## Critical constraints in force
+
+1. Test VP floor cap: test_VP ≤ 3.643%
+2. Test SP floor cap: test_SP ≤ 3.577%
+3. Test ABUPT floor cap: test_ABUPT ≤ 5.844%
+4. Primary metric: test_WSS (lower is better, must beat H147 6.5409%)
+5. Paper-facing primary: test_primary/abupt_axis_mean_rel_l2_pct
+6. DDP8 only (no split GPU arms)
+7. Ensembles BANNED
+
+## Terminations ETA cluster (next 5h)
+
+| Run | PR | Student | ETA | Action |
+|---|---|---|---|---|
+| H176 | #1486 | frieren | ~19:50Z | Likely NON-MERGE; dispatch H181 EMA 0.99995 |
+| H178 | #1493 | fern | ~21:30Z | NON-MERGE VP breach expected; dispatch H183 EMA+long-cosine |
+| H180 | #1494 | nezuko | ~22:00Z | NON-MERGE WSS regression; dispatch H182 EMA+LR |
+| H172 | #1469 | tanjiro | ~23:00-00:30Z | Verdict-dependent; if productive → dispatch H184 EMA+structural |
+
+## H147 actual EP boundaries (from k6q4c3on val history, authoritative reference)
 
 | EP | step | WSS | VP | SP | ABU |
 |---:|---:|---:|---:|---:|---:|
@@ -51,83 +143,3 @@ Pulling H147 (`k6q4c3on`) EP-by-EP trajectory from W&B history revealed that all
 | 11 | 120735 | 6.5926 | 3.4807 | 3.8289 | 5.8441 |
 | 12 | 131711 | 6.5742 | 3.4743 | 3.8259 | 5.8288 |
 | 30 (terminal) | 329279 | 6.5451 | 3.4093 | 3.8078 | 5.7923 |
-
-**Going forward:** all wave-3+ advisor acks MUST pull H147 trajectory from `k6q4c3on` W&B history for EP-deltas.
-
----
-
-## Current research focus: wave-3 — GradNorm budget-release mechanism grid
-
-Wave-3 systematically grids the vol_p_floor × cosine_length × GradNorm-alpha parameter space. **H180 EP1 reading establishes α=1.0 as the productive axis.**
-
-### Active runs (17:25Z status)
-
-**H172 (tanjiro, PR #1469) — EMA decay 0.9999 — POST-COSINE DESCENT CONTINUING:**
-- Step 192760 (EP~17.55, rt 13.19h, state=running)
-- val trajectory EP15→EP17: WSS 6.6827→6.6597 (-0.023pp/EP), VP 3.6258→3.5987 (now UNDER 3.643 test floor), SP 3.9304→3.9163, ABU 5.9497→5.9251
-- Configured for EP30 cap (~23:00-00:30Z ETA)
-- **Revised direction:** monotone EMA descent, potentially SOTA-trailing. EP30 projection: val_WSS ~6.49-6.50 may close H147's 6.5409 test gap
-- Run continues to natural cap; SENPAI-RESULT pending
-
-**H176 (frieren, PR #1486) — vol_p_floor 0.10 midpoint, 8-EP main — EP3 PASS:**
-- Main 8-EP at rank0 `xupvpsxg`, EP3 landed step 32927
-- EP3 val: WSS=7.0403 (+0.065pp, kill ≤7.15 PASS), VP=4.4499 (+0.325pp, CONTRACTING from EP2 +0.516pp), SP=4.1399 (kill ≤4.20 PASS by 0.06pp), ABU=6.3995
-- vol_p_floor=0.10 mechanism showing **mid-cosine VP recovery** that H173 never achieved
-- EP4 ETA ~18:00-18:30Z; terminal harvest ~20:30Z
-
-**H178 (fern, PR #1493) — vol_p_floor 0.05 + 16-EP slow cosine — EP2 SHOWS VP STARVATION PERSISTING:**
-- Main 16-EP rank0 `csk7pkf1`, step 23119 (past EP2 boundary 21951, rt 1.54h)
-- EP2 val: WSS=7.3013 (+0.042pp), **VP=5.8444 (+0.938pp)**, SP=4.3263, ABU=6.9077
-- vs H176 EP2 (8-EP same α): WSS better (-0.08pp), VP WORSE (+0.42pp despite slower cosine)
-- **Finding:** 16-EP slow cosine partially helps VP starvation vs H173 (35% improvement) but does NOT resolve it. α=0.5 with floor=0.05 fails at any cosine length
-- Updated kill ladder TIGHTENED: EP4 VP kill ≤5.00; EP6 VP kill ≤4.50
-
-**H180 (nezuko, PR #1494) — vol_p_floor 0.05 + GradNorm α=1.0 — ANTI-STARVATION CONFIRMED EP1:**
-- Main 8-EP rank0 `gz8t5gkt`, EP1 boundary step 10975 (rt ~0.83h)
-- **val_VP=13.2316 (−0.886pp BELOW H147)** — first wave-3 arm with VP under H147 at boundary
-- **w_vol_p=0.2037 (NOT clamped, 4× floor)** — α=1.0 mechanism active
-- val_WSS=12.8736 (+0.058pp), val_SP=9.0038 (+0.102pp), val_ABU=12.8840 (−0.162pp)
-- EP2 boundary ETA 17:43Z is CRITICAL
-- Kill ladder: EP2 ≤7.50 WSS / ≤5.50 VP; EP4 ≤7.00 / ≤3.95 VP; EP6 ≤6.85 / ≤3.70 VP; EP8 terminal
-
----
-
-## Wave-2 closed results (all 4 mechanisms fully harvested)
-
-| Hypothesis | Mechanism | test_WSS | test_VP | test_SP | test_ABU | Verdict |
-|---|---|---:|---:|---:|---:|---|
-| H173 (PR #1474) | vol_p_floor 0.05 (α=0.5, 8-EP) | 6.6081 (+0.067pp) | 3.7793 **BREACH +0.136** | **3.5458 BEAT H147 -0.018** | 5.7897 PASS | NON-MERGE: VP breach |
-| H174 (PR #1478) | PE-σ density shift | 6.7336 | 3.6548 **BREACH +0.012** | 3.6737 **BREACH +0.110** | 5.8720 **BREACH +0.028** | NON-MERGE: all 3 floors breach |
-| H175 (PR #1480) | wss_charb yz @ 0.05 | 6.6370 (+0.096pp) | 3.5813 PASS | 3.6445 **BREACH +0.068** | 5.7940 PASS | NON-MERGE: SP breach |
-| H172 (PR #1469) | EMA decay 0.9999 | TBD | TBD | TBD | TBD | post-cosine EMA descent continuing |
-
-**Wave-2 conclusion:** vol_p_floor mechanism (H173 family) is the ONLY productive axis on test_SP, but α=0.5 breaks VP via floor clamping. **Wave-3 H180 supplies the resolution: α=1.0 prevents floor clamping while preserving the productive mechanism.**
-
----
-
-## Critical constraints in force
-
-1. Test VP floor cap: test_VP ≤ 3.643%
-2. Test SP floor cap: test_SP ≤ 3.577%
-3. Test ABUPT floor cap: test_ABUPT ≤ 5.844%
-4. Primary metric: test_WSS (lower is better, must beat H147 6.5409%)
-5. Paper-facing primary: test_primary/abupt_axis_mean_rel_l2_pct
-6. DDP8 only (no split GPU arms)
-7. Ensembles BANNED
-
-## Wave-3 parameter grid (vol_p_floor × cosine_length × α)
-
-| Experiment | floor | cosine_EPs | α | Status (17:25Z) | Key reading |
-|---|---:|---:|---:|---|---|
-| H173 (closed) | 0.05 | 8 | 0.5 | NON-MERGE | VP breach +0.136 |
-| H176 (running) | 0.10 | 8 | 0.5 | **EP3 PASS** | VP gap contracting (EP2 +0.52 → EP3 +0.32) |
-| H178 (running) | 0.05 | 16 | 0.5 | **EP2 VP +0.94pp** | slow cosine doesn't fix starvation |
-| H180 (running) | 0.05 | 8 | 1.0 | **EP1 ANTI-STARV** | VP −0.886pp BELOW H147, w_vp NOT clamped |
-| H172 (running) | — | — | — | EP17 descending | EMA decay 0.9999, val_VP under test floor |
-
-### Wave-4 design queue (pending H176/H178/H180 terminals)
-
-1. **H181: α=1.0 + vol_p_floor=0.10 compound** — does midpoint floor compound with α=1.0 anti-starvation
-2. **H182: α=2.0 + vol_p_floor=0.05** — stronger restoring force test, looking for overshoot
-3. **H183: α=1.0 + 16-EP slow cosine** — compound test (only if α=1.0 alone wins)
-4. **H184: α=1.0 + EMA decay 0.9999** — compound with H172's slow EMA descent (only if H172 productive)
