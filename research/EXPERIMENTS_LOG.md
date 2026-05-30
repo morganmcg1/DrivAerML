@@ -1,3 +1,25 @@
+## 2026-05-30 02:50Z — PR #1457 tanjiro H277 CLOSED: Finding AAA — σ=3e-4 is FLAT under anti-thetic K=3 at EP15
+
+### PR #1457 tanjiro H277 — CLOSED: σ axis flat on anti-thetic at EP15
+
+- **Branch**: tanjiro/h277-ep15-sigma3e-4-antithetic-stack
+- **Hypothesis**: EP15+σ=3e-4+anti-thetic K=3 triple-mechanism compound — does the σ=3e-4 SP/VP benefit (Finding XX) carry into the anti-thetic stack?
+- **W&B run**: `w0q2aixh`
+
+| Metric | H277 (this) | H275 SOTA | Δ vs SOTA |
+|---|---:|---:|---:|
+| val_abupt | 5.9255% | **5.9243%** | **+1.2bp (worse)** |
+| test_abupt | 5.7705% | **5.7690%** | **+1.5bp (worse)** |
+| test_WSS | 6.6754% | **6.6743%** | +1.1bp (worse) |
+| test_VP | 3.3793% | **3.3788%** | +0.5bp (worse) |
+| test_SP | 3.6448% | **3.6427%** | +2.1bp (worse) |
+
+**Results commentary**: H277 marginally regresses on EVERY channel vs H275, all within 1-3bp eval noise. The pattern is uniform: σ=3e-4 does not help the anti-thetic K=3 EP15 stack — it slightly hurts it.
+
+**Finding AAA-sigma-flat-on-antithetic-EP15**: BANKED. σ axis at EP15+anti-K=3 is essentially flat or slightly favorable to σ=5e-4 (the H275 SOTA setting). Contrast with Finding XX (σ=3e-4 helps EP15+random-K=5 on SP/VP, hurts WSS — channel-asymmetric). The σ-axis behavior differs dramatically depending on the K-sampling structure: under random K=5, σ-dependent SP/VP benefit comes from incoherent variance partial-cancellation, but under anti-thetic K=3 the linear Taylor term is already canceled — σ adjustments cannot improve further. **Practical conclusion**: do NOT pursue σ<5e-4 with anti-thetic K. The σ axis is closed for the SOTA recipe family.
+
+**Note on stale-gate framing**: Tanjiro compared against H267 (5.9367/5.7825) — his gate at assignment time. H275 (5.9243/5.7690) merged at 01:17Z, while his run was already underway. His relative claim ("−11.2bp val / −12.0bp test vs H267") was correct given his information; he was just unaware of the gate move.
+
 ## 2026-05-30 01:17Z — PR #1455 edward H275 MERGED: New SOTA — EP15+anti-K=3+6-res×mirror (Finding ZZ)
 
 ### PR #1455 edward H275 — MERGED as SOTA: EP15 × anti-thetic K=3 full stack super-additive

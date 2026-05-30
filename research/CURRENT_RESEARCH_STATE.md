@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 01:22Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
+**Updated**: 2026-05-30 02:50Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
 
 ---
 
@@ -26,7 +26,7 @@
 | PR | Student | Hypothesis | Status | val | ETA |
 |---|---|---|---|---|---|
 | **#1467** | **edward** | **H284: EP15+Sobol-anti-K=3+6-res+mirror** | 🆕 assigned (triple-mechanism compound) | — | ~05:00Z |
-| **#1457** | **tanjiro** | **H277: EP15+σ=3e-4+anti-K=3+6-res+mirror** | 🟡 val 5.9255 — test arm running (fails new H275 gate) | 5.9255 | test ~03:00Z |
+| **#1470** | **tanjiro** | **H285: EP15+anti-K=4 pairs (8p)+6-res+mirror** | 🆕 assigned (K-scaling on SOTA) | — | ~07:10Z |
 | **#1458** | **askeladd** | **H278: EP13+anti-K=4 pairs (8p)+6-res+mirror** | 🟡 val 5.9316 — test arm running (fails new H275 gate) | 5.9316 | test ~04:30Z |
 | **#1459** | **frieren** | **H279: EP15+Sobol-K5+6-res+mirror** | 🟠 crashed (NCCL timeout) + relaunched 01:35Z | — | ~04:40Z |
 | **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟡 running | — | ~05:30Z |
@@ -46,6 +46,7 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1457 tanjiro H277 | EP15+σ=3e-4+anti-K=3 stacked | **Finding AAA-sigma-flat-on-antithetic-EP15** (close, +1.2/+1.5bp worse than H275, fails new gate) | 5.9255 | 5.7705 |
 | #1455 edward H275 | EP15+anti-K=3 stacked | **MERGED as SOTA — Finding ZZ-EP15-anti-super-additive** | 5.9243 | 5.7690 |
 | #1456 thorfinn H276 | EP15+σ=3e-4+K=5 random stacked | **Finding XX-σ=3e-4-EP15-channel-asymmetric** (close, val -0.08bp, test +0.05bp, WSS +1.9bp) | 5.9314 | 5.7768 |
 | #1448 alphonse H269 | EP13+K=10 random stacked | **Finding WW-antithetic-dominates-K-scaling** (close, +0.15bp gate) | 5.9330 | 5.7778 |
@@ -58,10 +59,11 @@
 
 ---
 
-## Findings Bank (28 banked)
+## Findings Bank (29 banked)
 
 | ID | Source | Summary |
 |---|---|---|
+| **AAA-sigma-flat-antithetic-EP15** | H277 tanjiro (closed 02:50Z) | σ=3e-4 uniformly slightly WORSE than σ=5e-4 on EP15+anti-K=3 (+0.5 to +2.1bp per channel). σ axis closed for anti-thetic stack family — Finding XX SP/VP benefit vanishes under anti-thetic (linear term already canceled) |
 | **ZZ-EP15-anti-super-additive** | H275 edward (merged 01:17Z) | EP15×anti-K=3 is super-additive: +0.28bp val / +0.51bp test bonus vs pure-additive expectation. Flatter EP15 EMA minimum makes Taylor linear-term cancellation more meaningful. All channels improve (WSS −6.2bp, SP −8.8bp, VP −5.8bp) vs H274 |
 | **XX-sigma3e4-EP15-channel-asymmetric** | H276 thorfinn (closed 00:40Z) | σ=3e-4+EP15+random K=5 gives SP/VP-favorable (−2.1/−2.3bp) but WSS-unfavorable (+1.9bp) vs SOTA. σ (global mag) ⊥ anti-thetic (pairing structure) at channel level |
 | **WW-antithetic-dominates-K-scaling** | H269 alphonse (closed 00:02Z) | Random K=10 (10p) cannot match anti-K=3 (6p) on any channel in EP13+stack; 67% K-multiplication leaves +0.15bp test gap. Anti-thetic structural advantage > random K-scaling efficiency |
@@ -81,10 +83,9 @@
 
 After current round resolves (new gate val < 5.9243 / test < 5.7690):
 1. **Sobol × anti × EP15**: H284 edward tests this directly (triple-mechanism compound, ETA ~05:00Z)
-2. **σ=3e-4 × anti-thetic EP15**: H277 tanjiro (val 5.9255 — informative but likely fails H275 gate)
-3. **Anti-thetic K-scaling at EP15**: H282 (K=2) + H274 (K=3) + H278 (K=4) → K-curve 
-4. **SP floor**: 3.6427 → 3.577 = 6.5bp — primary paper-facing gap. H281 tests σ+anti; H283 tests σ+Sobol
-5. **H285 candidate**: If Sobol-anti gives further −2-3bp, next: EP15+Sobol-anti K=4 or K=5
+2. **Anti-thetic K-scaling at EP15**: H285 tanjiro K=4 (assigned, ETA ~07:10Z); H282 alphonse K=2 + H278 askeladd K=4 at EP13 → full K-curve
+3. **SP floor**: 3.6427 → 3.577 = 6.5bp — primary paper-facing gap. H281 fern tests σ+anti at EP13; H283 thorfinn tests σ+Sobol at EP15
+4. **σ axis CLOSED at EP15+anti**: Finding AAA confirms σ=5e-4 is optimal for anti-thetic K=3 at EP15. Do not assign further σ variations on this stack.
 
 ---
 
@@ -101,7 +102,8 @@ After current round resolves (new gate val < 5.9243 / test < 5.7690):
 | EP15 + anti-thetic K=3 + 6-res + mirror | ✓ H275 val 5.9243 / test 5.7690 ← **CURRENT SOTA** |
 | EP15 + σ=3e-4 + K=5 random + 6-res + mirror | ✗ H276 5.9314/5.7768 — Finding XX (val passes, test +0.05bp, WSS+1.9bp) |
 | EP15 + σ=3e-4 + Sobol K=5 + 6-res + mirror | 🆕 H283 thorfinn (assigning) |
-| EP15 + σ=3e-4 + anti-thetic K=3 + 6-res + mirror | 🟡 H277 tanjiro (running) |
+| EP15 + σ=3e-4 + anti-thetic K=3 + 6-res + mirror | ✗ H277 5.9255/5.7705 — Finding AAA (σ=3e-4 flat/unfavorable under anti-thetic) |
+| EP15 + anti-thetic K=4 pairs (8p) + 6-res + mirror | 🆕 H285 tanjiro (assigned) |
 | EP13 + anti-thetic K=4 pairs (8p) + 6-res + mirror | 🟡 H278 askeladd (running) |
 | EP15 + Sobol QMC K=5 + 6-res + mirror | 🟡 H279 frieren (running) |
 | EP13 + Sobol × anti-thetic K=5 (10p) + 6-res + mirror | 🟡 H280 nezuko (running) |
