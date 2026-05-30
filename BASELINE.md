@@ -98,7 +98,37 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1454 H274 H185+EP13+Anti-thetic-K3+6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1455 H275 H185+EP15+Anti-thetic-K3+6-res×Mirror Full Stack TTA (tay) — 2026-05-30 ***
+
+**val_abupt=5.9243%** / **test_abupt=5.7690%** (corrected split, H185 EP15 EMA + K=3 anti-thetic weight-noise σ=5e-4 × 6-res × mirror TTA)
+
+**New SOTA — beats H274 fern (PR #1454) by −7.9bp val / −7.3bp test. EP15 EMA × anti-thetic K=3 compound is super-additive (+0.28bp val, +0.51bp test vs pure-additive expectation). test_WSS 6.6743% is the new program best — −6.2bp vs H274.**
+
+**W&B run:** `0b4t2bz2` (edward/h275-ep15-anti-K3-stack)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1455
+
+**Val metrics (corrected split, weight_noise_mirror_res_avg):** val_abupt=5.9243%, val_SP=3.9143%, val_VP=3.4613%, val_WSS=6.7201%
+**Test metrics (corrected split, weight_noise_mirror_res_avg):** test_abupt=5.7690%, test_VP=**3.3788%**, test_SP=3.6427%, test_WSS=**6.6743%**, test_WSS_x=5.9320%, test_WSS_y=7.2272%, test_WSS_z=8.6646%
+
+**Paper floors:** test_VP 3.3788 < 3.421 ✓ | test_WSS 6.6743 < 6.727 ✓ | test_SP 3.6427 > 3.577 ✗ (6.5bp gap — improved 1.0bp vs H274)
+
+**TTA method**: 72-pass = 6-res {32768,49152,65536,81920,98304,131072} × K=3 anti-thetic pairs (6 noise samples) × {orig, mirror-y}. Eval cost: ~240 min on DDP×8. EP15 EMA makes anti-thetic Taylor cancellation more effective (flatter minimum, less curvature noise).
+
+**Gain analysis (vs H274 prior SOTA EP13+anti-K3):**
+- val: −7.9bp | test: −7.3bp
+- test_VP: 3.3788 vs 3.3846 (−5.8bp ✓)
+- test_WSS: **6.6743** vs 6.6805 (−6.2bp ✓ — new program best)
+- test_SP: 3.6427 vs 3.6515 (−8.8bp — SP gap to floor narrowing)
+
+**Finding ZZ-EP15-anti-super-additive**: EP15 × anti-K=3 stack is super-additive. EP15 EMA alone adds ~−0.51bp val/−0.22bp test (H267 vs H253). Anti-K=3 alone adds ~−0.96bp val/−0.84bp test (H274 vs H253). Compound H275 adds −1.75bp val/−1.57bp test vs H253 (pure-additive prediction: −1.47/−1.06). Opposite of H267's sub-additive EP15+random K=5 (Finding QQ). Flatter EP15 EMA minimum amplifies the Taylor linear-term cancellation benefit of anti-thetic pairing.
+
+**Merge gate (updated):** val_abupt < **5.9243%** AND test_abupt < **5.7690%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+---
+
+## *** Prior SOTA: PR #1454 H274 H185+EP13+Anti-thetic-K3+6-res×Mirror Full Stack TTA (tay) — 2026-05-29 ***
 
 **val_abupt=5.9322%** / **test_abupt=5.7763%** (corrected split, H185 EP13 EMA + K=3 anti-thetic weight-noise σ=5e-4 × 6-res × mirror TTA)
 
