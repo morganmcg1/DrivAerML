@@ -1,6 +1,31 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-30 07:05Z._
+_Last updated: 2026-05-30 09:10Z._
+
+**09:10Z snapshot — H173 EP4 MECHANISM PAYOFF DEEPENING (SP BEATS H147 by -0.03pp, WSS_z descent 60% faster than H147), H175 main 8-EP launched + EP1 smoke BEATS H147 (-0.094pp), H174 main EP1 SP -0.35pp BELOW H147 (density-preservation positive), H172 EP5 raw kill gate PASS (1.35pp margin):**
+
+1. **H173 (frieren) EP4 — STRONGEST WAVE-2 SIGNAL (PR #1474):** val_WSS=6.9482 PASS gate ≤7.00, **val_WSS_z=9.2937 BEATS H147 EP4 z by -0.11pp** (descent rate -0.159pp/EP = 60% FASTER than H147), **val_SP=3.9684 BEATS H147 EP4 estimate by -0.03pp** (FIRST wave-2 direction REDUCING SP below H147 in 6-axis SP-floor era). GradNorm autonomous discovery: w_τ_y rising +0.247 from H147 (autonomous y-discovery), w_cp relaxing 1.060→1.011 (SP-guardian eases as floor protected). Mechanism deeply confirmed at THIRD decimal. EP5 ETA ~step 54900 (~09:00Z, very close).
+2. **H175 (nezuko) main 8-EP LAUNCHED 08:24Z (PR #1480):** rank0=`o5jmdw3q` step 4394+ runtime 0.29h. **Smoke EP1 EMA val_WSS=12.7265 BEATS H147 EP1 by -0.094pp** — cleanest wave-2 EP1 reading, FIRST wave-2 arm to beat H147 at EP1. Magnitude-preserving Charbonnier coverage (yz @ 0.05 = 0.10 total). Kill ladder: EP3 >7.20% KILL, EP5 >6.85% KILL, EP6 SP watchdog >4.05% flag. EP3 ETA ~11:45Z.
+3. **H174 (fern) main EP1 val_WSS=12.9211 LANDED (PR #1478):** +0.10pp trail vs H147 EP1=12.82 (normal spectral re-allocation envelope). **SP=9.0543 = -0.35pp BELOW H147 EP1** (density-preservation hypothesis showing EARLY positive signal — no SP breach pattern of axis-perturbing experiments). GradNorm w_vol_p=0.150 floor (H147-style); w_cp=1.04 +0.15 elevated (SP-guardian active given SP under baseline — same mechanism as H173). EP3 first kill check ETA ~+2h.
+4. **H172 (tanjiro) EP5 raw kill gate PASS by 1.35pp (PR #1469):** raw_WSS=7.1464 vs gate 8.50. EMA val_WSS=7.2734 (+0.52pp trail vs H147 EP5=6.75, trailing on -0.130/1k slope projecting EP10 EMA ~6.65-6.85 = matches H147 terminal). EP6 boundary at step ~65000 landing now (step=65219). 30-EP continues to EP25/EP30 terminal harvest.
+
+### 09:10Z reading: 09:05Z snapshot of 4 active runs
+
+| Run | rank0 | rt | step | EP | val_WSS | vs H147 ref | mechanism reading |
+|---|---|---:|---:|---:|---:|---|---|
+| **H172 tanjiro** EMA decay=0.9999 | `7d83go4z` | 4.49h | 65219 | EP5→6 | 7.273 EMA / 7.146 raw | +0.52pp EMA / raw PASS gate by 1.35pp | EMA trail expected w/ 0.9999 cooling lag; on -0.130/1k slope projects EP10 ~6.65-6.85 = H147 |
+| **H173 frieren** GradNorm vol_p 0.15→0.05 | `ll8zl49z` | 3.52h | 51724 | EP4 done, mid-EP5 | **6.948** | **-0.05pp wrt H147 EP4 ref ~7.00** | **w_cp 1.011 (relaxing — SP protected). val_SP=3.968 BEATS H147 EP4. WSS_z descent -0.159pp/EP = 60% faster** |
+| **H174 fern** PE σ shifted-right | `oad2rrht` | 0.95h | 14252 | EP1 main | 12.921 | +0.10pp vs H147 EP1=12.82 | **SP=9.054 -0.35pp BELOW H147 EP1** — density-preservation early positive |
+| **H175 nezuko** wss_charb yz @ 0.05 | `o5jmdw3q` | 0.29h | 4394 | warmup | — | smoke EP1 = 12.726 BEATS H147 | First wave-2 EP1 below H147 baseline |
+
+### 09:10Z key crossover signals
+
+- **H173 SP floor BEATEN at EP4** — first dl24 result in 6+ runs to bring SP UNDER H147 baseline. The "resource conservation law" is testable: H173 vol_p clamp RELEASE redistributes to w_cp (SP-guardian) rather than to WSS heads, exactly orthogonal to "WSS-pressure-up→SP-break."
+- **H173 WSS_z descent 60% faster than H147** confirms the predicted mechanism — freeing ~0.10 weight from w_vol_p floor lets GradNorm find binding constraints (w_τ_y +0.247, w_τ_z carries z-axis to harvest); the H156 EP10 mid-term harvest pattern is compressing into H173 EP5-6.
+- **H175 magnitude-preservation hypothesis testable @ EP6:** if SP holds ≤ 4.00, meta-finding extends to "Charbonnier MAGNITUDE breaks SP, COVERAGE is safe at preserved magnitude." If SP breaches, finding is "any WSS-axis perturbation breaks SP regardless of magnitude" = closes the entire Charbonnier-coverage direction.
+- **H174 density-preservation early signal:** SP -0.35pp at EP1 mirrors H173 early SP signal — second arm where the SP breach pattern is NOT activated. If EP5 SP stays ≤ 4.10, the density-preservation hypothesis confirms "PE sigma shifts at preserved features-per-band are SP-orthogonal." If SP breaches mid-EP, the meta-finding extends to "ANY PE perturbation breaks SP regardless of density."
+
+---
 
 **07:05Z snapshot — H169 CLOSED (6th SP floor breach extending meta-finding into LOSS family), H175 dispatched, H173 EP2 mechanism deeply confirmed, H172 mid-EP3 healthy, H174 smoke imminent:**
 

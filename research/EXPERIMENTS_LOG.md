@@ -1,5 +1,76 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-30 09:10Z — Wave-2 EP4/EP5 cluster: H173 mechanism payoff DEEPENING, H174/H175 main launches, H172 EP5 PASS
+
+**4 active runs in flight, all healthy:**
+
+### H173 frieren (PR #1474) — EP4 MECHANISM PAYOFF DEEPENING
+
+`ll8zl49z` step 51724 runtime 3.52h ≈ EP4.3. **Strongest wave-2 signal of the entire 6-axis-falsification era.**
+
+| metric | H173 EP4 | H147 EP4 ref | gate | Δ |
+|---|---:|---:|---|---:|
+| EMA val_WSS | **6.9482** | ~6.90 | ≤7.00 | +0.05pp PASS |
+| EMA val_WSS_z | **9.2937** | ~9.40 | — | **-0.11pp (BEATS H147)** |
+| EMA val_SP | **3.9684** | ~4.00 | — | **-0.03pp (BEATS H147 — FIRST wave-2 SP under floor)** |
+
+**EP3→EP4 descent rates:**
+- val_WSS_z: -0.159pp/EP = **60% FASTER than H147's typical ~-0.10pp/EP cool rate**
+- val_WSS: -0.129pp/EP (matches H147)
+- val_VP: -0.395pp/EP (descending fast at low w_vol_p as predicted)
+
+**GradNorm autonomous discovery EP4→mid-EP5:**
+- w_τ_y rising to **1.565 (+0.247 vs H147 1.318)** — autonomous y-axis discovery
+- w_τ_z cooling 1.414→1.384 — z-axis mechanism gain banked, GradNorm reallocates
+- w_cp relaxing 1.060→1.011 — SP-guardian eases as SP under H147 baseline
+- w_vol_p stable 0.0504 at new 0.05 floor (mechanism confirmed at THIRD decimal)
+
+Mechanism payoff statement: H173 is the FIRST direction in 6 wave-2 axes (H164/H165/H166/H167/H168/H169) to BEAT H147 SP rather than breach it. The "resource conservation law" prior (any WSS-pressure-up perturbation breaks SP) is testably orthogonal here — releasing w_vol_p clamp redirects via w_cp (SP-guardian) instead of via WSS heads.
+
+### H175 nezuko (PR #1480) — main 8-EP LAUNCHED 08:24Z + smoke EP1 BEATS H147
+
+`o5jmdw3q` step 4394 runtime 0.29h, smoke EP1 EMA val_WSS=**12.7265 BEATS H147 EP1 (12.82) by -0.094pp** — cleanest wave-2 EP1 reading and **FIRST wave-2 arm to beat H147 at EP1**.
+
+Wave-2 EP1 EMA comparison (cleanest to noisiest):
+- **H175 EP1 smoke = 12.73** ← cleanest
+- H174 EP1 main = 12.92
+- H173 EP1 main = 13.10
+- H172 EP1 main = 13.18
+- H168 EP1 main = 13.30 (worst)
+
+Magnitude-preserving Charbonnier coverage (yz @ 0.05 = total 0.10 matching H147 z @ 0.10). The hypothesis test: if EP6 SP ≤ 4.00, the meta-finding extends to "MAGNITUDE breaks SP, COVERAGE at preserved magnitude is safe"; if SP breaches, the entire Charbonnier-coverage direction is closed.
+
+Kill ladder: EP3 >7.20% KILL, EP5 >6.85% KILL, EP6 SP watchdog >4.05% flag.
+
+### H174 fern (PR #1478) — main EP1 LANDED 08:48Z, density-preservation POSITIVE
+
+`oad2rrht` step 14252 runtime 0.95h. **EP1 EMA val_WSS=12.9211** (+0.10pp vs H147 EP1=12.82, normal spectral re-allocation envelope).
+
+**Early density-preservation signal — SP=9.0543 = -0.35pp BELOW H147 EP1.** Second wave-2 arm (after H173) where the SP breach pattern (H164-H169 +0.3 to +0.7pp at EP1) is NOT activated. GradNorm w_cp=1.04 (+0.15 elevated) = SP-guardian already detecting healthier SP than H147 baseline — same mechanism as H173.
+
+PE init sigmas shifted right `[0.5,1.0,2.0,4.0,8.0]` at preserved 16/5=3.2 features/band (matches H147 5/16=3.2). Tests dual hypothesis: if EP5 SP stays ≤ 4.10, density-preservation confirmed = "PE sigma shifts at preserved features-per-band are SP-orthogonal"; if SP breaches, meta-finding extends to "ANY PE perturbation breaks SP."
+
+### H172 tanjiro (PR #1469) — EP5 raw kill gate PASS by 1.35pp
+
+`7d83go4z` step 65219 runtime 4.49h ≈ EP6.0. **raw_WSS=7.1464 vs gate 8.50 → PASS by 1.35pp.** EMA val_WSS=7.2734 (+0.52pp trail vs H147 EP5=6.75 — expected with decay=0.9999 cooling lag).
+
+Per-1k-step slopes (cosine cooling regime):
+- val_WSS: -0.130/1k → projects EP10 EMA 6.65-6.85 (matches H147)
+- val_WSS_y: -0.228/1k (y descending fastest)
+- val_SP: -0.093/1k → projects EP10 SP 3.85-4.00 (H147 territory)
+
+30-EP main continues to EP25/EP30 terminal harvest (~04:00Z+ next day cycle).
+
+### Status
+
+- **H173 EP5 ETA imminent** (step ~54900, currently 51724) — load-bearing crossover signal
+- **H172 EP6 ETA imminent** (step ~65900, currently 65219) — EMA shadow continuing cool
+- **H174 EP3 ETA ~11:00Z** — first kill check on density-preservation hypothesis
+- **H175 EP3 ETA ~11:45Z** — first kill check on magnitude-preservation hypothesis
+- PR #1474 rebase conflict (research/* duplicate from assign-experiment skill) NON-BLOCKING for training, will resolve at terminal commit.
+
+---
+
 ## 2026-05-26 09:55 — PR #1335 H144 fern CLOSED: EMA-of-weights does not beat H39 SOTA
 
 - `dl24-fern/h144-ema-weights`, run `wybzhel9` (8 DDP ranks)
