@@ -98,7 +98,49 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1484 H296 H185+EP15+Anti-thetic-K4+8-res×Mirror Full Stack TTA (tay) — 2026-05-30 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1489 H300 H296+Per-Channel Affine Calibration (tay) — 2026-05-30 ***
+
+**val_abupt_calibrated=5.9011%** / **test_abupt_calibrated=5.7399%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA → per-channel affine α/β calibration)
+
+**New SOTA — beats H296 by −21bp val / −28bp test. All 5 channels Pareto-improve. Largest gains: test_SP −30bp (3.6436→3.6132, gap to paper floor 3.577 closes from 67→36bp), test_WSS_z −44bp, test_WSS_y −37bp, test_WSS −33bp. Calibration is orthogonal to TTA aggregation — opens entirely new research axis.**
+
+**W&B run:** `59r4noqh` (edward/h300-cal-K4-6res)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1489
+
+**Val metrics (calibrated):** val_abupt=5.9011%
+**Test metrics (calibrated):** test_abupt=**5.7399%**, test_VP=**3.3763%**, test_SP=**3.6132%**, test_WSS=**6.6404%**, test_WSS_x=5.9033%, test_WSS_y=7.1873%, test_WSS_z=8.6195%
+
+**Paper floors:** test_VP 3.3763 < 3.421 ✓ | test_WSS 6.6404 < 6.727 ✓ | test_SP 3.6132 > 3.577 ✗ (3.6bp gap — closed from 6.6bp at H296)
+**Stretch goal:** test_WSS < 5.85% — gap = **0.790pp** (was 0.823pp at H296). Still significant but closing.
+
+**Calibration method**: Per-channel affine fit on 34-car val set, applied to 50-car test set.
+- 10 parameters total: (α, β) × 5 channels [VP, SP, τ_x, τ_y, τ_z]
+- α ∈ [0.99187, 0.99975] (near-unity scale correction)
+- β_VP = −0.8554 (largest offset; model consistently over-predicts VP magnitude)
+- All other β ≈ 0
+
+**Merge gate (updated):** val_abupt_calibrated < **5.9011%** AND test_abupt_calibrated < **5.7399%**
+**Note:** Future experiments must report calibrated metrics (fit α/β on val, report on test). Raw metrics still tracked for reference.
+
+**Reproduce (H296 base + calibration):**
+```bash
+H185_EP15_CKPT="outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt"
+
+torchrun --standalone --nproc-per-node=8 eval_tta_h252.py \
+  --checkpoint $H185_EP15_CKPT \
+  --resolutions "32768,40960,49152,57344,65536,81920,98304,131072" \
+  --eval-modes "weight_noise_mirror_res_avg,weight_noise_mirror_res_avg_calibrated" \
+  --weight-noise-sigma 5e-4 \
+  --weight-noise-passes 4 \
+  --antithetic-noise \
+  --calibrate \
+  --batch-size 2 --num-workers 4
+```
+
+---
+
+## Prior Single-Model SOTA: PR #1484 H296 H185+EP15+Anti-thetic-K4+8-res×Mirror Full Stack TTA (tay) — 2026-05-30 ***
 
 **val_abupt=5.9221%** / **test_abupt=5.7678%** (corrected split, H185 EP15 EMA + K=4 anti-thetic weight-noise σ=5e-4 × 8-res × mirror TTA)
 
