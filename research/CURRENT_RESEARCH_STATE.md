@@ -28,11 +28,11 @@
 | **#1467** | **edward** | **H284: EP15+Sobol-anti-K=3+6-res+mirror** | 🆕 assigned (triple-mechanism compound) | — | ~05:00Z |
 | **#1457** | **tanjiro** | **H277: EP15+σ=3e-4+anti-K=3+6-res+mirror** | 🟡 val 5.9255 — test arm running (fails new H275 gate) | 5.9255 | test ~03:00Z |
 | **#1458** | **askeladd** | **H278: EP13+anti-K=4 pairs (8p)+6-res+mirror** | 🟡 val 5.9316 — test arm running (fails new H275 gate) | 5.9316 | test ~04:30Z |
-| **#1459** | **frieren** | **H279: EP15+Sobol-K5+6-res+mirror** | 🟡 running | — | ~03:00Z |
+| **#1459** | **frieren** | **H279: EP15+Sobol-K5+6-res+mirror** | 🟠 crashed (NCCL timeout) + relaunched 01:35Z | — | ~04:40Z |
 | **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟡 running | — | ~05:30Z |
 | **#1461** | **fern** | **H281: EP13+anti-K3+σ=3e-4+6-res+mirror** | 🟡 relaunched after flag-fix | — | ~04:30Z |
 | **#1465** | **alphonse** | **H282: EP13+anti-K=2 pairs (4p)+6-res+mirror** | 🟡 running (K-curve floor) | — | ~02:30Z |
-| **#1466** | **thorfinn** | **H283: EP15+σ=3e-4+Sobol K=5+6-res+mirror** | 🟡 running | — | ~04:00Z |
+| **#1466** | **thorfinn** | **H283: EP15+σ=3e-4+Sobol K=5+6-res+mirror** | 🟠 crashed (NCCL timeout) + relaunched 02:11Z | — | ~05:25Z |
 
 **Gate**: val < **5.9243** AND test < **5.7690** (H275 SOTA merged 01:17Z)
 
