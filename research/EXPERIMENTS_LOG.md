@@ -4473,3 +4473,55 @@ The 4-axis structural-wave sealing + 5+ prior consecutive non-merge results trig
 **Assigning H171 next:** tanjiro → `mirror-y-train-aug` — exploit known x-z plane geometric symmetry of automotive aero. Train-time mirror-y aug doubles effective dataset, geometric-symmetry-respecting model should generalize better to held-out test geometries. Fully orthogonal to all 4 structural axes and all loss-weight axes. The other-advisor's H275 in drivaerml-ddp8 track uses 6-res×mirror TTA at inference (val_ABUPT=5.92, test_ABUPT=5.77) — direct cross-track evidence that mirror-y is a real exploitable symmetry. Train-time mirror should reach similar generalization without 72-pass inference cost.
 
 
+
+## 2026-05-30 03:49Z — PR #1464 H170 frieren CLOSED: α=0.3 GradNorm mechanism falsified, α-axis bracketed
+
+- `dl24-frieren/h170-gradnorm-alpha-03`, rank0 run `nkc26gvj` (8 DDP ranks)
+- Hypothesis: Lower GradNorm restoring force α=0.5→0.3 would reduce w_τ_z oscillation amplitude, smoothing gradient budget for the τ_z head and consolidating τ_z learning signal.
+- **Terminal verdict: CLOSE NON-MERGE — EP5 kill at 6.899% > 6.80% gate. Mechanism falsified in opposite direction.**
+
+### Per-epoch val trajectory vs H147
+
+| EP | step | val_WSS | wss_z | vs H147 ref | Δ |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 10975 | 12.829% | 16.713% | 12.82% | +0.01 |
+| 2 | 21950 | 7.375% | 9.869% | 7.26% | **+0.115** |
+| 3 | 32925 | 7.128% | 9.594% | 6.98% | **+0.148** |
+| 4 | 43900 | 6.961% | 9.391% | ~6.85 | **+0.111** |
+| 5 | 54875 | **6.899%** | **9.323%** | 6.75% | **+0.149** |
+
+Cooling: EP2→3 −0.247pp; EP3→4 −0.167pp; EP4→5 −0.062pp (near-stall). Kill gate 6.80% fired at EP5 = 6.899%.
+
+### GradNorm weight trace — discriminating diagnostic
+
+| EP | w_cp | w_τ_x | w_τ_y | w_τ_z | w_vol_p | clamp |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1.089 | 1.311 | 1.238 | 1.213 | 0.150 | ✓ |
+| 2 | 1.069 | 1.393 | 1.050 | 1.338 | 0.150 | ✓ |
+| 3 | 0.906 | 1.438 | 1.057 | **1.449** | 0.150 | ✓ |
+| 4 | 0.832 | 1.389 | 1.083 | **1.547** | 0.150 | ✓ |
+| 5 | 0.780 | 1.404 | 1.119 | **1.547** | 0.150 | ✓ |
+
+**Mechanism falsified — opposite direction:** α=0.3 increased w_τ_z oscillation 3.2× (std 0.147 vs H147 0.046). w_τ_z drifted UPWARD monotonically (1.21→1.55) instead of stabilizing. w_cp collapsed (1.09→0.78). val_WSS_z +0.5pp worse than H147 trajectory.
+
+**Key finding: vol_p clamp binding throughout (both H147 AND H170).** w_vol_p pinned at 0.15 floor for 100% of both runs. GradNorm wants to push vol_p below 0.15 but clamp blocks it → dispatching H173 (clamp 0.15→0.05) to test this directly.
+
+### Joint α-axis closure with H874
+
+| Run | α | Outcome |
+|---|---:|---|
+| H874 (pre-dataset) | 0.75 | Blew up EP16 (high tail) |
+| H147 SOTA | 0.50 | SOTA (stable, tight oscillation) |
+| **H170** | **0.30** | **Kill EP5 trail (low tail)** |
+
+**α=0.5 is now bracketed and TIGHT.** α-axis closed for this stack.
+
+### Wave-2 trail pattern confirmation
+
+Across H164/H165/H166 (structural wave) + H168/H169/H170 (wave-2 loss-rep-allocation):
+- H164/H165/H166: EP1-only-gain, late-EP trail → CLOSED
+- H170: EP2→EP5 monotonically widening gap → KILL
+- H169: Lost EP3 BEAT by EP4 (+0.036pp trail, continuing)
+- H168: EP5 borderline (6.858%), mechanism-signal (WSSz FASTEST cooling) still intact
+
+**H147 stack is rigid against single-flag perturbation across 5+ mechanistic axes.** Combined finding spans structural, loss-density, β, lr, per-axis-weight, GradNorm-α axes.
