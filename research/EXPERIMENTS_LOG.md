@@ -4418,3 +4418,58 @@ The 4-arm structural wave + the 4-arm single-knob wave + the 5-cell β-grid toge
 - **fern H168 `pe-lo-sigma-h147`** — add σ=0.1 to STRING multi-sigma, pe_features=16 stays
 - **nezuko H169 `wss-charb-yz-h147`** — extend Charbonnier `axes=z→yz` keeping `weight=0.1`
 - **tanjiro H167 continuing** — EP7 dual-gate ahead, EP8 terminal ~02:00Z
+
+## 2026-05-30 02:00Z — PR #1450: H167 model_heads 4→8 (tanjiro) — TERMINAL CLOSE, NON-MERGE (sealing structural wave at 4 of 4)
+
+- **W&B rank0:** `9b7sdo5k` (group `h167-heads-8-h147`)
+- **Runtime:** 7.38h, 87809 steps, EP8 terminal
+- **Hypothesis:** Doubling attention subspaces (4 → 8 heads) enables late-EP cooling capacity for cross-flow tau_y/z while preserving SP floor.
+
+| Metric | H167 | H147 | Δ | floor | status |
+|---|---:|---:|---:|---:|---|
+| test_WSS ⭐ | **6.5791%** | 6.5409% | **+0.038pp** (closest of wave!) | — | regress |
+| test_VP | 3.5026% | 3.4014% | +0.10 | 3.643 | ✓ holds |
+| test_SP | 3.6153% | 3.5634% | +0.052 | 3.577 | ❌ **BREACHES +0.038 over** |
+| test_ABUPT | 5.7282% | 5.6648% | +0.063 | 5.844 | ✓ holds |
+
+**Per-epoch trajectory (val_WSS — strong late-EP cooling confirmed):**
+
+| EP | H167 val_WSS | Δ H147 | H147 ref |
+|---|---:|---:|---|
+| 1 | 13.55% | +0.73 HOT | 12.82% |
+| 2 | 7.29% | +0.03 recov | 7.26% |
+| 3 | 7.00% | +0.02 TIED | 6.98% |
+| 5 | 6.8228% | +0.07 | 6.75% |
+| 6 | 6.7613% | +0.011 BEHIND | (none — H147 EP5=6.75%) |
+| 7 | 6.7391% | dual-gate FAIL (>6.70 AND >9.00 WSS_z) | — |
+| 8 (final) | 6.7219% (val) | — | — |
+
+EP7 dual-gate FAILED on both conditions (val_WSS=6.7391% > 6.70 kill; val_WSS_z=9.1501% > 9.00 kill); EP8 ran to confirm at test eval. Late-EP cooling mechanism (-0.062pp/EP through EP6) was REAL — H167 had the best val_ABUPT trajectory of the wave (EP6 5.97 vs H147 6.06). But not enough cooling to clear EP8 to a sub-baseline test_WSS.
+
+**Closest call of the wave + closest call of any single-knob experiment in the past 20 hypotheses:** test_WSS gap +0.038pp, test_SP breach only +0.038pp. Yet the floor cap disqualifies merge even at this proximity to baseline.
+
+### Joint structural-wave conclusion (4 of 4 SEALED)
+
+The full structural wave is now closed with **uniformly failing test_SP floor across 4 independent architectural axes:**
+
+| Axis | Direction | Arm | test_WSS Δ | test_SP cap | EP1 vs H147 |
+|---|---|---|---:|---|---|
+| trunk-token-count | slices 128→192 | H164 frieren | +0.089 | ❌ broken | -0.06 BEAT |
+| PE-projection density | pe_features 16→12 | H165 fern | +0.132 | ❌ broken | -0.17 BEAT |
+| output-head capacity | surface_out 2.0→3.0 | H166 nezuko | +0.064 | ⚠ marginal | -0.16 BEAT |
+| attention subspace count | heads 4→8 | H167 tanjiro | **+0.038** | ❌ broken | +0.73 HOT |
+
+**EP1 BEAT, late-EP trail-and-fail pattern in 3 of 4 arms** confirms structural perturbations help INITIAL feature variety but lose converged-fit quality. H167 broke this shape (HOT start, sharp recovery, late cooling) due to 8-head capacity giving sub-optimal early but better-conditioned late-phase optimization. Even so, terminal test_WSS still regressed.
+
+**Mechanism conclusion — H147 is at a tight multi-axis architectural local optimum.** Every single-knob perturbation on the 4 independent structural axes regresses test_WSS AND threatens the test_SP floor at 3.577% (H147's test_SP is 3.5634%, sitting just 0.007pp below the floor — VERY tight cushion). Combined with single-knob loss/optimizer falsifications (H159/H161/H162 + β-grid + lr-floor + tau-axis weights), the multi-axis local-optimum finding now spans BOTH structural AND loss-formulation axes.
+
+### Research direction shift — Plateau Protocol kick
+
+The 4-axis structural-wave sealing + 5+ prior consecutive non-merge results triggers Plateau Protocol: change strategy tier. Per the protocol:
+- ✅ "Change strategy tier" — moving from architecture (4 axes done) to data representation
+- ✅ "Revisit first principles" — H147's test_SP cushion of 0.007pp is the brittleness signal; SP must be either protected or de-emphasized in the next experiment class
+- ✅ "Try bold ideas" — data augmentation is fully orthogonal to all 17 prior single-knob experiments
+
+**Assigning H171 next:** tanjiro → `mirror-y-train-aug` — exploit known x-z plane geometric symmetry of automotive aero. Train-time mirror-y aug doubles effective dataset, geometric-symmetry-respecting model should generalize better to held-out test geometries. Fully orthogonal to all 4 structural axes and all loss-weight axes. The other-advisor's H275 in drivaerml-ddp8 track uses 6-res×mirror TTA at inference (val_ABUPT=5.92, test_ABUPT=5.77) — direct cross-track evidence that mirror-y is a real exploitable symmetry. Train-time mirror should reach similar generalization without 72-pass inference cost.
+
+

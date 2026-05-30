@@ -1,21 +1,40 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-30 00:15Z._
+_Last updated: 2026-05-30 02:00Z._
 
-**00:15Z early-morning launch status — H167 EP6 jackpot trajectory confirmed (sole structural-wave survivor); H168/H169/H170 wave launches IN FLIGHT, all 4 students DDP8 running. EP1 readings expected ~02:30-04:30Z.**
+**02:00Z structural-wave FULLY CLOSED (4 of 4 falsified) — H167 terminal NON-MERGE confirms joint multi-axis architectural local optimum. H171 mirror-y-train-aug dispatched to tanjiro (Plateau-Protocol data-tier shift). H168/H170 EP2 trail pattern emerging; H169 main EP1 healthy.**
 
-### Wave-2 launch verification (00:10Z W&B snapshot)
+### Wave-1 FINAL: All 4 structural perturbations fail (test_SP floor breach)
 
-| Run | Student | rank0 | Phase | Step | Notes |
+| Run | rank0 | rt | test_WSS | Δ H147 | test_SP | floor cap | Verdict |
+|-----|---|---:|---:|---:|---:|---|---|
+| H164 frieren slices 128→192 | `2qm6c9w4` | 6.77h | 6.6296% | +0.089pp | 3.6631% | ❌ +0.086 over | **CLOSED #1444** |
+| H165 fern pe_features 16→12 | `3mpka9g9` | 6.13h | 6.6727% | +0.132pp | 3.6633% | ❌ +0.086 over | **CLOSED #1445** |
+| H166 nezuko surface_out 2.0→3.0 | `jmyv1byk` | 5.91h | 6.6052% | +0.064pp | 3.6031% | ⚠ marginal +0.026 | **CLOSED #1446** |
+| **H167 tanjiro heads 4→8** | `9b7sdo5k` | 7.38h | **6.5791%** | **+0.038pp** (closest!) | 3.6153% | ❌ +0.038 over | **CLOSED #1450 01:55Z** |
+
+**Joint structural-wave finding (SEALED — 4-axis falsification):** H147 stack sits at a tight multi-axis architectural local optimum. EVERY single-knob structural perturbation tested (trunk tokens, PE density, output head width, attention subspace count) regresses test_WSS AND breaks the tight test_SP floor at 3.577%. H167 was the closest call (smallest WSS gap +0.038, SP breach only +0.038 over) but the floor cap disqualifies merge even in this best case. Combined with single-knob loss/optimizer falsifications (H159/H161/H162/H160 β-grid + lr-floor + tau-axis weights), the local-optimum finding now spans BOTH structural AND loss-formulation axes.
+
+**Research direction shift (Plateau Protocol active):** Floor lies in non-structural, non-loss-weight axes. Next class must be orthogonal to BOTH:
+1. ✅ **Data-level intervention** — H171 mirror-y train aug (DISPATCHED to tanjiro)
+2. Optimizer-level — Lookahead/NorMuon wrappers, AGC, LLRD (queued)
+3. Generalization-level — stronger EMA, EMA-checkpoint eval (queued)
+4. Regularization-level — DropPath, stochastic depth (queued)
+
+### Wave-2 in flight (02:00Z W&B snapshot)
+
+| Run | Student | rank0 | Phase | val_WSS | EP context vs H147 |
 |---|---|---|---|---:|---|
-| H167 `heads-8-h147` | tanjiro | `9b7sdo5k` | mid-EP7 | ~73,632 | EP6 confirmed 6.7613% val_WSS; EP7 dual-gate pending; EP8 terminal ~02:00Z |
-| H168 `pe-lo-sigma` | fern | `t9h0inur` | main pre-EP1 | ~3,821 | ⚠ no smoke prefix detected — went direct to main; monitor EP1 acutely |
-| H169 `wss-charb-yz` | nezuko | `rha7q5tp` | **smoke** | ~2,229 | ✓ proper smoke-first protocol; main launches after smoke clears |
-| H170 `gradnorm-alpha-03` | frieren | `nkc26gvj` | main pre-EP1 | ~1,335 | ⚠ no smoke prefix — direct main; monitor EP1 acutely |
+| H168 `pe-lo-sigma` | fern | `t9h0inur` | EP2 | 7.3396% | H147 EP2=7.26%, +0.08 trail pattern (matches structural wave shape) |
+| H169 `wss-charb-yz` main | nezuko | `aco66tdm` | EP1 | 12.9085% | H147 EP1=12.82%, +0.09 (mild trail; smoke rank0 crashed, ranks 1-7 OK, main relaunched cleanly) |
+| H170 `gradnorm-alpha-03` | frieren | `nkc26gvj` | EP2 | 7.3752% | H147 EP2=7.26%, +0.12 trail pattern |
+| **H171 `mirror-y-train-aug`** | **tanjiro** | TBD | dispatched | — | smoke-first then 8-EP main; PR #1468 |
 
-H168/H170 smoke-skip is a soft protocol gap; both runs healthy at low step count. Will flag in PR if EP1 reading is anomalous. H169's smoke-then-main protocol is correct.
+**Trail-pattern watch:** Both H168 and H170 are showing the same "EP1 close-or-better-than-H147, EP2 gap reverses to +0.08-0.12" shape as the structural wave. If terminal results follow the wave pattern (small WSS regression + SP floor breach), the local-optimum finding extends to representation hyperparams (PE sigma) AND training dynamics (gradnorm alpha) — broadening the falsification class significantly. Decisive EP at ~04:30Z for EP5 kill gate.
 
-### Wave-1 conclusion: H167 sole survivor of structural wave (23:50Z)
+### Earlier Wave-1 evidence (for reference)
+
+
 
 
 
