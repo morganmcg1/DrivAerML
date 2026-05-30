@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 05:10Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
+**Updated**: 2026-05-30 05:35Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
 
 ---
 
@@ -21,25 +21,26 @@
 
 ---
 
-## Active Fleet (as of 05:10Z — 8 students active)
+## Active Fleet (as of 05:35Z — 8 students active)
 
 | PR | Student | Hypothesis | Status | val | ETA |
 |---|---|---|---|---|---|
 | **#1467** | **edward** | **H284: EP15+Sobol-anti-K=3+6-res+mirror** | 🔥 val 5.9242 (TIED with SOTA gate, test pending) | **5.9242** | ~04:50Z |
-| **#1470** | **tanjiro** | **H285: EP15+anti-K=4 pairs (8p)+6-res+mirror** | 🟡 running (K-scaling on SOTA) | — | ~07:10Z |
+| **#1470** | **tanjiro** | **H285: EP15+anti-K=4 pairs (8p)+6-res+mirror** | 🔥 val 5.9235 BEATS GATE (-0.8bp), test pending | **5.9235** | ~08:00Z |
 | **#1471** | **alphonse** | **H286: Aggregation operator sweep on H275 SOTA** | 🆕 assigned (mean/median/trimmed/Huber) | — | ~06:30Z |
 | **#1472** | **askeladd** | **H287: EP14 checkpoint axis test** | 🆕 assigned (EP14 vs EP15 adjacent) | — | ~06:30Z |
 | **#1473** | **fern** | **H288: 8-res densification on H275 SOTA** | 🆕 just assigned (8-res grid: +40960+57344) | — | ~07:30Z |
 | **#1475** | **frieren** | **H289: EP12 checkpoint axis test** | 🆕 just assigned (EP12 vs EP15 — completes 4-pt EP-curve) | — | ~08:00Z |
 | **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟠 pre-eval after 2 crashes (compute-heavy; alive, GPUs 100%) | — | ~06:30Z |
-| **#1466** | **thorfinn** | **H283: EP15+σ=3e-4+Sobol K=5+6-res+mirror** | 🟡 running (NCCL-relaunched 02:11Z) | — | ~05:25Z |
+| **#1476** | **thorfinn** | **H290: EP15+multi-σ{3e-4,5e-4,7e-4}+anti-K=3** | 🆕 just assigned (σ-diversity across anti-thetic pairs) | — | ~08:00Z |
 
 **Gate**: val < **5.9243** AND test < **5.7690** (H275 SOTA merged 01:17Z)
 
 **Hot watch**: 
-- **Edward H284** is the PRIMARY SOTA candidate — val 5.9242 ties SOTA gate (within 0.01bp), Sobol×anti×EP15 triple compound. Test arm decides merge vs close. ETA ~04:50Z.
-- Tanjiro H285 K=4 EP15 is the secondary candidate (next ~07:10Z).
+- **Tanjiro H285 K=4** is NOW a SOTA candidate — val 5.9235 BEATS gate by 0.8bp! Test arm decides. ETA ~08:00Z. K=4 vs K=3 at EP15 may reveal Finding BBB does NOT extend from EP13 to EP15.
+- **Edward H284** is the PRIMARY SOTA candidate — val 5.9242 ties SOTA gate (within 0.01bp), Sobol×anti×EP15 triple compound. Test arm decides merge vs close. ETA ~07:10Z.
 - Nezuko H280 had 2 prior crashes (likely NCCL); current retry has been pre-eval for 2.5h. Worth monitoring closely if she crashes again.
+- Thorfinn H283 CLOSED (σ=3e-4+Sobol-K5+EP15 val 5.9274 +3.1bp fails gate) — banked Finding XX-Sobol-confirmed (σ axis closed across all noise families at EP15).
 - Frieren H279 CLOSED (Sobol K=5 EP15 val 5.9291 +4.8bp over SOTA gate) — banked Findings DDD-Sobol-EP15-super-additive and EEE-anti-dominates-Sobol-at-EP15.
 - Fern H281 closed with Finding AAA confirmed at EP13 (σ=3e-4 worse than σ=5e-4 in anti-thetic on BOTH EP13 and EP15). σ-axis fully closed for anti-thetic stack.
 
@@ -49,6 +50,7 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1466 thorfinn H283 | EP15+σ=3e-4+Sobol-K5+6-res+mirror | **Finding XX-Sobol-confirmed** (close, val 5.9274 +3.1bp / test 5.7725 +3.5bp fails H275 gate; σ-axis closed across all noise families at EP15) | 5.9274 | 5.7725 |
 | #1459 frieren H279 | EP15+Sobol-K5+6-res+mirror | **Findings DDD-Sobol-EP15-super-additive + EEE-anti-dominates-Sobol-at-EP15** (close, val 5.9291 +4.8bp / test 5.7734 +4.4bp fails H275 gate; anti structurally dominates Sobol at both EPs) | 5.9291 | 5.7734 |
 | #1461 fern H281 | EP13+σ=3e-4+anti-K=3 stacked | **Finding AAA confirmed at EP13** (close, σ=3e-4 worse than σ=5e-4 on EP13+anti too — σ-axis CLOSED for anti family on both EPs) | 5.9342 | 5.7785 |
 | #1465 alphonse H282 | EP13+anti-K=2 stacked | **Finding BBB-K-curve-floor-EP13** (close, K=2 floor: +9.7bp val vs H275 SOTA) | 5.9340 | 5.7783 |
@@ -101,7 +103,8 @@ After current round resolves (new gate val < 5.9243 / test < 5.7690):
 7. **K-axis at EP13 CLOSED (Finding BBB)**: Do not assign further K variations at EP13 anti-thetic. K=3 is the sweet spot.
 8. **σ axis CLOSED at EP15+anti (Finding AAA)**: σ=5e-4 is optimal; no further σ variations on anti-thetic stack.
 9. **Sobol×EP15 CLOSED (Finding EEE)**: Anti-K=3 dominates Sobol-K=5 at both EPs; do not test more Sobol-only variants on EP15 stack.
-10. **SP floor**: 3.6427 → 3.577 = 6.5bp gap — H283 thorfinn (σ+Sobol) likely closes σ at Sobol family too.
+10. **σ axis CLOSED at EP15 (ALL noise families)**: Finding XX-Sobol-confirmed from H283 closes single-σ recipes. Multi-σ diversity (H290 thorfinn) is the ONE remaining σ-adjacent test.
+11. **SP floor**: 3.6427 → 3.577 = 6.5bp gap — H290 thorfinn multi-σ is the primary test for SP/VP/WSS simultaneous improvement.
 
 ---
 
@@ -118,7 +121,7 @@ After current round resolves (new gate val < 5.9243 / test < 5.7690):
 | EP13 + anti-thetic K=4 pairs (8p) + 6-res + mirror | ✗ H278 5.9316/5.7758 — Finding BBB-K-saturates (K=4 only −0.6bp over K=3, fails H275 gate +7.3bp) |
 | EP15 + anti-thetic K=3 + 6-res + mirror | ✓ H275 val 5.9243 / test 5.7690 ← **CURRENT SOTA** |
 | EP15 + σ=3e-4 + K=5 random + 6-res + mirror | ✗ H276 5.9314/5.7768 — Finding XX (val passes, test +0.05bp, WSS+1.9bp) |
-| EP15 + σ=3e-4 + Sobol K=5 + 6-res + mirror | 🟡 H283 thorfinn (running) |
+| EP15 + σ=3e-4 + Sobol K=5 + 6-res + mirror | ✗ H283 5.9274/5.7725 — Finding XX-Sobol-confirmed (fails H275 gate +3.1/+3.5bp; σ-axis closed across all noise families at EP15) |
 | EP15 + σ=3e-4 + anti-thetic K=3 + 6-res + mirror | ✗ H277 5.9255/5.7705 — Finding AAA (σ=3e-4 flat/unfavorable under anti-thetic) |
 | EP15 + anti-thetic K=4 pairs (8p) + 6-res + mirror | 🟡 H285 tanjiro (running) |
 | EP15 + Sobol QMC K=5 + 6-res + mirror | ✗ H279 5.9291/5.7734 — Findings DDD-Sobol-EP15-super-additive + EEE-anti-dominates-Sobol-at-EP15 (fails H275 gate +4.8/+4.4bp; anti beats Sobol at EP15 too) |

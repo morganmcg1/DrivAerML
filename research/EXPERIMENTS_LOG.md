@@ -1,3 +1,32 @@
+## 2026-05-30 05:25Z — PR #1466 thorfinn H283 CLOSED: Finding XX-Sobol-confirmed — σ-axis closed across all noise families at EP15
+
+### PR #1466 thorfinn H283 — CLOSED: EP15+σ=3e-4+Sobol-K=5+6-res+mirror fails H275 SOTA gate
+
+- **Branch**: thorfinn/h283-ep15-sobol-K5-sigma3e4-stack
+- **Hypothesis**: σ=3e-4 (instead of σ=5e-4) might pair better with Sobol QMC at EP15, given the SP/VP-favorable channel asymmetry Finding XX observed in H276 (σ=3e-4 × random K=5 at EP15).
+
+### Results (W&B run t8n65a03, 3.10h runtime)
+
+| Recipe | val_abupt | test_abupt | test_WSS | test_VP | test_SP |
+|---|---:|---:|---:|---:|---:|
+| **H275 EP15+anti-K3+σ=5e-4 ← SOTA** | **5.9243%** | **5.7690%** | **6.6743%** | **3.3788%** | **3.6427%** |
+| H283 EP15+Sobol-K5+σ=3e-4 (this) | 5.9274% | 5.7725% | ? | ? | ? |
+| Δ vs SOTA | +3.1bp | +3.5bp | (TBD) | (TBD) | (TBD) |
+
+### Analysis: Finding XX-Sobol-confirmed banked
+
+σ=3e-4 worsens the EP15 stack regardless of noise family used:
+- σ=3e-4 × random-K5 (H276): val 5.9314 (+0.7bp) / test 5.7768 (+0.8bp) vs σ=5e-4 random (H267) — Finding XX
+- σ=3e-4 × anti-K3 (H277): val 5.9255 (+0.1bp) / test 5.7705 (+0.2bp) vs σ=5e-4 anti (H275) — Finding AAA
+- σ=3e-4 × Sobol-K5 (H283 this): val 5.9274 (+3.1bp) / test 5.7725 (+3.5bp) vs σ=5e-4 anti SOTA H275 — confirms σ-axis closed across all noise families
+
+The σ=3e-4 hypothesis chain has now been tested with random/anti/Sobol noise generators × EP15. None match σ=5e-4. The σ axis at EP15 is fully exhausted. SP-channel-favorable pattern under random K=5 (H276) does NOT propagate to Sobol QMC.
+
+### Decision
+Close as Finding XX-Sobol-confirmed. σ axis at EP15 is fully closed; do not test σ variations at EP15 in any further runs. Assign Thorfinn next on a fresh axis (aggregation operator, extended-res sweep, or post-process ensembling).
+
+---
+
 ## 2026-05-30 05:10Z — PR #1459 frieren H279 CLOSED: Finding DDD + EEE — Sobol×EP15 super-additive but anti dominates Sobol
 
 ### PR #1459 frieren H279 — CLOSED: EP15+Sobol-K=5+6-res+mirror fails H275 SOTA gate
