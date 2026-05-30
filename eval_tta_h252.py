@@ -81,6 +81,11 @@ class EvalConfig:
 
     # Weight-noise stacking knobs
     weight_noise_sigma: float = 5e-4
+    # H297: per-layer-group sigma stratification. Negative sentinel means
+    # "inherit from weight_noise_sigma". Use to set σ_attn = 0 while keeping
+    # σ_mlp = 5e-4 (or any other anisotropic split).
+    weight_noise_sigma_attn: float = -1.0
+    weight_noise_sigma_mlp: float = -1.0
     weight_noise_passes: int = 5
     weight_noise_seed_base: int = 42
     # H274: anti-thetic noise pairs. When True, each of weight_noise_passes
@@ -239,6 +244,24 @@ def chunk_global_indices(view_index: int, view_count: int, n_full: int) -> torch
 # --- weight-noise helpers ---
 
 
+def get_param_group(name: str) -> str:
+    """Classify a parameter into {"attn", "mlp", "other"} by substring matching.
+
+    Used by H297 to stratify weight noise by layer type. Attention substrings
+    catch Transolver's `attention.qkv`, `attention.proj`, `attention.in_project_*`,
+    `attention.q_norm`, `attention.k_norm`, `attention.temperature`, plus the
+    `surf_to_vol_xattn` MultiheadAttention (`xattn`, `in_proj_*`, `out_proj.*`).
+    MLP substrings catch `blocks.<N>.mlp.fc1/fc2`. Everything else (LayerNorm,
+    pos_embed, surface_bias MLP, output heads, RFF, projections) is "other".
+    """
+    lname = name.lower()
+    if any(k in lname for k in ["attn", "attention", "q_proj", "k_proj", "v_proj", "out_proj", "qkv"]):
+        return "attn"
+    if any(k in lname for k in ["mlp", "ffn", "fc1", "fc2", "gate_proj", "up_proj", "down_proj"]):
+        return "mlp"
+    return "other"
+
+
 @torch.no_grad()
 def snapshot_clean_params(module: nn.Module) -> dict[str, torch.Tensor]:
     snap: dict[str, torch.Tensor] = {}
@@ -259,12 +282,17 @@ def restore_clean_params(module: nn.Module, clean: dict[str, torch.Tensor]) -> N
 def perturb_relative_(
     module: nn.Module,
     clean: dict[str, torch.Tensor],
-    sigma: float,
+    group_sigma: dict[str, float],
     seed: int,
     device: torch.device,
     sign: float = 1.0,
 ) -> None:
-    """p <- clean_p + sign * randn(seed) * sigma * |clean_p|, identical across DDP ranks.
+    """p <- clean_p + sign * randn(seed) * sigma_g * |clean_p|, identical across DDP ranks.
+
+    ``group_sigma`` maps {"attn", "mlp", "other"} -> σ. ``get_param_group(name)``
+    selects which σ to apply per parameter, enabling H297-style anisotropy
+    (e.g. σ_attn=0 with σ_mlp=5e-4). The generator is always advanced once per
+    parameter (even when σ=0) so anti-thetic +ε / −ε pairs draw identical noise.
 
     With matched ``seed`` and ``sign=±1.0`` calls, produces an anti-thetic pair
     whose linear Taylor term cancels in the average (Finding NN / H274).
@@ -275,9 +303,16 @@ def perturb_relative_(
         if not p.dtype.is_floating_point:
             continue
         clean_p = clean[name]
+        sg = group_sigma[get_param_group(name)]
+        # Always draw randn to keep generator state consistent across calls,
+        # so sigma_g=0 parameters don't desync the anti-thetic pair on the
+        # remaining noisy parameters.
         noise = torch.randn(p.shape, generator=gen, device=device, dtype=p.dtype)
-        noise.mul_(sigma * sign).mul_(clean_p.abs())
-        p.data.copy_(clean_p).add_(noise)
+        if sg == 0.0:
+            p.data.copy_(clean_p)
+        else:
+            noise.mul_(sg * sign).mul_(clean_p.abs())
+            p.data.copy_(clean_p).add_(noise)
 
 
 # --- per-case stacked TTA ---
@@ -296,7 +331,7 @@ def process_case_stacked(
     use_mirror: bool,
     clean: dict[str, torch.Tensor],
     K_passes: int,
-    sigma: float,
+    group_sigma: dict[str, float],
     seed_base: int,
     antithetic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
@@ -308,6 +343,10 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    ``group_sigma`` maps {"attn","mlp","other"} -> σ. Any σ > 0 triggers
+    weight-noise sampling; if all σ == 0 the model is held at the clean
+    snapshot (deterministic baseline).
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -328,9 +367,11 @@ def process_case_stacked(
 
     mirror_flags = (False, True) if use_mirror else (False,)
 
+    any_noise = any(s > 0.0 for s in group_sigma.values())
+
     # Build the (noise_idx, sign) schedule. Anti-thetic pairs share a seed so
     # +ε / −ε use the SAME draw of ε (otherwise it would just be 2K i.i.d.).
-    if antithetic and sigma > 0.0:
+    if antithetic and any_noise:
         schedule = [(k, sign) for k in range(K_passes) for sign in (+1.0, -1.0)]
     else:
         schedule = [(k, +1.0) for k in range(K_passes)]
@@ -338,10 +379,11 @@ def process_case_stacked(
     for k, sign in schedule:
         # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
         t_p = time.time()
-        if sigma > 0.0:
+        if any_noise:
             seed = (seed_base + k) * 100003
             perturb_relative_(
-                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
+                eval_module, clean, group_sigma=group_sigma, seed=seed,
+                device=device, sign=sign,
             )
         else:
             restore_clean_params(eval_module, clean)
@@ -448,7 +490,7 @@ def process_case_stacked(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
+    k_eff = K_passes * (2 if (antithetic and any_noise) else 1)
     n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
@@ -542,7 +584,7 @@ def evaluate_split_stacked(
     use_mirror: bool,
     clean: dict[str, torch.Tensor],
     K_passes: int,
-    sigma: float,
+    group_sigma: dict[str, float],
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
@@ -574,7 +616,7 @@ def evaluate_split_stacked(
             use_mirror=use_mirror,
             clean=clean,
             K_passes=K_passes,
-            sigma=sigma,
+            group_sigma=group_sigma,
             seed_base=seed_base,
             antithetic=antithetic,
         )
@@ -665,6 +707,17 @@ def main(argv: Iterable[str] | None = None) -> None:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
+    sigma_attn = (
+        cfg.weight_noise_sigma if cfg.weight_noise_sigma_attn < 0
+        else cfg.weight_noise_sigma_attn
+    )
+    sigma_mlp = (
+        cfg.weight_noise_sigma if cfg.weight_noise_sigma_mlp < 0
+        else cfg.weight_noise_sigma_mlp
+    )
+    sigma_other = cfg.weight_noise_sigma
+    group_sigma = {"attn": sigma_attn, "mlp": sigma_mlp, "other": sigma_other}
+
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
@@ -676,6 +729,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
             f"seed_base={cfg.weight_noise_seed_base}"
+        )
+        print(
+            f"Per-group sigma: attn={sigma_attn} mlp={sigma_mlp} other={sigma_other}"
         )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
@@ -717,6 +773,28 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_perturbed = sum(t.numel() for t in clean.values())
         print(f"Snapshotted {len(clean)} fp tensors ({n_perturbed:,} elements)")
 
+        # H297: print layer-group breakdown to verify the per-group sigma split.
+        # Expected: ~30–50% attn, ~40–60% mlp, ~5–10% other for Transolver.
+        group_numel = {"attn": 0, "mlp": 0, "other": 0}
+        group_count = {"attn": 0, "mlp": 0, "other": 0}
+        print("Layer-group breakdown (H297 noise-stratification):")
+        for name, p in eval_module.named_parameters():
+            g = get_param_group(name)
+            group_numel[g] += p.numel()
+            group_count[g] += 1
+            print(f"  {g:<6s}: {name}  (numel={p.numel():,})")
+        total_numel = sum(group_numel.values())
+        if total_numel > 0:
+            print(
+                f"Group totals: "
+                f"attn={group_numel['attn']:,} ({group_count['attn']} tensors, "
+                f"{100.0 * group_numel['attn'] / total_numel:.1f}%) | "
+                f"mlp={group_numel['mlp']:,} ({group_count['mlp']} tensors, "
+                f"{100.0 * group_numel['mlp'] / total_numel:.1f}%) | "
+                f"other={group_numel['other']:,} ({group_count['other']} tensors, "
+                f"{100.0 * group_numel['other'] / total_numel:.1f}%)"
+            )
+
     val_case_ids = store.case_ids("val")
     test_case_ids = store.case_ids("test")
     if cfg.debug:
@@ -745,6 +823,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "n_val_cases": len(val_case_ids),
                 "n_test_cases": len(test_case_ids),
                 "ckpt_source": ckpt_source,
+                "sigma_attn_effective": sigma_attn,
+                "sigma_mlp_effective": sigma_mlp,
+                "sigma_other_effective": sigma_other,
             },
             tags=[
                 "h252",
@@ -803,7 +884,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_mirror=use_mirror,
                 clean=clean,
                 K_passes=cfg.weight_noise_passes,
-                sigma=cfg.weight_noise_sigma,
+                group_sigma=group_sigma,
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
