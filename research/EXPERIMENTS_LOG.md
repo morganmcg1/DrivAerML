@@ -4525,3 +4525,68 @@ Across H164/H165/H166 (structural wave) + H168/H169/H170 (wave-2 loss-rep-alloca
 - H168: EP5 borderline (6.858%), mechanism-signal (WSSz FASTEST cooling) still intact
 
 **H147 stack is rigid against single-flag perturbation across 5+ mechanistic axes.** Combined finding spans structural, loss-density, β, lr, per-axis-weight, GradNorm-α axes.
+
+## 2026-05-30 06:30Z — PR #1462 H168 fern CLOSED NON-MERGE: pe_init_sigmas +σ=0.1 — SP floor broken 0.110pp (worst of wave-2)
+
+- `dl24-fern/h168-pe-lo-sigma`, run `t9h0inur` (DDP8, ~5.87h wallclock)
+- Hypothesis: add σ=0.1 to STRING multi-sigma PE (5→6 sigmas, pe_num_features=16 unchanged) for boundary-layer-transition spatial resolution → preferential test_WSS_z gain
+- **Terminal verdict: NON-MERGE — SP floor decisively broken; σ=0.1 preferential-WSSz mechanism FALSIFIED**
+
+### Terminal SENPAI-RESULT (EP8, EMA-best checkpoint)
+
+| Metric | H168 test | H147 SOTA | Δ vs H147 | Floor cap | Status |
+|---|---:|---:|---:|---:|:--|
+| **wall_shear_rel_l2_pct (primary)** | **6.6323%** | 6.5409% | **+0.0914pp** | — | trail |
+| wall_shear_x_rel_l2_pct | 5.9017% | 5.8155% | +0.0862pp | — | trail |
+| wall_shear_y_rel_l2_pct | 7.1831% | 7.0556% | +0.1275pp | — | trail |
+| wall_shear_z_rel_l2_pct | 8.5747% | 8.4882% | +0.0865pp | — | **no preferential gain** |
+| volume_pressure_rel_l2_pct | 3.5439% | 3.4014% | +0.1425pp | 3.643% | clears 0.099pp |
+| **surface_pressure_rel_l2_pct** | **3.6873%** | 3.5634% | +0.1239pp | **3.577%** | **BROKEN 0.110pp WORST** |
+| abupt_axis_mean_rel_l2_pct | 5.7782% | 5.6648% | +0.1134pp | 5.844% | clears 0.066pp |
+
+### Full val trajectory (EP1-EP8 val_primary)
+
+| EP | step | WSS | WSSx | WSSy | WSSz | VP | SP | ABUPT |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10975 | 12.6230 | 11.1971 | 14.0494 | 16.2662 | 13.6121 | 8.3277 | 12.6905 |
+| 2 | 21951 | 7.3396 | 6.3108 | 8.3416 | 9.8055 | 6.1331 | 4.3501 | 6.9882 |
+| 3 | 32927 | 7.0703 | 6.1038 | 7.9327 | 9.4872 | 4.4146 | 4.1809 | 6.4238 |
+| 4 | 43903 | 6.9366 | 5.9993 | 7.7261 | 9.3425 | 3.9609 | 4.1038 | 6.2265 |
+| 5 | 54879 | 6.8583 | 5.9471 | 7.5927 | 9.2481 | 3.7891 | 4.0536 | 6.1261 |
+| 6 | 65855 | 6.8082 | 5.9128 | 7.4973 | 9.1971 | 3.6896 | 4.0188 | 6.0631 |
+| 7 | 76831 | 6.7852 | 5.9087 | 7.4371 | 9.1652 | 3.6400 | 4.0036 | 6.0309 |
+| **8** | 87800 | **6.7653** | 5.8961 | 7.3918 | **9.1512** | 3.6138 | 3.9867 | **6.0079**★ |
+
+★ = best-EMA checkpoint (selection metric val_primary/abupt_axis_mean_rel_l2_pct)
+
+### Mechanism diagnostic — σ=0.1 preferential-WSSz hypothesis FALSIFIED
+
+Hypothesis predicted: adding σ=0.1 (~20-40mm physical scale) targets boundary-layer-transition spatial frequencies → preferential test_WSS_z gain (vehicles' τ_z geometry).
+
+Observed at terminal: WSSz regressed +0.0865pp ≈ WSSx +0.0862pp (essentially identical). WSSy regressed MORE (+0.1275pp), not less. Per-axis EP-by-EP slopes through EP4-7 showed WSSy leading the descent, not WSSz. The σ=0.1 band did NOT preferentially attack τ_z geometry.
+
+### Working explanation — per-band feature density dilution
+
+H147: 16 features ÷ 5 sigmas = 3.2 features/band
+H168: 16 features ÷ 6 sigmas = 2.67 features/band (17% reduction per band)
+
+The uniform regression across WSS axes + SP + VP + ABUPT — none of which the σ=0.1 spatial-scale hypothesis touched — is consistent with overall PE spectral capacity loss, not per-axis preferential effect. The added finest band came at the cost of feature density per existing band.
+
+### Wave-2 SP floor regression hardened to 5 axes
+
+| Run | Perturbation | test_SP | Δ floor |
+|---|---|---:|---:|
+| H147 SOTA | — | 3.5634% | (clears 0.014pp) |
+| H164 | slices 128→192 | 3.6631% | +0.086pp |
+| H165 | pe_features 16→12 | 3.6633% | +0.086pp |
+| H166 | surface_out_width 2.0→3.0 | 3.6031% | +0.026pp |
+| H167 | heads 4→8 | 3.6153% | +0.038pp |
+| **H168** | **+σ=0.1 PE band** | **3.6873%** | **+0.110pp WORST** |
+
+The H147 stack occupies a tight Pareto knee where SP=3.5634% sits just 0.014pp inside the 3.577% floor. Any structural perturbation drops SP by 0.026-0.110pp. H168 worst because it combined PE-spectrum perturbation AND per-band density loss.
+
+### Conclusion / next-cycle direction
+
+- σ=0.1 PE mechanism: FALSIFIED. Per-axis decomposition (fern's diagnostic discipline) gave clean rejection.
+- Wave-2 SP-floor regression now confirmed across 5 axes (4 structural + PE-allocation-with-density-loss).
+- **H174 dispatched (fern):** shifted-right PE sigmas `[0.5, 1.0, 2.0, 4.0, 8.0]` — 5 sigmas × 16/5 = 3.2 features/band (density preserved). Tests dual hypothesis: if SP also breaks under density-preserving spectral re-allocation, meta-finding extends from "structural or density-loss" to "ANY single-flag PE perturbation." If SP holds at ≤3.577%, density-preservation mechanism isolated.
