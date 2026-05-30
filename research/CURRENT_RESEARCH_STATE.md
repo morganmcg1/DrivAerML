@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 08:10Z | Branch: `tay` | **SOTA: H275 EP15+Anti-K3+6-res+mirror (PR #1455)** | Round 4k
+**Updated**: 2026-05-30 08:40Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470) — NEW** | Round 4k
 
 ---
 
@@ -8,40 +8,39 @@
 
 | Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP | W&B |
 |---|---:|---:|---:|---:|---:|---|
-| H275 EP15+anti-K3+6-res+mirror ← **CURRENT SOTA** | **5.9243%** | **5.7690%** | **6.6743%** | **3.3788%** | **3.6427%** | 0b4t2bz2 |
-| H274 EP13+anti-K3+6-res+mirror (prior) | 5.9322% | 5.7763% | 6.6805% | 3.3846% | 3.6515% | o8oq9r92 |
-| H271 EP13+Sobol-K5+6-res+mirror | 5.9368% | 5.7797% | 6.6848% | 3.3864% | 3.6512% | o9hb87lt |
-| H267 EP15+K=5 random+6-res+mirror | 5.9367% | 5.7825% | 6.6898% | 3.3850% | 3.6505% | snouz8zi |
+| **H285 EP15+anti-K4+6-res+mirror ← CURRENT SOTA (NEW)** | **5.9235%** | **5.7683%** | **6.6735%** | **3.3783%** | **3.6425%** | 4vvc40zs |
+| H275 EP15+anti-K3+6-res+mirror (prior SOTA) | 5.9243% | 5.7690% | 6.6743% | 3.3788% | 3.6427% | 0b4t2bz2 |
+| H274 EP13+anti-K3+6-res+mirror | 5.9322% | 5.7763% | 6.6805% | 3.3846% | 3.6515% | o8oq9r92 |
 | Transolver-3 target (Morgan Issue #1056) | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% | — |
 
-**Merge gate**: val_abupt < **5.9243%** AND test_abupt < **5.7690%**
-**Paper floors**: test_VP 3.3788 ≤ 3.421 ✓ | test_WSS 6.6743 ≤ 6.727 ✓ | test_SP 3.6427 > 3.577 ✗ (6.5bp gap — improved 1.0bp vs H274)
+**Merge gate**: val_abupt < **5.9235%** AND test_abupt < **5.7683%**
+**Paper floors**: test_VP 3.3783 ≤ 3.421 ✓ | test_WSS 6.6735 ≤ 6.727 ✓ | test_SP 3.6425 > 3.577 ✗ (6.5bp gap — marginal 0.02bp vs H275)
 
-**Key findings**: Finding ZZ (EP15×anti-K3 super-additive: +0.28bp val, +0.51bp test bonus vs pure-additive), Finding VV (anti-thetic cancels linear Taylor term), Finding UU (Sobol QMC uniform −0.5bp/ch over random)
+**Key findings**: Finding JJJ (K4 at EP15 +0.7bp, slope diminishing but sign-consistent 5/5 channels), Finding ZZ (EP15×anti-K3 super-additive), Finding VV (anti-thetic cancels linear Taylor term)
 
 ---
 
-## Active Fleet (as of 08:10Z — 8 students active)
+## Active Fleet (as of 08:40Z — 8 students active)
 
 | PR | Student | Hypothesis | Status | val | ETA |
 |---|---|---|---|---|---|
-| **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 🔬 smoke passed, primary not yet launched (OOM check on 196K) | — | ~11:00Z |
-| **#1470** | **tanjiro** | **H285: EP15+anti-K=4 pairs (8p)+6-res+mirror** | 🔥 val 5.9235 BEATS GATE (−0.8bp), test arm running (~2h remaining) | **5.9235** | ~09:30Z |
-| **#1471** | **alphonse** | **H286: Aggregation operator sweep on H275 SOTA** | 🟡 fixed loader-spawn bug, running full sweep since 05:36Z, ETA ~09:00Z | — | ~09:00Z |
-| **#1482** | **askeladd** | **H294: Student-t df=3 noise at EP15+anti-K3+6-res** | 🆕 just assigned (noise-family heavy-tail test) | — | ~11:30Z |
-| **#1473** | **fern** | **H288: 8-res mid densification** | 🔥 val **5.9229** (BEST IN FLEET, −1.4bp), test arm running (~1.5h remaining) | **5.9229** | ~09:30Z |
-| **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K} at EP15+anti-K3** | 🟡 running 1.5h, no val metrics yet (early) | — | ~10:00Z |
-| **#1481** | **nezuko** | **H293: Laplace noise at EP15+anti-K3+6-res** | 🆕 just assigned (noise-family medium-heavy-tail test) | — | ~11:30Z |
-| **#1476** | **thorfinn** | **H290: EP15+multi-σ{3e-4,5e-4,7e-4}+anti-K=3** | 🟡 primary running ~1.5h+ (2 runs, possible dual-run anomaly), no metrics yet | — | ~10:30Z |
+| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | 🆕 just assigned (K-axis close experiment; val arm ~197min sufficient if fails gate) | — | ~12:30Z |
+| **#1471** | **alphonse** | **H286: Aggregation operator sweep on H275 SOTA** | 🟡 running since 05:36Z (2.8h no val metrics — normal, cache-then-log recipe). ETA ~09:06Z | — | ~09:06Z |
+| **#1482** | **askeladd** | **H294: Student-t df=3 noise at EP15+anti-K3+6-res** | 🟡 just picked up, bgz1d8mm running no metrics yet | — | ~12:30Z |
+| **#1473** | **fern** | **H288: 8-res mid densification** | 🔥 val **5.9229** (BEATS NEW GATE 5.9235, −0.6bp), test arm (7mt43jcr) running | **5.9229** | ~10:30Z |
+| **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K} at EP15+anti-K3** | 🟡 val 5.9252 (just above new gate 5.9235 by +0.17bp), test pending | 5.9252 | ~10:00Z |
+| **#1481** | **nezuko** | **H293: Laplace noise at EP15+anti-K3+6-res** | 🟡 hu472xfk running, no metrics yet (early) | — | ~12:30Z |
+| **#1476** | **thorfinn** | **H290: EP15+multi-σ{3e-4,5e-4,7e-4}+anti-K=3** | 🟡 slzcnzs7 val **5.9241** (BEATS new gate 5.9235 by −0.6bp), test arm running | **5.9241** | ~10:30Z |
+| **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 🟡 xyy8f895 primary launched, no metrics yet (~1h in) | — | ~12:00Z |
 
-**Gate**: val < **5.9243** AND test < **5.7690** (H275 SOTA merged 01:17Z)
+**Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
 
 **Hot watch**: 
-- **Fern H288** is PRIMARY SOTA candidate — val 5.9229 BEATS gate by 1.4bp (BEST IN FLEET). Test arm running, ETA ~09:30Z.
-- **Tanjiro H285 K=4** is secondary SOTA candidate — val 5.9235 −0.8bp. Test arm running, ETA ~09:30Z.
-- **Alphonse H286** running since 05:36Z with per-mirror loader bug FIXED. Val metrics expected ~09:00Z.
-- **Edward H292**: student still in OOM-verification phase (196608 res). Primary not yet launched.
-- **Thorfinn H290**: possible dual-run anomaly (2 concurrent slzcnzs7/1rg2kll5). No metrics yet — either just started or stuck in pre-eval.
+- **Fern H288 val 5.9229** is PRIMARY SOTA candidate — BEATS new gate by 0.6bp. Test arm (7mt43jcr) running, ETA ~10:30Z.
+- **Thorfinn H290 val 5.9241** is secondary — BEATS new gate by 0.6bp. Test arm running, ETA ~10:30Z.
+- **Frieren H291 val 5.9252** is borderline — just 0.17bp ABOVE new gate. May still beat test gate; worth watching.
+- **Alphonse H286**: terminal expected ~09:06Z (5 aggregators in one shot).
+- **Tanjiro H285 MERGED as SOTA** (08:37Z). New assignment H295 K=5 just sent.
 
 ---
 
@@ -49,6 +48,7 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1470 tanjiro H285 | EP15+anti-K4+6-res+mirror | **MERGED as NEW SOTA** — Finding JJJ-K4-K-axis-alive-at-EP15 (K=3→K=4 = −0.8bp val / −0.7bp test, sign-consistent 5/5 channels, slope diminishing) | 5.9235 | 5.7683 |
 | #1472 askeladd H287 | EP14 checkpoint anti-K3 | **Finding III-EP-axis-fully-exhausted** (EP14 val 5.9326/test 5.7764 fails gate; EP13≈EP14<EP15(peak)>EP16; all accessible checkpoints below EP15 confirmed worse across all 3 channels) | 5.9326 | 5.7764 |
 | #1460 nezuko H280 | EP13+Sobol-anti-K5+6-res | **Finding HHH-EP13-no-rescue-with-K5-Sobol** (EP13+K5+Sobol val 5.9313/test 5.7753 fails gate; all channels match-or-degrade vs SOTA; doubled-K Sobol diversity cannot compensate for EP13 vs EP15; EP-axis closed above AND below) | 5.9313 | 5.7753 |
 | #1475 frieren H289 | EP16 checkpoint axis (closed w/o running) | **Finding FFF-EP-axis-closed-at-H275-recipe** (checkpoint EP12/EP16 unavailable; H244 3-res evals confirm EP15 peak, EP16 slight regression; EP-axis fully exhausted with available checkpoints) | n/a | n/a |
@@ -70,10 +70,11 @@
 
 ---
 
-## Findings Bank (37 banked, HHH+III added 08:10Z)
+## Findings Bank (38 banked, JJJ added 08:40Z)
 
 | ID | Source | Summary |
 |---|---|---|
+| **JJJ-K4-K-axis-alive-at-EP15** | H285 tanjiro (merged 08:37Z as NEW SOTA) | K=3→K=4 anti-thetic at EP15+6-res gives val −0.8bp / test −0.7bp. Sign-consistent across all 5 paper-facing channels (5/5). K-axis still alive but slope diminishing: K=2→3 compound was super-additive (Finding ZZ); K=3→4 is weakly additive. K=5 next (H295 tanjiro) to close axis. Merge gate updated to val<5.9235, test<5.7683. |
 | **III-EP-axis-fully-exhausted** | H287 askeladd (closed 08:10Z) | EP14+anti-K3+6-res val 5.9326/test 5.7764 fails gate. Combined with FFF (EP16), HHH (EP13), EP12 unavailable: EP-curve at H275 recipe fully closed as EP13≈EP14<EP15(peak)>EP16. No checkpoint variation can improve SOTA without new training. |
 | **HHH-EP13-no-rescue-with-K5-Sobol** | H280 nezuko (closed 08:10Z) | EP13+Sobol-anti-K5+6-res val 5.9313/test 5.7753 fails gate. Doubled-K diversity + Sobol cannot rescue EP13 checkpoint. Combined with Finding FFF (EP16) and III (EP14): EP-axis fully exhausted on both sides of EP15 peak. |
 | **GGG-Sobol-anti-non-stacking-at-K3-EP15** | H284 edward (closed 07:20Z) | Sobol×anti compound at K=3 EP15 is non-additive: val −0.012bp / test +0.065bp ≈ zero net movement vs H275. Anti-K=3 already kills the dominant linear Taylor variance; Sobol QMC targets the SAME variance budget. Both mechanisms not orthogonal at K=3. |

@@ -1,3 +1,38 @@
+## 2026-05-30 08:37Z — PR #1470 tanjiro H285 MERGED: NEW SOTA — Finding JJJ — K=4 EP15 anti-thetic beats K=3
+
+### PR #1470 tanjiro H285 — MERGED as NEW SOTA: EP15+anti-K4+6-res+mirror
+
+- **Branch**: tanjiro/h285-ep15-anti-K4-stack
+- **Hypothesis**: K=4 anti-thetic pairs at EP15+6-res — does K-scaling beyond K=3 continue to improve?
+
+### Results (W&B run 4vvc40zs, 314 min runtime)
+
+| Metric | H275 SOTA (K=3) | **H285 NEW SOTA (K=4)** | Δ |
+|---|---:|---:|---:|
+| val_abupt | 5.9243% | **5.9235%** | −0.8bp ✓ |
+| test_abupt | 5.7690% | **5.7683%** | −0.7bp ✓ |
+| test_WSS | 6.6743% | **6.6735%** | −0.8bp ✓ |
+| test_VP | 3.3788% | **3.3783%** | −0.5bp ✓ |
+| test_SP | 3.6427% | **3.6425%** | −0.2bp ✓ |
+
+### Analysis: Finding JJJ-K4-K-axis-alive-at-EP15 banked
+
+All 5 paper-facing metrics improved. The margin is small (~0.7bp) but the sign-consistency across 5/5 channels is strong evidence of real signal. K=3→K=4 slope is −0.7bp/pass, much smaller than the K=2→K=3 super-additive jump at EP15 (Finding ZZ), indicating diminishing returns. However the K-axis is demonstrably still alive.
+
+K-axis progression at EP15+6-res+mirror (anti-thetic, σ=5e-4):
+| K | K_eff | val_abupt | test_abupt |
+|:---:|:---:|---:|---:|
+| 3 (H275) | 6 | 5.9243 | 5.7690 |
+| **4 (H285)** | **8** | **5.9235** | **5.7683** |
+| 5 (H295, in-flight) | 10 | ? | ? |
+
+New merge gate: val < **5.9235** AND test < **5.7683**. Tanjiro assigned H295 (K=5) to close the K-axis — if K=5 fails gate, K-axis is exhausted at K=4.
+
+### Decision
+Merged as new SOTA. Assigned H295 (K=5 at EP15) to tanjiro to close the K-axis.
+
+---
+
 ## 2026-05-30 08:10Z — PR #1472 askeladd H287 CLOSED: Finding III — EP-axis fully exhausted around EP15
 
 ### PR #1472 askeladd H287 — CLOSED: EP14+anti-K3+6-res+mirror fails H275 SOTA gate
