@@ -1,24 +1,41 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-30 06:30Z._
+_Last updated: 2026-05-30 07:05Z._
 
-**06:30Z snapshot — H168 CLOSED (4th SP floor breach), H174 dispatched, H169 EP7 tracking, H172 EP3, H173 EP1 PASS:**
+**07:05Z snapshot — H169 CLOSED (6th SP floor breach extending meta-finding into LOSS family), H175 dispatched, H173 EP2 mechanism deeply confirmed, H172 mid-EP3 healthy, H174 smoke imminent:**
 
-1. **H168 (fern) CLOSED PR #1462** — terminal test_WSS=6.6323% (+0.091pp), test_SP=3.6873% **BROKE floor by 0.110pp** (worst of wave-2). σ=0.1 PE preferential-WSSz mechanism FALSIFIED (WSSz +0.087 ~= WSSx +0.086). Per-band feature density dilution (16÷6=2.67 vs H147 16÷5=3.2) the working explanation. 4th independent structural axis breaking SP floor. NON-MERGE.
-2. **H174 dispatched to fern PR #1478** — pe_init_sigmas `[0.5,1.0,2.0,4.0,8.0]` (shifted right, density-preserved at 5 sigmas × 16/5 = 3.2 features/band). Fern's own H168 follow-up #1, UNTRIED, single-flag. Tests dual hypothesis: if SP floor breaks under density-preserving spectral re-allocation, then meta-finding extends from "structural perturbation" to "ANY single-flag PE perturbation breaks SP." Either result informative.
-3. **H169 (nezuko) EP7 val_WSS=6.767%** (EP1→EP7: 12.91→7.22→6.98→6.89→6.81→6.77→6.77 — slope decay −0.248→−0.090→−0.072→−0.040→−0.008pp). val_SP=3.968% tight; val_VP=3.672% tightening. EP8 ETA 06:37Z, terminal soon. WSS_y leading descent (mechanism confirmed); WSS_z plateaued at 9.18% (no z-axis collapse).
-4. **H172 (tanjiro) 30-EP main mid-EP3** — step 31610 at 06:30Z (2.15h runtime since 04:12Z launch). EMA shadow expected unwarmed at EP3 (val_primary EMA=50.5% — needs ~7 EPs warmup). val_raw_primary/wall_shear=7.98% tracking. Kill ladder gates: EP5 raw >8.5% KILL, EP10 EMA >6.8%.
-5. **H173 (frieren) smoke EP1=12.81% PASS**, main 8-EP launched ~05:10Z. GradNorm w_vol_p dropped from H147's pinned 0.172 to 0.089 (clamp not binding) — mechanism CONFIRMED. EP3≤7.20% gate, EP5≤6.80%, EP8 terminal.
+1. **H169 (nezuko) CLOSED PR #1463 NON-MERGE** — terminal test_WSS=6.6686% (+0.128pp vs SOTA 6.5409), test_SP=3.6933% **BROKE floor by 0.116pp** (6th axis). All 3 WSS axes regressed at test despite val_WSS_y leading EP1-7 (mechanism val→test divergence). Charbonnier family sealed on 2D magnitude × coverage plane: H147 z@0.1 SOTA, H161 z@0.3 fail, H169 yz@0.1=2× total fail. NON-MERGE.
+2. **H175 (nezuko) DISPATCHED PR #1480** — `wss_charbonnier_weight=0.05 axes=yz` (TOTAL=0.10 matching H147 z@0.10). Magnitude-preserving coverage extension. Isolates coverage from magnitude — last cell in 2D Charbonnier ablation grid. Student's own H169 follow-up #1.
+3. **H173 (frieren) EP2 mechanism DEEPLY CONFIRMED** — w_vol_p saturated at NEW 0.05 floor (0.0503→0.0501 mid-EP3); w_τ_x cooled −0.255 vs H147 (GradNorm correctly identifies easy axis); w_τ_y RISING (1.278→1.402); **w_cp absorbed +0.191** (protects SP rather than starving it — first wave-2 direction without "WSS-pressure-up→SP-floor-break" mechanism). EP2 val_WSS=7.40% trail +0.14pp expected; EP3 ETA ~07:28Z.
+4. **H172 (tanjiro) 30-EP main mid-EP3 healthy** — step 40874 at 07:05Z (2.82h runtime). val_raw_primary/wall_shear=7.60% (clean, no regression). val_primary EMA=16.63% (warming — expected at ~4 windows of 10k-step horizon). EP5 raw gate (>8.50% KILL) ETA ~07:55Z.
+5. **H174 (fern) smoke at step 6840** (28 min runtime). EP1 ETA ~07:13Z. Density-preserved spectral shift `[0.5,1.0,2.0,4.0,8.0]` (5 sigmas × 16/5 = 3.2 features/band, matching H147). Tests dual hypothesis: SP breach under density-preservation → ANY single-flag PE perturbation breaks SP.
 
-### Wave-2 EP3-EP8 status (06:30Z W&B reads)
+### SP-floor meta-finding — **6 axes BROKEN**, conservation-law diagnosis
 
-| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_WSS_y | val_WSS_z | Last slope | Watch |
-|---|---|---|---:|---:|---:|---|---:|---:|---|---|
-| **H168 `pe-lo-sigma`** fern | #1462 | t9h0inur | 5.87h | **EP8 TERM** | **6.765%** | +0.115pp | 7.392% | 9.151% | −0.020pp EP7→8 | **CLOSED** test_WSS=6.6323% +0.091pp; test_SP=3.6873% BROKE 0.110pp |
-| **H169 `wss-charb-yz`** nezuko | #1463 | aco66tdm | 5.05h | **EP7** | **6.767%** | tracking | **7.309% LEADING** | 9.177% | −0.008pp EP6→7 | EP8 ETA 06:37Z; floor margins tight (VP 3.672 SP 3.968); test eval pending |
-| **H172 `ema-weights`** tanjiro | #1469 | 7d83go4z | 2.15h | EP3 mid | raw=7.98% | EMA=50.5% (unwarmed expected) | — | — | — | 30-EP main active; kill gates EP5 raw>8.5%, EP10 EMA>6.8% |
-| **H173 `gradnorm-clamp-vol-p`** frieren | #1474 | 7lkmhfar | 1.3h | EP1 PASS | 12.81% | matches H147 12.82% | — | — | — | 8-EP main; w_vol_p UNPINNED 0.089 (clamp not binding) — mechanism confirmed |
-| **H174 `pe-sigma-shifted-right`** fern | #1478 | TBD | 0h | not started | — | — | — | — | — | Just dispatched; smoke first, then 8-EP main |
+**H169 closure extends meta-finding from STRUCTURAL/PE family into LOSS family.** This makes the finding axis-orthogonal: structural, spectral allocation, AND loss perturbations all break SP floor. Working diagnosis: **resource conservation law** — H147's GradNorm equilibrium balances 5 task gradients with `min_w_vol_p=0.15` floor + SP at +0.014pp cushion. ANY perturbation that increases optimization pressure on the WSS pathway (more axes, more layers, more capacity, more loss weight) automatically steals from SP+VP, and **SP loses first.**
+
+| Perturbation | Axis | test_SP delta | Family |
+|---|---|---:|:---|
+| H164 slices 128→192 | trunk capacity | +0.086pp | structural |
+| H165 pe_features 16→12 | PE feature count | +0.086pp | structural/PE-density |
+| H166 surface_out 2.0→3.0 | head width | +0.026pp | structural |
+| H167 heads 4→8 | attention subspaces | +0.038pp | structural |
+| H168 add σ=0.1 PE band | PE spectral allocation | +0.110pp | PE-density-dilution |
+| **H169 wss_charb yz@0.10** | **loss coverage (2× total)** | **+0.116pp** | **LOSS** |
+
+**H173 (vol_p clamp release) is the FIRST orthogonal direction** — it RELEASES budget rather than diverting it, redistributes to w_cp (which protects SP) rather than to WSS heads. EP3-8 trajectory is the load-bearing test of the orthogonality.
+
+**H175 is the last 2D Charbonnier cell:** if H175 (yz @ 0.05, total preserved) also breaks SP, then COVERAGE itself diffuses optimization pressure across more heads → close entire Charbonnier-coverage direction. If H175 holds SP floor, magnitude was the sole culprit.
+
+### Wave-2 EP status (07:05Z W&B reads)
+
+| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | Watch |
+|---|---|---|---:|---:|---:|---|---|
+| **H169 `wss-charb-yz`** nezuko | #1463 | aco66tdm | 5.92h | **EP8 TERM** | **6.758%** | +0.12pp | **CLOSED 07:05Z** test_WSS=6.6686% +0.128pp; test_SP=3.6933% BROKE 0.116pp; 6th SP floor axis |
+| **H172 `ema-weights`** tanjiro | #1469 | 7d83go4z | 2.82h | EP3-4 | raw=7.60% | EMA=16.63% (warming) | 30-EP active; EP5 raw kill ETA ~07:55Z (>8.50%) |
+| **H173 `gradnorm-clamp-vol-p`** frieren | #1474 | ll8zl49z | 1.85h | EP2 done, mid-EP3 | 7.40% (EP2) | +0.14pp expected | EP3 ETA ~07:28Z; w_vol_p at 0.05 floor (mechanism confirmed); w_cp +0.191 protects SP |
+| **H174 `pe-sigma-shifted-right`** fern | #1478 | zxtabl4e | 0.46h | smoke mid-EP1 | — | — | EP1 ETA ~07:13Z; gate ≤13.5% |
+| **H175 `wss-charb-yz-005`** nezuko | #1480 | — | — | DISPATCHED 07:05Z | — | — | Smoke-first then 8-EP main; magnitude-preserving coverage |
 
 ### Wave-2 trail pattern — H168 TERMINAL, SP floor 4-axis hardened
 
@@ -32,21 +49,13 @@ _Last updated: 2026-05-30 06:30Z._
 | H169 wss-charb-yz | Loss-axis-coverage | EP3 BEAT → EP4-7 trail flat | EP7 6.767%; EP8 pending | TBD |
 | **H170 gradnorm-α** | **Loss-allocation** | **EP2→5 widening trail → KILL** | **CLOSED (α-axis bracketed)** | — |
 
-### SP-floor meta-finding — 5 axes confirmed BROKEN, density-preservation as next test
+### Emerging conclusion (post-H169 closure)
 
-H147 test_SP=3.5634% has only 0.014pp cushion to the 3.577% floor cap. Every structural/PE perturbation tested regresses SP by 0.026-0.110pp:
-
-| Perturbation | Axis | test_SP delta | Density change |
-|---|---|---:|:---|
-| H164 slices 128→192 | trunk capacity | +0.086pp | — |
-| H165 pe_features 16→12 | PE feature count | +0.086pp | density reduced (12 vs 16) |
-| H166 surface_out 2.0→3.0 | output head width | +0.026pp | — |
-| H167 heads 4→8 | attention subspaces | +0.038pp | — |
-| **H168 add σ=0.1 PE band** | **PE spectral allocation** | **+0.110pp** | **density reduced (16/6 vs 16/5)** |
-
-**H174 (shifted-right PE sigmas, density PRESERVED at 16/5)** is the direct test: if SP also breaks under density-preserving spectral shift, then ANY single-flag PE perturbation is shown to break SP — sharpening the meta-finding from "structural" to "structural OR spectral" classes. If SP holds (≤ 3.577%), density-preservation hypothesis confirmed and the H147 floor mechanism isolated to per-band feature density.
-
-**Emerging conclusion (updated):** single-flag perturbations now fail across 5 axes (structural, PE-freq-density, Charbonnier-coverage, GradNorm-allocation, GradNorm-α). Plateau-escape directions still in flight: H169 (EP8 terminal pending), H172 (30-EP EMA decay=0.9999), H173 (GradNorm clamp release), H174 (density-preserved PE re-allocation).
+Single-flag perturbations now fail across **6 axes** (4 structural + 1 PE-spectral + 1 LOSS = H169). Plateau-escape directions still in flight:
+- **H172** (30-EP EMA decay=0.9999) — pure regularizer, doesn't touch loss balance, mid-EP3 healthy
+- **H173** (GradNorm vol_p clamp release 0.15→0.05) — RELEASES budget, redistributes to w_cp protecting SP, FIRST orthogonal direction to "WSS-pressure-up→SP-break"
+- **H174** (density-preserved PE shifted-right) — tests whether ANY PE perturbation breaks SP regardless of density
+- **H175** (yz @ 0.05 magnitude-preserved Charbonnier coverage) — isolates coverage from magnitude, closes 2D Charbonnier cell
 
 ### H173 (frieren) — vol_p clamp probe
 

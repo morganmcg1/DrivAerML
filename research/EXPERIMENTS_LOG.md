@@ -4590,3 +4590,79 @@ The H147 stack occupies a tight Pareto knee where SP=3.5634% sits just 0.014pp i
 - σ=0.1 PE mechanism: FALSIFIED. Per-axis decomposition (fern's diagnostic discipline) gave clean rejection.
 - Wave-2 SP-floor regression now confirmed across 5 axes (4 structural + PE-allocation-with-density-loss).
 - **H174 dispatched (fern):** shifted-right PE sigmas `[0.5, 1.0, 2.0, 4.0, 8.0]` — 5 sigmas × 16/5 = 3.2 features/band (density preserved). Tests dual hypothesis: if SP also breaks under density-preserving spectral re-allocation, meta-finding extends from "structural or density-loss" to "ANY single-flag PE perturbation." If SP holds at ≤3.577%, density-preservation mechanism isolated.
+
+## 2026-05-30 07:05Z — PR #1463 H169 nezuko CLOSED NON-MERGE: wss_charb axes z→yz at SAME weight 0.10 — SP floor broken 0.116pp (6th axis), mechanism val→test divergence
+
+- `dl24-nezuko/h169-wss-charb-yz`, run `aco66tdm` (DDP8, ~5.92h wallclock, EP8 best-val EMA harvest)
+- Hypothesis: extending WSS Charbonnier coverage from z-only to yz at SAME weight 0.10 covers the second-worst axis tau_y → target axis (y) benefits without weight amplification
+- **Terminal verdict: NON-MERGE — test_WSS regress +0.128pp, test_SP floor broken +0.116pp; mechanism val→test divergence (val_y led, test_y reversed)**
+
+### Terminal SENPAI-RESULT (EP8, EMA-best checkpoint)
+
+| Metric | H169 test | H147 SOTA | Δ vs H147 | Floor cap | Status |
+|---|---:|---:|---:|---:|:--|
+| **wall_shear_rel_l2_pct (primary)** | **6.6686%** | 6.5409% | **+0.128pp** | — | regress |
+| wall_shear_x_rel_l2_pct | 5.9045% | 5.8155% | +0.0890pp | — | slight regress |
+| wall_shear_y_rel_l2_pct | **7.2271%** | 7.0556% | **+0.171pp** | — | **TARGET axis regressed** (mechanism falsified at test) |
+| wall_shear_z_rel_l2_pct | 8.7237% | 8.4882% | +0.2354pp | — | regress |
+| volume_pressure_rel_l2_pct | 3.5839% | 3.4014% | +0.1825pp | 3.643% | clears 0.059pp |
+| **surface_pressure_rel_l2_pct** | **3.6933%** | 3.5634% | +0.1299pp | **3.577%** | **BROKEN 0.116pp** |
+| abupt_axis_mean_rel_l2_pct | 5.8265% | 5.6648% | +0.1617pp | 5.844% | clears 0.018pp (tight) |
+
+### Full val trajectory EP1-EP8 (val_primary)
+
+| EP | step | WSS | WSSx | WSSy | WSSz | VP | SP | ABUPT |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10974 | 12.908 | 11.394 | 14.293 | 16.907 | 13.875 | 9.015 | 13.097 |
+| 2 | 21950 | 7.224 | 6.231 | 8.154 | 9.675 | 5.014 | 4.268 | 6.668 |
+| 3 | 32927 | 6.976 | 6.051 | 7.742 | 9.395 | 4.189 | 4.078 | 6.291 |
+| 4 | 43903 | 6.886 | — | 7.563 | 9.299 | — | — | 6.159 |
+| 5 | 54879 | 6.814 | 5.950 | 7.435 | 9.206 | 3.774 | 3.981 | 6.069 |
+| 6 | 65855 | 6.775 | 5.928 | 7.347 | 9.167 | 3.704 | 3.967 | 6.023 |
+| 7 | 76831 | 6.767 | 5.926 | 7.309 | 9.177 | 3.672 | 3.968 | 6.010 |
+| **8** | 87809 | **6.758** | 5.921 | **7.282** | 9.174 | 3.656 | 3.968 | **6.000**★ |
+
+★ = EMA-best checkpoint (selection metric val_primary/abupt_axis_mean_rel_l2_pct)
+
+### Mechanism diagnostic — val→test divergence
+
+Val: val_WSS_y LED H147 by 0.151pp at EP2, then sustained leading axis trend through EP7 (7.309 vs H147 reference ~7.43-7.50%). Mechanism prediction held during training.
+
+Test: test_WSS_y REGRESSED +0.171pp vs H147 (7.227% vs 7.056%). Complete sign reversal at val→test boundary.
+
+**Diagnosis:** the additional yz Charbonnier loss term provided overfitting signal on the val split (and on training) that did not generalize to test. The val_WSS_y leading indicator is now disqualified as a Charbonnier-coverage transfer indicator.
+
+### Loss-balance disruption + SP floor break
+
+H147's GradNorm equilibrium runs SP at +0.014pp floor cushion. H169 added additional WSS Charbonnier gradient (yz axes at same weight = effective 2× total Charbonnier contribution vs H147 z-only). This pulled GradNorm-allocated budget away from the SP head → SP regression +0.130pp → floor breach +0.116pp.
+
+### Wave-2 SP floor regression now 6 axes — RESOURCE CONSERVATION LAW
+
+| Run | Perturbation | Family | test_SP | Δ floor |
+|---|---|---|---:|---:|
+| H147 SOTA | — | — | 3.5634% | (clears 0.014pp) |
+| H164 | slices 128→192 | structural | 3.6631% | +0.086pp |
+| H165 | pe_features 16→12 | structural/PE-density | 3.6633% | +0.086pp |
+| H166 | surface_out_width 2.0→3.0 | structural | 3.6031% | +0.026pp |
+| H167 | heads 4→8 | structural | 3.6153% | +0.038pp |
+| H168 | +σ=0.1 PE band (5→6 sigmas) | PE-density-dilution | 3.6873% | +0.110pp |
+| **H169** | **wss_charb axes z→yz (2× total)** | **LOSS** | **3.6933%** | **+0.116pp** |
+
+**Joint meta-finding (sealed across STRUCTURAL + PE + LOSS families):** any perturbation that increases optimization pressure on the WSS pathway breaks the SP floor. **This is a resource conservation law, not a structural artifact** — H147's GradNorm equilibrium has 5 task budgets summing to fixed total; any WSS-side increase steals from SP+VP, and SP loses first (floor cushion only 0.014pp).
+
+### Joint Charbonnier family conclusion (3 perturbations, 3 falsifications)
+
+| H# | wss_charbonnier setting | total Charb pressure | test_WSS | Δ H147 | test_SP | floor |
+|---|---|---:|---:|---:|---:|---|
+| H147 | z @ 0.10 | 0.10 (baseline) | 6.5409 | — | 3.5634 | ✓ |
+| H161 | z @ 0.30 | 0.30 (3×) | 6.7402 | +0.199 | ? | — |
+| H169 | yz @ 0.10 | 0.20 (2×) | 6.6686 | +0.128 | **3.6933** | **❌** |
+| H175 | yz @ 0.05 | 0.10 (preserved) | — | DISPATCHED | — | — |
+
+H175 closes the 2D magnitude × coverage cell at preserved magnitude.
+
+### Conclusion / next-cycle direction
+
+- wss_charbonnier axis-coverage at SAME weight: FALSIFIED. Magnitude doubling broke SP floor; mechanism didn't transfer val→test.
+- **H175 dispatched (nezuko):** student's follow-up #1 verbatim — `wss_charbonnier_weight=0.05 axes=yz`. Preserves total Charbonnier contribution at 0.10 matching H147, isolates COVERAGE from MAGNITUDE. Three predicted outcomes: neutral, partial-win, or full-falsification of coverage direction.
+- Wave-2 plateau-escape now narrows to: H172 (EMA decay 0.9999, pure regularizer), H173 (vol_p clamp release, redistributes to w_cp protecting SP rather than starving), H174 (PE density-preserved spectral shift), H175 (magnitude-preserved coverage).
