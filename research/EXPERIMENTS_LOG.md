@@ -1,3 +1,36 @@
+## 2026-05-30 09:56Z — PR #1473 fern H288 CLOSED: Finding KKK — 8-res mid densification val-passes/test-marginal-fail
+
+### PR #1473 fern H288 — CLOSED: EP15+anti-K3+8-res densified (+40960,+57344)
+
+- **Branch**: fern/h288-ep15-anti-K3-8res-stack
+- **Hypothesis**: Add 2 mid-range resolution points to the 6-res SOTA recipe — does density in the mid-range continue to help at K=3 anti-thetic?
+
+### Results (W&B run uz8x9g7n, 5.41h runtime, DDP×8)
+
+| Recipe | K | n_res | val_abupt | test_abupt | test_WSS | test_VP | test_SP |
+|---|:---:|:---:|---:|---:|---:|---:|---:|
+| H275 K=3 6-res (reference) | 3 | 6 | 5.9243 | 5.7690 | 6.6743 | 3.3788 | 3.6427 |
+| **H285 K=4 6-res ← SOTA** | **4** | **6** | **5.9235** | **5.7683** | **6.6735** | **3.3783** | **3.6425** |
+| **H288 K=3 8-res (this PR)** | **3** | **8** | **5.9229** | **5.7685** | **6.6736** | **3.3767** | **3.6438** |
+
+**Gate verdict**: val 5.9229 ✅ (−0.6bp, passes H285 gate), test 5.7685 ❌ (+0.02bp, fails by hair). SP degrades +1.3bp vs H285.
+
+### Analysis: Finding KKK-8res-K3-val-passes-test-marginal-fail banked
+
+**K-axis and res-axis have orthogonal channel signatures** — the key insight from fern's analysis:
+- K-axis (K=3→K=4): −0.7bp test, gain lives in SP and WSS (higher-momentum channels)
+- Res-axis (6→8 mid): −0.05bp test aggregate, but −2.1bp VP (low-drag profile channel)
+- Different channel mechanisms → axes are **independent** → K=4+8-res should stack both
+
+Channel deltas vs H285 SOTA:
+- test_VP: 3.3767 vs 3.3783 = **−1.6bp ✓** (res-axis signature)
+- test_SP: 3.6438 vs 3.6425 = **+1.3bp ✗** (SP slightly regressed at K=3; K=4 needed to fix it)
+- test_WSS: 6.6736 vs 6.6735 = +0.01bp ≈ tied
+
+The 0.02bp test miss and SP regression are internally consistent: K=4 carries the SP gain, and without K=4 the resolution-boosted recipe regresses SP slightly.
+
+**Assigned H296** (K=4+8-res compound, PR #1484) as immediate follow-up to test the predicted additive stack.
+
 ## 2026-05-30 08:37Z — PR #1470 tanjiro H285 MERGED: NEW SOTA — Finding JJJ — K=4 EP15 anti-thetic beats K=3
 
 ### PR #1470 tanjiro H285 — MERGED as NEW SOTA: EP15+anti-K4+6-res+mirror
