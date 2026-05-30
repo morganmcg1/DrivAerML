@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-30 20:25Z**
+- **2026-05-30 21:15Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
@@ -32,20 +32,26 @@ w_vol_p=0.1523 at EP4 (3× floor, clamp_active=OFF throughout).
 
 ---
 
-## H172 EP20 — first run to undercut H147 EP6 reference (most consequential active result)
+## CRITICAL UPDATE (21:15Z): H172 descent STALLED at EP20→EP23 — wave-4 EMA thesis at risk
 
-**H172 (tanjiro, PR #1469, EMA decay 0.9999) at step 220346, EP~20, rt ~15.0h, `7d83go4z`:**
+**H172 (tanjiro, PR #1469, EMA decay 0.9999) at step 252,447, EP~23, rt ~17.5h, `7d83go4z`:**
 
-| Metric | H172 EP20 (val) | H147 EP6 (val) | H147 EP12 (val) | H147 EP30 terminal (test) |
-|---|---:|---:|---:|---:|
-| WSS | **6.6521** | 6.7215 | 6.5742 | 6.5409 |
-| VP | **3.5892** | 3.6549 | 3.4743 | 3.4014 |
-| SP | 3.9143 | 3.9107 | 3.8259 | 3.5634 |
-| ABU | **5.9180** | 5.9817 | 5.8288 | 5.6648 |
+| EP | step | val_WSS | val_VP | val_SP | val_ABU | EP→EP slope |
+|---:|---:|---:|---:|---:|---:|---|
+| 18 | 197,567 | 6.6554 | 3.6011 | 3.9268 | 5.9296 | — |
+| 20 | 219,519 | 6.6521 | 3.5892 | 3.9143 | 5.9180 | −0.0017pp/EP |
+| ~23 | 252,447 | **6.6566** | 3.5940 | 3.9195 | 5.9235 | **+0.0015pp/EP REVERSED** |
 
-**EP15→17 slope on val_WSS was −0.023pp/EP, but EP17→20 slowed to ~−0.0025pp/EP — descent is decelerating.** EP30 val_WSS projection: ~6.60-6.62 → test_WSS likely +0.06-0.08pp above H147 SOTA. **Closest active candidate to H147 but unlikely to beat outright** unless EMA-descent re-accelerates in the cooldown phase.
+**val_WSS went UP +0.0045pp EP20→EP23.** Within noise but materially undercuts the EP30 projection I posted at 19:15Z (6.60-6.62). Likely revised EP30: **val_WSS 6.65-6.67 → test_WSS 6.62-6.64 = +0.08-0.10pp BEHIND H147 SOTA**.
 
-H172 is the **only mechanism in flight that has materially undercut H147 mid-train references**. Wave-4 should prioritize EMA-derivative experiments.
+**Mechanism re-reading:** EMA-0.9999 produced the deepest EP15-EP20 minimum of wave-3, but the descent is NOT durable through the cosine cooldown. The underlying model continues training; as cosine LR floors out, the model's movements draw the EMA back toward worse weights. EMA-0.9999 captures the cosine descent itself, not a generalization-floor improvement. The mechanism finding tightens to: **EMA-derivative gains last only while the underlying model is actively descending.**
+
+**Implications for wave-4 H181 (EMA 0.99995):**
+- Longer averaging window (effective N=20k vs N=10k steps) might delay the same plateau by 5-10 EPs
+- But if the plateau is mechanism-bound to the cosine cooldown, longer EMA only delays the inevitable
+- H181's value is now **more diagnostic than competitive** — confirms whether EMA-derivative hits a ceiling, or just needs different averaging
+
+H172 is still **the closest active arm to H147** even at +0.08pp test_WSS. Allow to natural EP30 cap — EP25 boundary read will confirm whether this is a true stall or a temporary pause.
 
 ---
 
@@ -53,30 +59,30 @@ H172 is the **only mechanism in flight that has materially undercut H147 mid-tra
 
 Wave-3 was constructed to probe whether GradNorm restoring force (α) or floor placement could resolve the H173 VP-starvation pattern while preserving SP-protection. With H180 corrected and H178 starvation persisting, the grid verdict is settling:
 
-### Active runs (19:15Z status)
+### Active runs (21:15Z status)
 
-**H172 (tanjiro, PR #1469) — EMA decay 0.9999 — EP20 BELOW H147 EP6 references:**
-- val_WSS=6.6521, val_VP=3.5892, val_SP=3.9143, val_ABU=5.9180
-- Monotone descent through EP20 but slope decelerating EP17→EP20
-- ETA EP30 natural cap: ~23:00-00:30Z
-- Verdict pending terminal — most promising active arm
+**H172 (tanjiro, PR #1469) — EMA 0.9999 — EP23 STALLED:**
+- val_WSS=6.6566 (UP +0.0045pp from EP20 6.6521), val_VP=3.5940, val_SP=3.9195, val_ABU=5.9235
+- Descent reversed direction in cosine cooldown — see CRITICAL UPDATE section above
+- ETA EP30 natural cap: ~23:30-00:30Z
+- Revised projection: test_WSS 6.62-6.64 = NON-MERGE on WSS but possibly clears all floor caps
 
-**H176 (frieren, PR #1486) — CLOSED NON-MERGE 20:24Z — `xupvpsxg`:**
-- test_WSS=6.6790 (+0.138pp vs H147), test_VP=3.6646 (+0.022pp BREACH cap), test_SP=3.6616 (+0.085pp BREACH cap), test_ABU=5.8256 PASS
-- Worst-of-both-worlds: lost H173's SP-protection (collapsed by EP2) AND failed to fix VP starvation
-- Frontier finding: w_τ_y emerged as dominant absorber of freed budget (1.29→1.53 across 8 EPs), suggesting τ_y-pin as a future mechanism axis
-- **Wave-4 H181 (EMA decay 0.99995) DISPATCHED to frieren (PR #1503)**
+**H178 (fern, PR #1493) — vol_p_floor 0.05, α=0.5, 16-EP — EP8 complete:**
+- Step 87,851, rt 5.85h, val_WSS=6.8473 (+0.197), **val_VP=4.1338 (+0.575)**, val_SP=4.0771 (+0.212), val_ABU=6.2036
+- WSS slope EP7→EP8 flattening (−0.013pp), VP starvation persistent at +0.55-0.58pp throughout
+- 8 EPs remaining of 16-EP cosine — mechanism finding settled but harvesting for clean α/duration grid comparison
+- ETA EP16 terminal: ~22:30-23:00Z
 
-**H178 (fern, PR #1493) — vol_p_floor 0.05, α=0.5, 16-EP — EP9-ish:**
-- Step 53625, rt 3.35h, val_WSS=6.96, **val_VP=4.46 (+0.73 vs H147 EP5 ref step 54879)**
-- Worst VP performer of all three wave-3 floor-0.05 arms at comparable step
-- ETA EP16 terminal: ~21:30-22:00Z
+**H180 (nezuko, PR #1494) — vol_p_floor 0.05, α=1.0, 8-EP — EP7 complete:**
+- Step 76,831, rt 5.45h, val_WSS=6.8223 (+0.137), val_VP=3.7061 (+0.099), val_SP=4.0368 (+0.157), val_ABU=6.0774
+- w_vol_p=0.1047 at EP7 (2.1× floor, NEVER clamped in 76,830 steps) — anti-starvation mechanism intact end-to-end
+- r_vol_p DECAPPED from 5.00 cap (EP3-5) to 3.29 (EP7) — vol_p is no longer dominant under-trained task; redistributing to shear axes (w_τ_x 1.20→1.27)
+- ETA EP8 terminal + test: ~22:05-22:20Z. Linear projection EP8 val_WSS ~6.795, test likely +0.14pp NON-MERGE.
 
-**H180 (nezuko, PR #1494) — vol_p_floor 0.05, α=1.0, 8-EP — EP4 at parity on VP, persistent WSS regression:**
-- Step 46703, rt 2.93h, val_WSS=6.9241 (+0.09 vs H147), val_VP=3.8979 (+0.04), val_SP=4.0881 (+0.13)
-- w_vol_p=0.1523 (3× floor, NOT clamped) — mechanism prevents floor collapse
-- α=1.0 stabilizes VP near parity but WSS regression dominates terminal outcome
-- ETA EP8 terminal: ~22:00Z
+**H181 (frieren, PR #1503) — EMA 0.99995 — smoke launching:**
+- Smoke launched 20:58Z with H147-exact stack (lr=1e-4 — student correctly identified PR-body example listed 3e-4 but H147 config is 1e-4)
+- Orphan main `1vgmgyr2` crashed at 20:40Z due to wrong `data_root` (default fallback lacked curvature cache for runs 240/274/439) — student debugged and recovered
+- Smoke EP1 terminal ETA ~21:42Z; if smoke validates → main 30-EP launch authorized
 
 ---
 
@@ -86,24 +92,34 @@ Wave-3 was constructed to probe whether GradNorm restoring force (α) or floor p
 |---|---:|---:|---:|---|---|
 | H173 (closed) | 0.05 | 8 | 0.5 | NON-MERGE | VP breach +0.136 from floor clamping |
 | H176 (closed) | 0.10 | 8 | 0.5 | NON-MERGE 20:24Z | test_WSS +0.138; VP BREACH +0.022; SP BREACH +0.085 (worst-of-both) |
-| H178 (running) | 0.05 | 16 | 0.5 | EP9 VP +0.73 | 16-EP doesn't fix starvation |
-| H180 (running) | 0.05 | 8 | 1.0 | EP4 VP parity | α=1.0 prevents clamping; WSS +0.09 persistent |
-| H172 (running) | — | — | — | EP20 below H147 EP6 ref | EMA decay 0.9999, most productive in wave |
+| H178 (running) | 0.05 | 16 | 0.5 | EP8 VP +0.575 | 16-EP doesn't fix starvation (worst VP of all 4) |
+| H180 (running) | 0.05 | 8 | 1.0 | EP7 VP +0.099 | α=1.0 prevents clamping; WSS +0.14 persistent |
+| H172 (running) | — | — | — | EP23 STALLED | EMA decay 0.9999, descent reversed in cooldown |
 
-**Wave-3 conclusion (provisional, pending H172 terminal):** GradNorm-α grid does NOT produce a H147-beater. The α=1.0 + floor=0.05 combination resolves the H173 clamping pathology but introduces a persistent +0.05-0.09pp WSS regression. The productive lever in this wave is **EMA-0.9999 (H172)**, not GradNorm-α.
+**Wave-3 conclusion (revised 21:15Z, pending H172 terminal):** GradNorm-α grid does NOT produce a H147-beater. The α=1.0 + floor=0.05 combination resolves the H173 clamping pathology but introduces a persistent +0.05-0.15pp WSS regression. The productive lever appeared to be **EMA-0.9999 (H172)** but the EP20→EP23 stall casts doubt on durability — EMA captures cosine descent, not a true generalization-floor improvement. Wave-4 must validate whether longer averaging (H181 0.99995) extends descent durability or hits the same ceiling.
 
 ---
 
-## Wave-4 design queue (REVISED, EMA-derivative focused)
+## Wave-4 design queue (REVISED 21:15Z, contingency for H172 stall)
 
-Revised based on the H180 walkback and H172 leadership. Drop α-grid follow-ups; pivot to EMA + LR + cosine combinations.
+Revised based on H180 walkback, H172 EP20→EP23 stall, and H172 leadership weakening. Two paths forward depending on H172 EP30 terminal:
 
-1. **H181: EMA decay 0.99995** (frieren, after H176 terminal ~20:00Z) — push past H172's 0.9999 to see if longer averaging window extracts more descent
-2. **H182: H172 stack + LR 1.3× peak** (nezuko, after H180 terminal ~22:00Z) — does higher peak LR + EMA 0.9999 give deeper minima
-3. **H183: H172 stack + cosine 30→40 EP within 24h budget** (fern, after H178 terminal ~21:30Z) — extended cosine descent with EMA averaging
-4. **H184: H172 stack + structural perturbation** (tanjiro, after H172 terminal ~00:00Z) — compound EMA with one architectural change (e.g., attention heads, layer count)
+**Path A — H172 terminal val_WSS ≤ 6.62 (productive descent recovers):**
+1. **H181: EMA decay 0.99995** (frieren, in flight as smoke) — push past H172's 0.9999
+2. **H182: H172 stack + LR 1.3× peak** (nezuko, after H180 terminal ~22:00Z)
+3. **H183: H172 stack + extended cosine 30 EP** (fern, after H178 terminal ~22:30Z) — cap at ≤32 EP; 40-EP exceeds 24h budget at H172's rate
+4. **H184: H172 stack + structural perturbation** (tanjiro, after H172 terminal ~00:00Z) — verify `--model-heads` flag, smoke first
 
-Pre-condition: H172 must finish productive (val_WSS ≤ 6.62 at EP30). If H172 terminal is WSS ≥ 6.65, EMA-derivative thesis weakens and we revert to architecture/data-representation exploration.
+**Path B — H172 terminal val_WSS ≥ 6.65 (EMA-derivative thesis falsified):**
+- Allow H181 to run (already in flight, useful diagnostic) — if H181 also stalls, EMA-derivative is settled NON-PRODUCTIVE
+- Pivot wave-5 to architecture/data-representation:
+  - Attention head count or layer width (structural)
+  - Y-symmetry augmentation variants (training data)
+  - Different LR schedule families (WSD, one-cycle, restart)
+  - τ_y-pin mechanism (from H176 finding: w_τ_y emerged as dominant freed-budget absorber)
+- Dispatch researcher-agent for fresh wave-5 hypotheses if H172 terminal confirms stall
+
+**Plateau Protocol check:** H167-H180 = 14+ consecutive experiments without beating H147. If H172 + H181 both fail to beat, we are in formal plateau and must escalate strategy tier per CLAUDE.md.
 
 ---
 
@@ -117,15 +133,15 @@ Pre-condition: H172 must finish productive (val_WSS ≤ 6.62 at EP30). If H172 t
 6. DDP8 only (no split GPU arms)
 7. Ensembles BANNED
 
-## Terminations ETA cluster (remaining)
+## Terminations ETA cluster (21:15Z)
 
 | Run | PR | Student | ETA | Action |
 |---|---|---|---|---|
 | H176 | #1486 | frieren | ✓ CLOSED 20:24Z | H181 EMA 0.99995 dispatched (PR #1503) |
-| H178 | #1493 | fern | ~21:30Z | NON-MERGE VP breach expected; dispatch H183 EMA+extended-cosine (cap ≤32 EP) |
-| H180 | #1494 | nezuko | ~22:00Z | NON-MERGE WSS regression; dispatch H182 EMA+LR 1.3× |
-| H172 | #1469 | tanjiro | ~23:00-00:30Z | Verdict-dependent; if productive → dispatch H184 EMA+heads (verify `--model-heads` flag first) |
-| H181 | #1503 | frieren | ~21:00Z + 20h main | smoke first, then main 30-EP |
+| H181 smoke | #1503 | frieren | ~21:42Z | authorize main 30-EP after smoke EP1 validates |
+| H180 | #1494 | nezuko | ~22:05-22:20Z | NON-MERGE WSS +0.14 expected; dispatch H182 EMA+LR 1.3× |
+| H178 | #1493 | fern | ~22:30-23:00Z | NON-MERGE VP breach expected; dispatch H183 EMA+extended-cosine (cap ≤32 EP) |
+| H172 | #1469 | tanjiro | ~23:30-00:30Z | Verdict-dependent on EP25-EP30 recovery; if stall persists → close NON-MERGE, dispatch researcher-agent for wave-5 |
 
 ## H147 actual EP boundaries (from k6q4c3on val history, authoritative reference)
 
