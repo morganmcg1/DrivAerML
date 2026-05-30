@@ -1,8 +1,11 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 13:05Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 13:28Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
 
-**🚨 HOT: Tanjiro H295 K=5 val=5.9231 PASSES gate by 0.4bp** (W&B uf17vdab). Test arm in progress, ETA ~14:34Z. SENPAI_TIMEOUT cuts at ~14:46Z (tight). If test < 5.7683 → NEW SOTA, merge PR #1483.
+**🔥🔥 TWO val winners pending test arms:**
+- **Fern H296 K=4+8-res compound val=5.9221** (W&B at1jadnv) → **−1.4bp vs H285 gate** — STRONGEST val candidate (PR #1484)
+- **Tanjiro H295 K=5 val=5.9231** (W&B uf17vdab) → −0.4bp vs gate (PR #1483)
+- Both compound/extension gains stack as Finding KKK predicted. Test arms ETA 14:00-15:00Z. **First test arm to land AND pass <5.7683 = merge candidate.**
 
 **4 students re-assigned** (PRs #1487-1490) after H286/H292/H293/H294 closed 12:13-12:26Z with Findings MMM/OOO/PPP/QQQ.
 
@@ -29,7 +32,7 @@
 | PR | Student | Hypothesis | val_abupt | Status | ETA |
 |---|---|---|---:|---|---|
 | **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | **5.9231 ✓** | 🟢 uf17vdab — **val PASSES gate −0.4bp**, test arm running | ~14:34Z |
-| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | — | 🟡 at1jadnv running, val arm in progress | ~13:30Z |
+| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | **5.9221 ✓✓** | 🟢 at1jadnv — **val BEATS gate −1.4bp, BEATS H295 by 1.0bp** — STRONGEST candidate | test arm ~16:30Z |
 | **#1485** | **thorfinn** | **H297: Per-layer noise (σ_attn=0, σ_mlp=5e-4, K=4)** | — | 🟡 1ie6ksw6 running (started 11:34Z, ETA ~16:48Z) | ~16:48Z |
 | **#1477** | **frieren** | **H291: 8-res LOWER test relaunch** | 5.9252 ✗ | 🟡 rowu861p test-only (primary crashed), close pending test result | ~13:30Z |
 | **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ_coord∈{1e-4,5e-4,1e-3})** | — | 🆕 assigned 13:05Z (just picked up) | ~19:00Z |
