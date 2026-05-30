@@ -33,6 +33,7 @@ Modes:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import time
 from dataclasses import asdict, dataclass, fields
@@ -88,6 +89,19 @@ class EvalConfig:
     # number of forward passes per (res, mirror) is 2 * weight_noise_passes.
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
+
+    # H284: Sobol QMC weight perturbation. ``weight_noise_mode`` selects the
+    # eps generator: "random" (H252 baseline, per-tensor i.i.d. Gaussian via
+    # torch.Generator seeds) or "sobol" (K scrambled Sobol latents projected
+    # to full parameter space via a fixed seeded Gaussian random projection).
+    # Sobol covers the weight-perturbation ball with star-discrepancy
+    # O((log K)^d / K) instead of i.i.d. O(1/sqrt K). For anti-thetic K=3,
+    # we draw K=3 Sobol eps vectors once and reuse each for the (+ε, −ε) pair.
+    weight_noise_mode: str = "random"
+    sobol_proj_dim: int = 1024
+    sobol_seed: int = 43
+    sobol_B_seed: int = 42
+    sobol_chunk_size: int = 65536
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -280,6 +294,127 @@ def perturb_relative_(
         p.data.copy_(clean_p).add_(noise)
 
 
+# --- Sobol QMC helpers (H284 / Finding UU, ported verbatim from eval_h271_sobol_tta.py) ---
+
+
+def _draw_sobol_std_normal(
+    *,
+    n_noise_passes: int,
+    proj_dim: int,
+    sobol_seed: int,
+) -> torch.Tensor:
+    """Draw ``n_noise_passes`` standard-normal vectors of length ``proj_dim`` via
+    scrambled Sobol + inverse-normal CDF.
+
+    Returns a ``(K, proj_dim)`` float32 tensor on CPU.
+    """
+    from torch.quasirandom import SobolEngine  # noqa: PLC0415
+    from torch.distributions import Normal  # noqa: PLC0415
+
+    engine = SobolEngine(dimension=proj_dim, scramble=True, seed=sobol_seed)
+    u = engine.draw(n_noise_passes).to(torch.float32)
+    u = u.clamp(1e-6, 1.0 - 1e-6)
+    return Normal(0.0, 1.0).icdf(u)
+
+
+def _sobol_flat_eps(
+    *,
+    n_noise_passes: int,
+    total_params: int,
+    proj_dim: int,
+    sobol_seed: int,
+    B_seed: int,
+    chunk_size: int,
+) -> torch.Tensor:
+    """Return ``(K, total_params)`` Sobol-derived standard-normal samples.
+
+    Computed as ``normal_pts @ B`` with ``normal_pts ~`` scrambled Sobol icdf
+    and ``B[i, j] ~ N(0, 1/proj_dim)``. The ``B`` matrix is generated in
+    column chunks (``proj_dim x chunk_size``) so peak memory stays bounded.
+    """
+    normal_pts = _draw_sobol_std_normal(
+        n_noise_passes=n_noise_passes,
+        proj_dim=proj_dim,
+        sobol_seed=sobol_seed,
+    )  # (K, proj_dim) cpu float32
+    flat_eps = torch.empty(n_noise_passes, total_params, dtype=torch.float32)
+    g = torch.Generator(device="cpu")
+    g.manual_seed(B_seed)
+    inv_sqrt_d = 1.0 / math.sqrt(proj_dim)
+    for start in range(0, total_params, chunk_size):
+        end = min(start + chunk_size, total_params)
+        B_chunk = torch.randn(
+            proj_dim, end - start, generator=g, dtype=torch.float32
+        ).mul_(inv_sqrt_d)
+        flat_eps[:, start:end] = normal_pts @ B_chunk
+    return flat_eps
+
+
+@torch.no_grad()
+def perturb_relative_with_flat_eps_(
+    module: nn.Module,
+    clean: dict[str, torch.Tensor],
+    flat_eps_k: torch.Tensor,
+    sigma: float,
+    sign: float,
+    device: torch.device,
+) -> None:
+    """p <- clean_p + sign * sigma * |clean_p| * eps_slice, with eps from a
+    precomputed Sobol-derived flat vector.
+
+    ``flat_eps_k`` is a CPU float32 vector of length ``sum(p.numel() for fp p)``,
+    iterated in ``module.named_parameters()`` order. Matched ``sign=±1.0`` calls
+    sharing the same ``flat_eps_k`` produce a Sobol anti-thetic pair whose linear
+    Taylor term cancels (Finding NN / H274) while keeping QMC coverage
+    (Finding UU / H271).
+    """
+    offset = 0
+    for name, p in module.named_parameters():
+        if not p.dtype.is_floating_point:
+            continue
+        clean_p = clean[name]
+        n = clean_p.numel()
+        eps_slice = (
+            flat_eps_k[offset : offset + n]
+            .view_as(clean_p)
+            .to(device=device, dtype=p.dtype)
+        )
+        offset += n
+        noise = eps_slice.mul(sigma * sign).mul_(clean_p.abs())
+        p.data.copy_(clean_p).add_(noise)
+    if offset != flat_eps_k.numel():
+        raise RuntimeError(
+            f"Sobol flat eps size mismatch: consumed {offset} != total {flat_eps_k.numel()}"
+        )
+
+
+def precompute_sobol_eps_per_k(
+    *,
+    clean: dict[str, torch.Tensor],
+    K_passes: int,
+    proj_dim: int,
+    sobol_seed: int,
+    B_seed: int,
+    chunk_size: int,
+) -> tuple[torch.Tensor, int]:
+    """Pre-compute ``K_passes`` Sobol flat-eps vectors once.
+
+    Returns ``(flat_eps_KxP, total_params)`` where ``flat_eps_KxP[k]`` is the
+    standard-normal-like vector used for the k-th perturbation. The same draw
+    is shared between the +ε and −ε arms of an anti-thetic pair.
+    """
+    total_params = sum(v.numel() for v in clean.values())
+    flat_eps = _sobol_flat_eps(
+        n_noise_passes=K_passes,
+        total_params=total_params,
+        proj_dim=proj_dim,
+        sobol_seed=sobol_seed,
+        B_seed=B_seed,
+        chunk_size=chunk_size,
+    )
+    return flat_eps, total_params
+
+
 # --- per-case stacked TTA ---
 
 
@@ -299,6 +434,7 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
+    sobol_flat_eps: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
@@ -308,6 +444,11 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    When ``sobol_flat_eps`` is provided (shape ``(K_passes, total_params)``),
+    the eps draws come from a precomputed scrambled Sobol QMC sequence instead
+    of per-(k) i.i.d. Gaussian (Finding UU / H271 + H284). Anti-thetic pairs
+    still share the same eps so the linear Taylor term cancels.
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -339,10 +480,20 @@ def process_case_stacked(
         # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
         t_p = time.time()
         if sigma > 0.0:
-            seed = (seed_base + k) * 100003
-            perturb_relative_(
-                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
-            )
+            if sobol_flat_eps is not None:
+                perturb_relative_with_flat_eps_(
+                    eval_module,
+                    clean,
+                    flat_eps_k=sobol_flat_eps[k],
+                    sigma=sigma,
+                    sign=sign,
+                    device=device,
+                )
+            else:
+                seed = (seed_base + k) * 100003
+                perturb_relative_(
+                    eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
+                )
         else:
             restore_clean_params(eval_module, clean)
         timing["perturb_seconds"] += time.time() - t_p
@@ -546,6 +697,7 @@ def evaluate_split_stacked(
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
+    sobol_flat_eps: torch.Tensor | None = None,
 ) -> dict[str, float]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -577,6 +729,7 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            sobol_flat_eps=sobol_flat_eps,
         )
         add_case_to_accumulator(
             acc,
@@ -665,6 +818,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
+    valid_noise_modes = ("random", "sobol")
+    if cfg.weight_noise_mode not in valid_noise_modes:
+        raise ValueError(
+            f"Unknown weight_noise_mode: {cfg.weight_noise_mode!r} "
+            f"(valid: {valid_noise_modes})"
+        )
+
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
@@ -675,8 +835,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-            f"seed_base={cfg.weight_noise_seed_base}"
+            f"seed_base={cfg.weight_noise_seed_base} "
+            f"noise_mode={cfg.weight_noise_mode}"
         )
+        if cfg.weight_noise_mode == "sobol":
+            print(
+                f"Sobol QMC: proj_dim={cfg.sobol_proj_dim} "
+                f"sobol_seed={cfg.sobol_seed} B_seed={cfg.sobol_B_seed} "
+                f"chunk_size={cfg.sobol_chunk_size}"
+            )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
     if state.is_main:
@@ -717,6 +884,23 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_perturbed = sum(t.numel() for t in clean.values())
         print(f"Snapshotted {len(clean)} fp tensors ({n_perturbed:,} elements)")
 
+    sobol_flat_eps: torch.Tensor | None = None
+    if cfg.weight_noise_mode == "sobol" and cfg.weight_noise_sigma > 0.0:
+        t_sobol = time.time()
+        sobol_flat_eps, total_params = precompute_sobol_eps_per_k(
+            clean=clean,
+            K_passes=cfg.weight_noise_passes,
+            proj_dim=cfg.sobol_proj_dim,
+            sobol_seed=cfg.sobol_seed,
+            B_seed=cfg.sobol_B_seed,
+            chunk_size=cfg.sobol_chunk_size,
+        )
+        if state.is_main:
+            print(
+                f"Sobol flat eps precomputed: shape={tuple(sobol_flat_eps.shape)} "
+                f"total_params={total_params:,} took {time.time() - t_sobol:.1f}s"
+            )
+
     val_case_ids = store.case_ids("val")
     test_case_ids = store.case_ids("test")
     if cfg.debug:
@@ -755,7 +939,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "mirror",
                 "eval-only",
                 cfg.agent,
-            ],
+                f"noise-mode-{cfg.weight_noise_mode}",
+            ] + (["h284", "sobol-anti"] if cfg.weight_noise_mode == "sobol" else []),
             reinit="finish_previous",
         )
 
@@ -807,6 +992,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
+                sobol_flat_eps=sobol_flat_eps,
             )
             dt = time.time() - t0
             if state.is_main:
