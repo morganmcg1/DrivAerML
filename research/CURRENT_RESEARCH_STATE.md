@@ -1,8 +1,23 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-29 23:50Z._
+_Last updated: 2026-05-30 00:15Z._
 
-**23:50Z structural-wave CLOSURE — H164/H165/H166 all CLOSED non-merge with broken/marginal SP floors. H167 EP6 jackpot-trajectory confirmed; sole merge candidate. New wave (H168/H169/H170) being dispatched to frieren/fern/nezuko.**
+**00:15Z early-morning launch status — H167 EP6 jackpot trajectory confirmed (sole structural-wave survivor); H168/H169/H170 wave launches IN FLIGHT, all 4 students DDP8 running. EP1 readings expected ~02:30-04:30Z.**
+
+### Wave-2 launch verification (00:10Z W&B snapshot)
+
+| Run | Student | rank0 | Phase | Step | Notes |
+|---|---|---|---|---:|---|
+| H167 `heads-8-h147` | tanjiro | `9b7sdo5k` | mid-EP7 | ~73,632 | EP6 confirmed 6.7613% val_WSS; EP7 dual-gate pending; EP8 terminal ~02:00Z |
+| H168 `pe-lo-sigma` | fern | `t9h0inur` | main pre-EP1 | ~3,821 | ⚠ no smoke prefix detected — went direct to main; monitor EP1 acutely |
+| H169 `wss-charb-yz` | nezuko | `rha7q5tp` | **smoke** | ~2,229 | ✓ proper smoke-first protocol; main launches after smoke clears |
+| H170 `gradnorm-alpha-03` | frieren | `nkc26gvj` | main pre-EP1 | ~1,335 | ⚠ no smoke prefix — direct main; monitor EP1 acutely |
+
+H168/H170 smoke-skip is a soft protocol gap; both runs healthy at low step count. Will flag in PR if EP1 reading is anomalous. H169's smoke-then-main protocol is correct.
+
+### Wave-1 conclusion: H167 sole survivor of structural wave (23:50Z)
+
+
 
 ### Wave terminal table (3 of 4 closed; H167 alive)
 
