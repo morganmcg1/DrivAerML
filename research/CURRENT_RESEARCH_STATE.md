@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-29 23:40Z | Branch: `tay` | **SOTA: H274 EP13+Anti-K3+6-res+mirror (PR #1454)** | Round 4k
+**Updated**: 2026-05-30 00:05Z | Branch: `tay` | **SOTA: H274 EP13+Anti-K3+6-res+mirror (PR #1454)** | Round 4k
 
 ---
 
@@ -20,22 +20,20 @@
 
 ---
 
-## Active Fleet (as of 23:40Z — 8 students all active)
+## Active Fleet (as of 00:05Z — 8 students all active, alphonse reassigned H282)
 
 | PR | Student | Hypothesis | Status | val | ETA |
 |---|---|---|---|---|---|
-| **#1448** | **alphonse** | **H269: EP13+K=10+6-res+mirror** | 🟢 test running | 5.9330 | ~00:15Z |
 | **#1455** | **edward** | **H275: EP15+anti-K=3+6-res+mirror** | 🟡 running | — | ~01:00Z |
 | **#1456** | **thorfinn** | **H276: EP15+σ=3e-4+K=5+6-res+mirror** | 🟡 running | — | ~01:20Z |
 | **#1457** | **tanjiro** | **H277: EP15+σ=3e-4+anti-K=3+6-res+mirror** | 🟡 running | — | ~01:05Z |
 | **#1458** | **askeladd** | **H278: EP13+anti-K=4 pairs (8p)+6-res+mirror** | 🟡 running | — | ~02:30Z |
 | **#1459** | **frieren** | **H279: EP15+Sobol-K5+6-res+mirror** | 🟡 running | — | ~02:00Z |
 | **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟡 running | — | ~05:30Z |
-| **#1461** | **fern** | **H281: EP13+anti-K3+σ=3e-4+6-res+mirror** | 🟡 just assigned | — | ~03:40Z |
+| **#1461** | **fern** | **H281: EP13+anti-K3+σ=3e-4+6-res+mirror** | 🟡 running | — | ~03:40Z |
+| **TBD** | **alphonse** | **H282: EP13+anti-K=2 pairs (4p)+6-res+mirror** | 🆕 assigning | — | ~02:30Z |
 
 **Gate**: val < **5.9322** AND test < **5.7763**
-
-**Note on alphonse H269**: val 5.9330 is ABOVE new gate (5.9322). Val won't clear. But test result is informative for the K=10 random K-curve (completing the picture of K-scaling in stacked context). Close if test misses gate; bank K=10 K-curve data.
 
 ---
 
@@ -43,6 +41,7 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1448 alphonse H269 | EP13+K=10 random stacked | **Finding WW-antithetic-dominates-K-scaling** (close, +0.15bp gate) | 5.9330 | 5.7778 |
 | #1454 fern H274 | EP13+anti-K=3 stacked | **MERGED as SOTA** | 5.9322 | 5.7763 |
 | #1451 frieren H271 | EP13+Sobol K=5 stacked | **MERGED** (prior SOTA, now superseded by H274) | 5.9368 | 5.7797 |
 | #1452 nezuko H272 | Hutchinson σ-scaling | **Finding TT-Hutchinson-shrinkage** | 5.9507 | 5.7944 |
@@ -52,10 +51,11 @@
 
 ---
 
-## Findings Bank (25 banked)
+## Findings Bank (26 banked)
 
 | ID | Source | Summary |
 |---|---|---|
+| **WW-antithetic-dominates-K-scaling** | H269 alphonse (closed 00:02Z) | Random K=10 (10p) cannot match anti-K=3 (6p) on any channel in EP13+stack; 67% K-multiplication leaves +0.15bp test gap. Anti-thetic structural advantage > random K-scaling efficiency |
 | **VV-antithetic-stacked** | H274 fern (merged 23:35Z) | EP13 anti-K=3 (72p) beats Sobol K=5 (60p) on all channels; −8.4bp test vs H253 random K=5; linear Taylor cancellation survives 12×(res,mirror) averaging |
 | **UU-Sobol-QMC** | H271 frieren (merged 22:50Z) | Sobol K=5 QMC (proj_dim=1024) beats random K=5 uniform −0.5bp/ch; test_WSS −5.0bp |
 | **TT-Hutchinson** | H272 nezuko | β=1e4 σ-shrinkage: 85% params at σ<0.5·σ_base, collapses diversity |
@@ -88,7 +88,8 @@ After current round resolves:
 | EP13 + Sobol QMC K=5 + 6-res + mirror | ✓ H271 val 5.9368 / test 5.7797 |
 | EP15 + K=5 random + 6-res + mirror | ✓ H267 val 5.9367 / test 5.7825 |
 | EP13 + K=5 random + 6-res + mirror | ✓ H253 val 5.9418 / test 5.7847 |
-| EP13 + K=10 random + 6-res + mirror | 🟢 H269 alphonse val 5.9330 (val above gate) |
+| EP13 + K=10 random + 6-res + mirror | ✗ H269 val 5.9330 / test 5.7778 — Finding WW (gates +0.08/+0.15bp) |
+| EP13 + anti-thetic K=2 pairs (4p) + 6-res + mirror | 🆕 H282 alphonse (assigning) |
 | EP15 + anti-thetic K=3 + 6-res + mirror | 🟡 H275 edward (running) |
 | EP15 + σ=3e-4 + K=5 random + 6-res + mirror | 🟡 H276 thorfinn (running) |
 | EP15 + σ=3e-4 + anti-thetic K=3 + 6-res + mirror | 🟡 H277 tanjiro (running) |

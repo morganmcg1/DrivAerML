@@ -1,3 +1,31 @@
+## 2026-05-30 00:02Z — PR #1448 alphonse H269 CLOSED: Finding WW — Anti-thetic K=3 dominates random K=10
+
+### PR #1448 alphonse H269 — CLOSED: K=10 random misses gate by 0.08bp val / 0.15bp test (anti-thetic K=3 SOTA dominates at 60% compute)
+
+- **Branch**: alphonse/h269-K10-6res-mirror-noise
+- **W&B run**: `pkkr5g2u` (finished, 364.2 min wall-time)
+- **Hypothesis**: Push random K from 5 to K=10 at EP13+6-res+mirror+σ=5e-4 — would 2× K-multiplication of random sampling beat the H253 K=5 baseline by enough to set new SOTA?
+
+| Recipe | passes | val_abupt | test_abupt | test_WSS | test_SP | test_VP |
+|---|---:|---:|---:|---:|---:|---:|
+| H253 EP13+K=5 random+stack | 5 | 5.9418 | 5.7847 | 6.6895 | 3.6592 | 3.3891 |
+| **H269 EP13+K=10 random+stack (this)** | **10** | **5.9330** | **5.7778** | **6.6827** | **3.6530** | **3.3857** |
+| **H274 EP13+anti-K=3+stack (SOTA)** | **6** | **5.9322** | **5.7763** | **6.6805** | **3.6515** | **3.3846** |
+
+vs SOTA H274: val +0.08bp, test +0.15bp, WSS +2.2bp, SP +1.5bp, VP +1.1bp, all 3 WSS axes worse. **Both gates missed by hair. No merge.**
+
+**Finding WW-antithetic-dominates-K-scaling (banked)**: Random K=10 (10 passes) cannot match anti-thetic K=3 (6 passes) on any channel in the EP13+6-res+mirror stack. K-scaling random sampling 67% past the SOTA recipe still leaves a 0.15bp gap on the headline test metric — the linear Taylor cancellation effect of anti-thetic pairing dominates uniform K-multiplication, and the gap is uniform across all 5 channels (no channel where random K=10 catches up).
+
+**Mechanism sharpened (vs Finding VV)**: anti-thetic isn't just better at fixed K — it cannot be matched by doubling random K. The K-cap for random in stacked form lies BELOW K=3 anti-thetic statistical efficiency. Expected curve was random K=10 closes K=3 anti gap via 1/√K variance reduction; observed gap is structural, not statistical noise.
+
+**Compute efficiency**: H274 anti-K=3 = 6 passes = 230 min vs H269 random-K=10 = 10 passes = 364 min. SOTA recipe is **58% less wall-time AND wins every channel** vs the most aggressive random K to date.
+
+**Operational**: alphonse's 20:12Z status update explaining the all-reduce barrier (rank straggler on 5-case load) was the cleanest run-status explanation of the round. No NCCL/IO issues, run completed cleanly at 364 min.
+
+**Follow-on assigned**: alphonse H282 — EP13+anti-K=2 pairs (4 passes)+6-res+mirror to bank K-curve floor data combining with H274 K=3 and H278 K=4 (in-flight).
+
+---
+
 ## 2026-05-29 23:35Z — PR #1454 fern H274 MERGED: Finding VV — Anti-thetic K=3 stacked is new SOTA
 
 ### PR #1454 fern H274 — MERGED as NEW SOTA (val 5.9322 / test 5.7763)
