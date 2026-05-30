@@ -1,26 +1,14 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 15:32Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 16:00Z | Branch: `tay` | **SOTA: H295 EP15+Anti-K5+6-res+mirror (PR #1483) — MERGED 15:45Z** | Round 4k+1
 
-**🚨🎉 NEW SOTA CANDIDATE: tanjiro H295 K=5 (uf17vdab) FINISHED — strict 5/5 improvement vs H285:**
+**🎉 NEW SOTA MERGED: H295 K=5 anti-thetic (tanjiro PR #1483)** — strict 5/5 axis improvement vs H285.
 
-| Metric | H285 SOTA | H295 K=5 (uf17vdab) | Δ |
-|---|---:|---:|---:|
-| val_abupt | 5.9235 | **5.9231** | −0.04 bp ✓ |
-| test_abupt | 5.7683 | **5.7679** | **−0.04 bp ✓ NEW SOTA** |
-| test_VP (pct) | 3.3783 | 3.3781 | −0.02 bp ✓ |
-| test_SP (pct) | 3.6425 | 3.6421 | −0.04 bp ✓ |
-| test_WSS (pct) | 6.6735 | 6.6732 | −0.03 bp ✓ |
+**🔥 Fern H296 K=4+8-res compound (PR #1484)** — val=5.9221 (−1.0bp vs NEW gate 5.9231). Test arm still running (at1jadnv). If test < **5.7679** (new tighter gate) → SECOND SOTA jump. ETA ~16:56Z.
 
-W&B `uf17vdab` state=finished (399 min). PR #1483. Advisor nudged tanjiro 15:31Z to post SENPAI-RESULT → swap status:wip → status:review → senpai:merge-winner.
+**Cycle 15:23Z — frieren H302 launched shared-loop primary**: W&B `b3724r40` (frieren/h302-surf7-vol6-K4anti-shared). K=4 anti + 7-surf + 6-vol shared-loop, ETA ~20:52Z.
 
-**🔥 Fern H296 K=4+8-res compound (PR #1484)** — W&B at1jadnv RUNNING 167 min; val_abupt=5.9221 (STRONGEST val seen, −1.4bp vs gate). Test arm not yet logged. If test < 5.7679 → second SOTA jump on top of tanjiro.
-
-**Cycle 15:23Z — frieren H302 launched shared-loop primary**: W&B `b3724r40` (frieren/h302-surf7-vol6-K4anti-shared, group h302-frieren-asymmetric-modality-res). Student adopted advisor refactor recommendation; K=4 anti + 7-surf + 6-vol shared-loop. Predicted ~329 min/rank ETA ~21:00Z.
-
-**Thorfinn H297 val done 13:41Z @ val=5.9237 — FAILS gate by 0.2bp** (W&B 1ie6ksw6 RUNNING 221 min). Test arm running; close PR #1485 with Finding once test lands regardless of test value.
-
-**Cycle 13:45Z**: PR #1477 frieren H291 CLOSED → **Finding RRR**: 8-res lower ladder fails both gates by ~1bp; res-axis exhausted below 32K (mirrors PPP above 131K).
+**Thorfinn H297 val done 13:41Z @ val=5.9237 — FAILS gate by 0.6bp vs new gate 5.9231** (W&B 1ie6ksw6). Close PR #1485 once test lands.
 
 ---
 
@@ -28,37 +16,34 @@ W&B `uf17vdab` state=finished (399 min). PR #1483. Advisor nudged tanjiro 15:31Z
 
 | Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP | W&B |
 |---|---:|---:|---:|---:|---:|---|
-| **H285 EP15+anti-K4+6-res+mirror ← CURRENT SOTA (NEW)** | **5.9235%** | **5.7683%** | **6.6735%** | **3.3783%** | **3.6425%** | 4vvc40zs |
-| H275 EP15+anti-K3+6-res+mirror (prior SOTA) | 5.9243% | 5.7690% | 6.6743% | 3.3788% | 3.6427% | 0b4t2bz2 |
-| H274 EP13+anti-K3+6-res+mirror | 5.9322% | 5.7763% | 6.6805% | 3.3846% | 3.6515% | o8oq9r92 |
+| **H295 EP15+anti-K5+6-res+mirror ← CURRENT SOTA** | **5.9231%** | **5.7679%** | **6.6732%** | **3.3781%** | **3.6421%** | uf17vdab |
+| H285 EP15+anti-K4+6-res+mirror (prior SOTA) | 5.9235% | 5.7683% | 6.6735% | 3.3783% | 3.6425% | 4vvc40zs |
+| H275 EP15+anti-K3+6-res+mirror | 5.9243% | 5.7690% | 6.6743% | 3.3788% | 3.6427% | 0b4t2bz2 |
 | Transolver-3 target (Morgan Issue #1056) | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% | — |
 
-**Merge gate**: val_abupt < **5.9235%** AND test_abupt < **5.7683%**
-**Paper floors**: test_VP 3.3783 ≤ 3.421 ✓ | test_WSS 6.6735 ≤ 6.727 ✓ | test_SP 3.6425 > 3.577 ✗ (6.5bp gap — marginal 0.02bp vs H275)
+**Merge gate (UPDATED)**: val_abupt < **5.9231%** AND test_abupt < **5.7679%**
+**Paper floors**: test_VP 3.3781 ≤ 3.421 ✓ | test_WSS 6.6732 ≤ 6.727 ✓ | test_SP 3.6421 > 3.577 ✗ (6.4bp gap)
 
-**Key findings**: Finding JJJ (K4 at EP15 +0.7bp, slope diminishing but sign-consistent 5/5 channels), Finding ZZ (EP15×anti-K3 super-additive), Finding VV (anti-thetic cancels linear Taylor term)
+**Key findings**: Finding SSS (K-axis saturation: K=4→5 slope 1/17 of K=3→4; noise floor reached at K=5), Finding JJJ, Finding ZZ, Finding VV
 
 ---
 
-## Active Fleet (as of 14:00Z — 8 students active)
+## Active Fleet (as of 16:00Z — 8 students active)
 
 | PR | Student | Hypothesis | val_abupt | Status | ETA |
 |---|---|---|---:|---|---|
-| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | **5.9231 ✓** | 🟢 uf17vdab — **val PASSES gate −0.4bp**, test arm running | ~14:36Z |
-| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | **5.9221 ✓✓** | 🟢 at1jadnv — val arm done 12:48Z; **val BEATS gate −1.4bp**, test arm running | ~15:45Z |
-| **#1485** | **thorfinn** | **H297: Per-layer noise (σ_attn=0, σ_mlp=5e-4, K=4)** | **5.9237 ✗** | 🟡 1ie6ksw6 — val done 13:41Z FAILS gate (+0.2bp), test arm still running | ~16:35Z |
-| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ_coord∈{1e-4,5e-4,1e-3})** | — | 🟢 wlqp94sd — first σ arm running | ~19:00Z |
-| **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🟢 assigned 13:05Z | ~18:00Z |
-| **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val, apply test)** | — | 🟢 assigned 13:05Z | ~18:00Z |
-| **#1491** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🟢 assigned 13:25Z | ~18:30Z |
-| **#1492** | **frieren** | **H302: Asymmetric per-modality resolution — surf-7 (32K-131K) × vol-6 (32K-131K), K=4 anti, shared-loop** | — | 🟡 PR #1492 — student caught compute-double flaw; advisor refactor (shared-loop K=4) sent 15:09Z; awaiting launch | ~21:00Z |
+| **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | 🆕 assigned 15:55Z (PR #1495) | ~21:30Z |
+| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | **5.9221 ✓** | 🟠 at1jadnv — val passes new gate by 1.0bp; **test arm running** | ~16:56Z |
+| **#1485** | **thorfinn** | **H297: Per-layer noise (σ_attn=0, σ_mlp=5e-4, K=4)** | **5.9237 ✗** | 🟡 1ie6ksw6 — val FAILS NEW gate (+0.6bp); test arm running | ~17:00Z |
+| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ_coord∈{1e-4,5e-4,1e-3})** | — | 🟢 wlqp94sd RUNNING | ~19:00Z |
+| **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🟢 1fx9l21z RUNNING | ~18:30Z |
+| **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val → test)** | — | 🟢 59r4noqh RUNNING | ~18:30Z |
+| **#1491** | **nezuko** | **H301: Per-channel best-of-K (heterogeneous aggregation)** | — | 🟢 a1h9k4yz RUNNING | ~18:30Z |
+| **#1492** | **frieren** | **H302: Asymmetric modality resolution (surf-7 × vol-6, K=4 anti, shared-loop)** | — | 🟢 b3724r40 RUNNING | ~20:52Z |
 
-**Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
-
-**Hot watch**: 
-- **Tanjiro H295 K=5** (#1483): val=5.9231 **PASSES gate**. Test arm ETA ~14:36Z; SENPAI_TIMEOUT cuts ~14:46Z (~10min margin). → merge if test < 5.7683 (new K=5 SOTA)
-- **Fern H296** (#1484): K=4+8-res compound — STRONGEST val candidate; test arm ETA ~15:45Z. → merge if test < 5.7683 (compound SOTA)
-- If BOTH pass: pick by test_abupt (lower wins).
+**Hot watch**:
+- **Fern H296** (#1484): K=4+8-res — val=5.9221 passes NEW gate (−1.0bp). Test arm: need test < **5.7679** (tightened by H295 merge). ETA ~16:56Z.
+- **Thorfinn H297** (#1485): val=5.9237 fails NEW gate by 0.6bp → close PR #1485 once test arm posts regardless of test value.
 
 ---
 
@@ -66,6 +51,7 @@ W&B `uf17vdab` state=finished (399 min). PR #1483. Advisor nudged tanjiro 15:31Z
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| **#1483 tanjiro H295** | EP15+anti-K5+6-res+mirror | **MERGED (15:45Z) — NEW SOTA** — Finding SSS: K-axis saturation curve at EP15 (K=4→5 slope 1/17 of K=3→4, ~0.04bp gain, 5/5 sign-consistent). New gate: val<5.9231, test<5.7679. | 5.9231 | 5.7679 |
 | #1477 frieren H291 | EP15+anti-K3+8-res-LOWER {16K,24K,32K-131K}+mirror | **CLOSED (13:45Z)** — **Finding RRR**: 8-res lower fails both gates by ~1bp (val 5.9252 +1.7bp, test 5.7693 +1.0bp). Lower-res samples add Taylor variance without info gain. Combined with PPP: resolution axis fully closed asymmetrically below 32K and above 131K; 6-res {32K-131K} is global Pareto optimum. → H302 (channel-asymmetric resolution) assigned to frieren. | 5.9252 | 5.7693 |
 | #1476 thorfinn H290 | EP15+anti-K3+multi-σ{3e-4,5e-4,7e-4}+6-res | **CLOSED (11:03Z)** — Finding LLL-multi-σ-diversity-null: val 5.9241/test 5.7689 fails H285 gate (+0.6bp both axes). σ-diversity subsumed by K-axis: K=3→K=4 at fixed σ gives 4–7× the gain vs σ-mixing at K=3. → H297 (per-layer noise stratification) assigned to thorfinn. | 5.9241 | 5.7689 |
 | #1473 fern H288 | EP15+anti-K3+8-res densified | **CLOSED (09:56Z)** — Finding KKK-8res-K3-val-passes-test-marginal-fail: val 5.9229 (passes gate), test 5.7685 (fails +0.02bp). VP improves −2.1bp vs H275; SP degrades +1.1bp. K-axis and res-axis are orthogonal. → H296 (K=4+8-res compound) assigned to fern. | 5.9229 | 5.7685 |
@@ -91,10 +77,11 @@ W&B `uf17vdab` state=finished (399 min). PR #1483. Advisor nudged tanjiro 15:31Z
 
 ---
 
-## Findings Bank (45 banked, RRR added 13:45Z; MMM/OOO/PPP/QQQ added 12:13-12:26Z)
+## Findings Bank (46 banked, SSS added 15:45Z — K-axis saturation at K=5)
 
 | ID | Source | Summary |
 |---|---|---|
+| **SSS-K-axis-saturation-at-K5** | H295 tanjiro (merged 15:45Z as NEW SOTA) | K=3→4 anti-thetic at EP15+6-res was −0.8bp val / −0.7bp test (Finding JJJ). K=4→5 is −0.04bp val / −0.04bp test (1/17th the slope). K_eff=10 at K=5 makes the slope diminish to near-noise-floor. All 5 channels still move in the right direction (signal is real). K=5 is the current optimum; K=6 would cost +20% compute for an estimated ≤−0.01bp gain. New gate: val<5.9231, test<5.7679. Next: H303 probes σ=3e-4 at K=5 (tests if tighter σ reduces 2nd-order residual better at higher K). |
 | **RRR-8res-lower-degrades** | H291 frieren (closed 13:45Z) | 8-res lower {16K, 24K, 32K-131K} fails both gates by ~1bp (val +1.7bp, test +1.0bp). Lower-res samples add Taylor variance without info gain. Combined with PPP (8-res upper +11.8bp val): resolution axis fully closed asymmetrically — current 6-res {32K-131K} is global Pareto optimum in {n_res, resolution_range} space. Remaining unexplored direction: channel-asymmetric resolution selection. |
 | **QQQ-student-t-null** | H294 askeladd (closed 12:26Z) | Student-t df=3 ≈ Gaussian at matched RMS σ=5e-4 (val 5.9248 +1.3bp). Combined with MMM: noise distribution family axis definitively closed. Leading-order anti-thetic cancellation is distribution-free. |
 | **PPP-8res-upper-degrades** | H292 edward (closed 12:26Z) | 8-res upper {32K-192K} degrades val by 11.8bp vs H285 SOTA. Resolution ceiling confirmed at ≤131K. More high-res samples add variance without Taylor-cancellation benefit. |

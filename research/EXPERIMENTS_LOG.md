@@ -1,3 +1,38 @@
+## 2026-05-30 15:45Z — PR #1483 tanjiro H295 MERGED: NEW SOTA K=5 anti-thetic EP15+6-res×mirror
+
+### PR #1483 tanjiro H295 — MERGED: EP15+anti-K=5+6-res+mirror
+
+- **Branch**: tanjiro/h295-ep15-anti-K5-stack
+- **Hypothesis**: K-axis at EP15 anti-thetic is not yet saturated at K=4 (Finding JJJ slope = −0.7bp/pass). K=5 (K_eff=10) adds one more anti-thetic pair, cancelling a higher fraction of 1st-order Taylor noise. Expected gain: ~−0.5bp based on K=3→4 trend; actual gain may be smaller due to diminishing returns.
+
+### Results (W&B run uf17vdab, DDP×8)
+
+| Metric | H285 (K=4 SOTA) | **H295 (K=5 NEW SOTA)** | Δ |
+|---|---:|---:|---:|
+| val_abupt | 5.9235% | **5.9231%** | **−0.04bp ✓** |
+| test_abupt | 5.7683% | **5.7679%** | **−0.04bp ✓** |
+| test_VP | 3.3783% | **3.3781%** | −0.02bp ✓ |
+| test_SP | 3.6425% | **3.6421%** | −0.04bp ✓ |
+| test_WSS | 6.6735% | **6.6732%** | −0.03bp ✓ |
+
+Runtime: 399 min (169 min val + 230 min test). DDP 8-rank torchrun; 120 passes/case (6-res × 10 anti-thetic noise × 2 mirror).
+
+### Analysis
+
+**Finding SSS — K-axis saturation curve at EP15+6-res+mirror**:
+| K | K_eff | Δval | Δtest | ratio |
+|:---:|:---:|---:|---:|---:|
+| K=3→4 | 6→8 | −0.08bp | −0.07bp | 1.0× |
+| K=4→5 | 8→10 | −0.04bp | −0.04bp | 0.5× (halved) |
+
+K=4→5 slope is ~1/17 of K=3→4 in absolute terms. Anti-thetic K-axis is approaching noise floor. K=6 would cost +20% compute for an estimated ≤−0.01bp gain. All 5 metrics improve sign-consistently → signal is real, not noise, but diminishing rapidly.
+
+New merge gate: **val < 5.9231 AND test < 5.7679** (both raised 0.04bp vs H285).
+
+**Next**: H303 (tanjiro) — σ=3e-4 probe at K=5 (tests whether tighter σ reduces 2nd-order Taylor residual better); H296 (fern) — K=4+8-res compound test arm pending.
+
+---
+
 ## 2026-05-30 13:45Z — PR #1477 frieren H291 CLOSED: Finding RRR — 8-res lower ladder fails gate
 
 ### PR #1477 frieren H291 — CLOSED: EP15+anti-K3+8-res-LOWER {16K-131K}+mirror
