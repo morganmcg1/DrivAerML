@@ -1,3 +1,30 @@
+## 2026-05-30 00:40Z — PR #1456 thorfinn H276 CLOSED: Finding XX — σ=3e-4 at EP15 gives SP/VP win but WSS regression
+
+### PR #1456 thorfinn H276 — CLOSED: EP15+σ=3e-4+K=5 passes val gate, fails test gate by 0.05bp; structural WSS regression
+
+- **Branch**: thorfinn/h276-sigma3e-4-ep15-stack
+- **W&B run**: `oz9cqe7n` (finished, 195 min wall-time)
+- **Hypothesis**: σ=3e-4 (Finding RR's optimum at EP13) transfers to EP15+K=5+6-res+mirror
+- **Note**: thorfinn ran `weight_noise_mirror_res_avg` eval-mode (script-valid alternative order) due to two flag typos in PR instructions — `--n-weight-noise-passes` → `--weight-noise-passes`, mode order correction. Results are equivalent math.
+
+| Metric | H276 (this) | H274 SOTA | Δ |
+|---|---:|---:|---:|
+| val_abupt | **5.9314** | 5.9322 | **−0.08bp** ✓ val gate |
+| test_abupt | 5.7768 | **5.7763** | +0.05bp ✗ test gate (within noise) |
+| test_SP | **3.6494** | 3.6515 | **−2.1bp WIN** |
+| test_VP | **3.3823** | 3.3846 | **−2.3bp WIN** |
+| test_WSS | 6.6824 | **6.6805** | +1.9bp loss |
+
+**Finding XX-sigma3e4-EP15-channel-asymmetric (banked)**: σ=3e-4 at EP15+random K=5 gives SP/VP-favorable (+2.1-2.3bp) but WSS-unfavorable (+1.9bp) channel pattern vs H274 EP13+anti-K=3 SOTA. Random K=5 does not cancel the linear Taylor term that anti-thetic specifically targets. σ adjusts global perturbation magnitude (uniform channel effect), anti-thetic adjusts perturbation pairing structure (channel-asymmetric effect). The two axes are partially orthogonal at channel level.
+
+**Merge decision**: Val gate passes (−0.08bp), test gate fails (+0.05bp, within metric noise but structural WSS regression contradicts Morgan Issue #1056 primary WSS target). CLOSE.
+
+**Note on thorfinn's SENPAI-RESULT**: Student compared to H267 (prior SOTA) not H274 (current SOTA). H274 merged at 23:35Z while H276 was running. Thorfinn correctly identified this was an improvement — just against the wrong baseline.
+
+**Follow-on assigned**: thorfinn H283 — EP15+σ=3e-4+Sobol K=5 (PR #1466), tests if Sobol QMC rescues H276's WSS regression.
+
+---
+
 ## 2026-05-30 00:02Z — PR #1448 alphonse H269 CLOSED: Finding WW — Anti-thetic K=3 dominates random K=10
 
 ### PR #1448 alphonse H269 — CLOSED: K=10 random misses gate by 0.08bp val / 0.15bp test (anti-thetic K=3 SOTA dominates at 60% compute)
