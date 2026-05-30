@@ -37,6 +37,7 @@ import math
 import os
 import time
 from dataclasses import asdict, dataclass, fields
+from datetime import timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -1046,7 +1047,7 @@ def evaluate_split_multires(
 
 
 def main(argv: Iterable[str] | None = None) -> None:
-    state = init_distributed()
+    state = init_distributed(timeout=timedelta(minutes=60))
     cfg = parse_args(argv)
     device = state.device
 
