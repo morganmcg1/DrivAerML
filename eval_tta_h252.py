@@ -89,6 +89,11 @@ class EvalConfig:
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
 
+    # H305: zero-cost physics BC enforcement. After TTA aggregation, project
+    # the per-case WSS vector onto the surface tangent plane by subtracting the
+    # normal component (wss · n̂)·n̂. The CFD solver guarantees τ·n̂ = 0.
+    enforce_wss_tangential: bool = False
+
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
     output_dir: str = "outputs/h252_eval"
@@ -299,6 +304,7 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
+    enforce_wss_tangential: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
@@ -308,6 +314,13 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    When ``enforce_wss_tangential=True`` the aggregated WSS vector is projected
+    onto the surface tangent plane (subtract normal component) before being
+    returned, enforcing the CFD no-penetration BC τ·n̂ = 0 at zero forward-pass
+    cost. The per-case BC violation stats are written into the returned
+    ``timing`` dict under keys ``bc_normal_abs_sum``, ``bc_wss_norm_sum``,
+    ``bc_count``.
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -448,6 +461,26 @@ def process_case_stacked(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
+    # H305: physics BC enforcement. Project WSS onto surface tangent plane
+    # using original (non-mirrored) normals from the full case. Surface
+    # channel layout is [x, y, z, nx, ny, nz, area]; normals are [..., 3:6].
+    # Surface predictions are [cp, tau_x, tau_y, tau_z]; WSS is [..., 1:4].
+    timing["bc_normal_abs_sum"] = 0.0
+    timing["bc_wss_norm_sum"] = 0.0
+    timing["bc_count"] = 0
+    if enforce_wss_tangential:
+        n_hat = torch.nn.functional.normalize(
+            case.surface_x[..., 3:6].float(), dim=-1
+        )  # [n_surf, 3]
+        wss = surf_avg[..., 1:4]  # [n_surf, 3]
+        normal_comp = (wss * n_hat).sum(-1, keepdim=True)  # [n_surf, 1]
+        wss_corrected = wss - normal_comp * n_hat
+        # Diagnostic accumulators (per-point absolute mean and WSS norm).
+        timing["bc_normal_abs_sum"] = float(normal_comp.abs().sum().item())
+        timing["bc_wss_norm_sum"] = float(wss.norm(dim=-1).sum().item())
+        timing["bc_count"] = int(wss.shape[0])
+        surf_avg = torch.cat([surf_avg[..., :1], wss_corrected], dim=-1)
+
     k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
     n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
@@ -546,6 +579,7 @@ def evaluate_split_stacked(
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
+    enforce_wss_tangential: bool = False,
 ) -> dict[str, float]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -561,6 +595,9 @@ def evaluate_split_stacked(
     total_io = 0.0
     total_perturb = 0.0
     total_forwards = 0
+    bc_normal_abs_sum = 0.0
+    bc_wss_norm_sum = 0.0
+    bc_count = 0
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
         surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_stacked(
@@ -577,6 +614,7 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            enforce_wss_tangential=enforce_wss_tangential,
         )
         add_case_to_accumulator(
             acc,
@@ -591,6 +629,9 @@ def evaluate_split_stacked(
         total_io += timing["io_seconds"]
         total_perturb += timing["perturb_seconds"]
         total_forwards += timing["n_forwards"]
+        bc_normal_abs_sum += float(timing["bc_normal_abs_sum"])
+        bc_wss_norm_sum += float(timing["bc_wss_norm_sum"])
+        bc_count += int(timing["bc_count"])
         dt = time.time() - t0
         print(
             f"  [rank {rank}] {split_name} {case_id} ({case_idx + 1}/{len(my_cases)}): "
@@ -612,13 +653,38 @@ def evaluate_split_stacked(
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(world_size)]
         dist.all_gather_object(gathered, acc)
+        bc_stats: list[tuple[float, float, int] | None] = [None for _ in range(world_size)]
+        dist.all_gather_object(
+            bc_stats, (bc_normal_abs_sum, bc_wss_norm_sum, bc_count)
+        )
         if not distributed_state.is_main:
             return {}
         merged = merge_eval_accumulators(g for g in gathered if g is not None)
+        total_normal_abs = sum(s[0] for s in bc_stats if s is not None)
+        total_wss_norm = sum(s[1] for s in bc_stats if s is not None)
+        total_count = sum(s[2] for s in bc_stats if s is not None)
     else:
         merged = acc
+        total_normal_abs = bc_normal_abs_sum
+        total_wss_norm = bc_wss_norm_sum
+        total_count = bc_count
 
-    return finalize_eval_accumulator(merged)
+    metrics = finalize_eval_accumulator(merged)
+    if enforce_wss_tangential and total_count > 0:
+        mean_bc_violation = total_normal_abs / total_count
+        mean_wss_magnitude = total_wss_norm / total_count
+        bc_ratio = (
+            mean_bc_violation / mean_wss_magnitude if mean_wss_magnitude > 0 else 0.0
+        )
+        metrics["bc_violation_mean_normal_abs"] = mean_bc_violation
+        metrics["bc_violation_mean_wss_norm"] = mean_wss_magnitude
+        metrics["bc_violation_ratio"] = bc_ratio
+        print(
+            f"  BC violation pre-correction: mean |τ·n̂| = {mean_bc_violation:.6f}, "
+            f"mean |τ| = {mean_wss_magnitude:.6f}, ratio = {bc_ratio:.4%}",
+            flush=True,
+        )
+    return metrics
 
 
 def resolve_checkpoint_path(cfg: EvalConfig, state) -> tuple[Path, str]:
@@ -807,6 +873,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
+                enforce_wss_tangential=cfg.enforce_wss_tangential,
             )
             dt = time.time() - t0
             if state.is_main:
@@ -818,6 +885,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_obj.update(primary_metric_log(f"{log_prefix}_primary/{mode}", metrics))
                 log_obj.update({f"{log_prefix}_extra/{mode}/loss": metrics["loss"]})
                 log_obj[f"{log_prefix}_extra/{mode}/seconds"] = dt
+                if "bc_violation_ratio" in metrics:
+                    log_obj[f"{log_prefix}_extra/{mode}/bc_violation_ratio"] = metrics[
+                        "bc_violation_ratio"
+                    ]
+                    log_obj[
+                        f"{log_prefix}_extra/{mode}/bc_violation_mean_normal_abs"
+                    ] = metrics["bc_violation_mean_normal_abs"]
+                    log_obj[
+                        f"{log_prefix}_extra/{mode}/bc_violation_mean_wss_norm"
+                    ] = metrics["bc_violation_mean_wss_norm"]
                 if run is not None:
                     wandb.log(log_obj)
 
