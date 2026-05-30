@@ -145,6 +145,7 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    seed: int = 0
     debug: bool = False
 
 
@@ -271,6 +272,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "seed": (
+            "H310: integer seed for torch / numpy / random. 0 (default) "
+            "leaves all RNGs at system entropy (matches historical "
+            "non-deterministic behavior). Nonzero sets torch.manual_seed, "
+            "torch.cuda.manual_seed_all, numpy.random.seed, and "
+            "random.seed BEFORE model/dataloader/DDP construction so two "
+            "runs with the same seed produce matching val curves (modulo "
+            "CUDA float non-determinism)."
         ),
     }
     for field in fields(Config):
@@ -831,6 +841,15 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        if config.seed != 0:
+            import random as _py_random
+            import numpy as _np
+            torch.manual_seed(config.seed)
+            torch.cuda.manual_seed_all(config.seed)
+            _np.random.seed(config.seed)
+            _py_random.seed(config.seed)
+            if state.is_main:
+                print(f"Seed: {config.seed} (torch / cuda / numpy / random)")
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
         requested_epochs = config.epochs
@@ -1081,6 +1100,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["mirror_augmentation"] = config.mirror_augmentation
             wandb.summary["epochs_already_done"] = config.epochs_already_done
             wandb.summary["save_every_epoch"] = config.save_every_epoch
+            wandb.summary["seed"] = config.seed
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
