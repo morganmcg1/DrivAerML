@@ -1,15 +1,17 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 14:00Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 15:14Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
 
-**🔥🔥 TWO val winners pending test arms:**
-- **Fern H296 K=4+8-res compound val=5.9221** (W&B at1jadnv) → **−1.4bp vs H285 gate** — STRONGEST val candidate (PR #1484). Val arm done 12:48Z, test arm started ~13:00Z, ETA ~15:45Z.
-- **Tanjiro H295 K=5 val=5.9231** (W&B uf17vdab) → −0.4bp vs gate (PR #1483). Test arm running, ETA ~14:36Z (50 min away).
+**🔥🔥 TWO val winners pending test arms (still running as of 15:14Z):**
+- **Fern H296 K=4+8-res compound val=5.9221** (W&B at1jadnv RUNNING 313 min) → **−1.4bp vs H285 gate** — STRONGEST val candidate (PR #1484). Val arm done 12:48Z; test arm running, true ETA ~16:00-16:30Z.
+- **Tanjiro H295 K=5 val=5.9231** (W&B uf17vdab RUNNING 388 min) → −0.4bp vs gate (PR #1483). Val done 11:35Z; test arm started 11:47Z. Original 14:36Z ETA OVERSHOT — true ETA ~15:55Z (test 50 cases vs val 34); SENPAI cap 17:47Z.
 - Both compound/extension gains stack as Finding KKK predicted. **First test arm to land AND pass <5.7683 = merge candidate.**
 
-**Cycle 13:45Z**: PR #1477 frieren H291 CLOSED → **Finding RRR**: 8-res lower ladder fails both gates by ~1bp; res-axis exhausted below 32K (mirrors PPP above 131K). **Frieren now idle** — fresh hypothesis being generated.
+**Cycle 15:09Z — frieren H302 PR #1492 implementation flaw caught**: Student timing analysis showed two-pass loop over (surf_res, vol_res) doubles compute (~660 min vs 360 cap). Frieren proposed Option E (K=2 anti). Advisor sent back **shared-loop refactor**: one pass over `union(surf_res, vol_res)`, conditional accumulation into surf/vol buffers → K=4 anti + 7-surf + 6-vol predicted ~329 min/rank. Awaiting student launch.
 
-**Thorfinn H297 val arm done 13:41Z @ val=5.9237 — FAILS gate by 0.2bp**. Test arm still running but likely null.
+**Thorfinn H297 val done 13:41Z @ val=5.9237 — FAILS gate by 0.2bp** (W&B 1ie6ksw6 RUNNING 221 min). Test arm running; close PR #1485 with Finding once test lands regardless of test value.
+
+**Cycle 13:45Z**: PR #1477 frieren H291 CLOSED → **Finding RRR**: 8-res lower ladder fails both gates by ~1bp; res-axis exhausted below 32K (mirrors PPP above 131K).
 
 ---
 
@@ -40,7 +42,7 @@
 | **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🟢 assigned 13:05Z | ~18:00Z |
 | **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val, apply test)** | — | 🟢 assigned 13:05Z | ~18:00Z |
 | **#1491** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🟢 assigned 13:25Z | ~18:30Z |
-| **#1492** | **frieren** | **H302: Asymmetric per-modality resolution — surf-8hi (32K-163K) × vol-6 (32K-131K)** | — | 🆕 assigned 14:00Z (PR #1492) | ~19:00Z |
+| **#1492** | **frieren** | **H302: Asymmetric per-modality resolution — surf-7 (32K-131K) × vol-6 (32K-131K), K=4 anti, shared-loop** | — | 🟡 PR #1492 — student caught compute-double flaw; advisor refactor (shared-loop K=4) sent 15:09Z; awaiting launch | ~21:00Z |
 
 **Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
 
