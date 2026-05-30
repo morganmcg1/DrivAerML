@@ -1,6 +1,8 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 11:03Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 11:48Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+
+**🚨 HOT: Tanjiro H295 K=5 val=5.9231 PASSES gate by 0.4bp** (W&B uf17vdab). Test arm in progress, ETA ~14:34Z. If test < 5.7683 → NEW SOTA, merge PR #1483.
 
 ---
 
@@ -20,27 +22,27 @@
 
 ---
 
-## Active Fleet (as of 08:40Z — 8 students active)
+## Active Fleet (as of 11:48Z — 8 students active)
 
-| PR | Student | Hypothesis | Status | val | ETA |
-|---|---|---|---|---|---|
-| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | 🟡 uf17vdab running (started 08:40Z), val arm ETA ~12:00Z | — | ~12:00Z |
-| **#1471** | **alphonse** | **H286: Aggregation operator sweep on H275 SOTA** | 🟡 bad1i1jv running, val 5.9242 (fails gate +0.7bp), test arm pending | 5.9242 | ~11:00Z |
-| **#1482** | **askeladd** | **H294: Student-t df=3 noise at EP15+anti-K3+6-res** | 🟡 jb36zg3o running (relaunched after init crash bgz1d8mm), no metrics yet | — | ~12:30Z |
-| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | 🆕 just assigned (compound K-axis+res-axis; Finding KKK orthogonality proven) | — | ~13:30Z |
-| **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K} at EP15+anti-K3** | 🟡 aqcgnn1z val 5.9252 (fails gate +1.7bp, likely close), test pending | 5.9252 | ~11:00Z |
-| **#1481** | **nezuko** | **H293: Laplace noise at EP15+anti-K3+6-res** | 🟡 hu472xfk running, no metrics yet | — | ~12:30Z |
-| **#1485** | **thorfinn** | **H297: Per-layer noise stratification (σ_attn=0, σ_mlp=5e-4, K=4)** | 🆕 just assigned (SP-floor targeted; ~314 min ETA) | — | ~15:00Z |
-| **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 🟡 xyy8f895 running, no metrics yet | — | ~13:00Z |
+| PR | Student | Hypothesis | val_abupt | Status | ETA |
+|---|---|---|---:|---|---|
+| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | **5.9231 ✓** | 🟢 uf17vdab val PASSES gate −0.4bp, test arm running | ~14:34Z |
+| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | — | 🟡 at1jadnv running, val arm in progress (started ~10:00Z) | ~13:30Z |
+| **#1471** | **alphonse** | **H286: Aggregation operator sweep (5 ops)** | 5.9242 ✗ | 🟡 bad1i1jv: best agg trimmed_mean_10 5.9242 (+0.7bp fail); test arm pending | ~13:00Z |
+| **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K}** | 5.9252 ✗ | 🟡 rowu861p test-only relaunch (primary aqcgnn1z crashed) | ~12:30-13:30Z |
+| **#1481** | **nezuko** | **H293: Laplace noise at EP15+anti-K3+6-res** | 5.9246 ✗ | 🟡 hu472xfk val done (+1.1bp fail); test arm pending | ~12:30Z |
+| **#1482** | **askeladd** | **H294: Student-t df=3 at EP15+anti-K3+6-res** | 5.9248 ✗ | 🟡 jb36zg3o val done (+1.3bp fail); test arm pending | ~12:30Z |
+| **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 5.9353 ✗ | 🟡 xyy8f895 val done (+12bp fail); test arm pending | ~13:00Z |
+| **#1485** | **thorfinn** | **H297: Per-layer noise stratification (σ_attn=0, σ_mlp=5e-4, K=4)** | — | 🆕 1ie6ksw6 just started 11:34Z; SP-floor targeted | ~16:48Z |
 
 **Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
 
 **Hot watch**: 
-- **Fern H296** (PR #1484): K=4+8-res compound — the HIGHEST-EV cell on the K×res matrix per Finding KKK orthogonality. Val arm ETA ~13:30Z. Primary SOTA candidate for next round.
-- **Alphonse H286** val 5.9242 (+0.7bp vs gate), test arm pending — marginal; likely close but not winner.
-- **Thorfinn H290** val 5.9241 (+0.6bp vs gate), test pending — marginal, close but fails gate.
-- **Frieren H291** val 5.9252 (+1.7bp vs gate) — highly unlikely to pass test gate; will close when test lands.
-- **Tanjiro H295** K=5 val arm at ~12:00Z — closes K-axis definitively (Finding JJJ follow-up).
+- **Tanjiro H295 K=5** (PR #1483): val=**5.9231 PASSES gate**. If test < 5.7683 → NEW SOTA. Test arm ETA ~14:34Z. SENPAI_TIMEOUT may cut at ~14:46Z (tight but should land).
+- **Fern H296** (PR #1484): K=4+8-res compound — HIGHEST-EV cell on K×res matrix per Finding KKK orthogonality. Val arm ETA ~13:30Z. Primary SOTA candidate parallel to H295.
+- **Alphonse H286** all 5 aggregators val ≥ 5.9242 fail gate; aggregation axis closing when test lands.
+- **Frieren H291** test-only relaunch `rowu861p` — primary crashed at 5.9252 val fail; closing when test lands.
+- **Edward/Nezuko/Askeladd** — all val arms fail gate; closing when test arms land. Noise-family + 8-res-upper axes will be closed.
 
 ---
 
