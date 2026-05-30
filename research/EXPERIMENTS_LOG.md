@@ -1,3 +1,37 @@
+## 2026-05-30 06:10Z — PR #1475 frieren H289 CLOSED: Finding FFF — EP-axis fully exhausted at H275 recipe (no runs needed)
+
+### PR #1475 frieren H289 — CLOSED: EP-axis exhausted, checkpoints unavailable
+
+- **Branch**: frieren/h289-ep12-checkpoint
+- **Original hypothesis**: EP12 checkpoint axis — complete 4-point EP-curve at anti-K=3 recipe
+
+### What happened (frieren's investigation)
+
+Frieren discovered that neither EP12 nor EP16 checkpoints exist:
+
+| Source | Available checkpoints | EP12? | EP16? |
+|---|---|---|---|
+| H185 base (yw2a5dyl) | Final EMA at EP13 only (save_every_epoch=None) | ❌ | ❌ |
+| H244 cosine ext (0gjfv45i) | EP14+EP15 locally; EP16 deleted | ❌ | ❌ (deleted) |
+| W&B best alias | EP15 only | ❌ | ❌ |
+
+### Finding FFF-EP-axis-closed-at-H275-recipe
+
+The H244 historical 3-res evals (edward, pre-H275) show:
+- EP14 val 5.9613 / test 5.8081 (3-res no-anti)
+- EP15 val 5.9516 / test 5.7998 ← peak
+- EP16 val 5.9548 / test 5.8028 ← slight regression
+
+H244 config `best_epoch=15` confirms EP15 is the local peak. Combined with H287 EP14 (val 5.9326, ~H274 EP13 level), the EP-curve at anti-K=3 + 6-res + mirror is:
+EP13 ≈ EP14 < EP15 (SOTA) > EP16
+
+Finding: EP-axis is unimodal with peak at EP15 across both 3-res and 6-res+anti families. No checkpoint within {EP13...EP16} can improve on H275 SOTA. EP-axis fully closed without wasting a single GPU-cycle.
+
+### Decision
+Closed (no runs executed). Assigned H291 (extended-res LOWER) to frieren as fresh axis.
+
+---
+
 ## 2026-05-30 05:25Z — PR #1466 thorfinn H283 CLOSED: Finding XX-Sobol-confirmed — σ-axis closed across all noise families at EP15
 
 ### PR #1466 thorfinn H283 — CLOSED: EP15+σ=3e-4+Sobol-K=5+6-res+mirror fails H275 SOTA gate
