@@ -88,6 +88,12 @@ class EvalConfig:
     # number of forward passes per (res, mirror) is 2 * weight_noise_passes.
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
+    # H290: optional comma-separated σ list, one entry per anti-thetic pair
+    # (length must match weight_noise_passes). When empty, falls back to
+    # weight_noise_sigma for every pair. Lets a single eval mix σ values
+    # (e.g. "3e-4,5e-4,7e-4") so SP/VP-favorable and WSS-favorable channel
+    # noises contribute jointly to the per-point average.
+    weight_noise_sigmas: str = ""
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -296,7 +302,7 @@ def process_case_stacked(
     use_mirror: bool,
     clean: dict[str, torch.Tensor],
     K_passes: int,
-    sigma: float,
+    sigma_list: list[float],
     seed_base: int,
     antithetic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
@@ -308,7 +314,14 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    ``sigma_list`` must have length ``K_passes`` and supplies σ for each pair
+    (H290: σ can vary across pairs to mix SP/VP-favorable and WSS-favorable
+    perturbation scales in one average).
     """
+    assert len(sigma_list) == K_passes, (
+        f"sigma_list length {len(sigma_list)} != K_passes {K_passes}"
+    )
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
     n_vol = counts["n_volume"]
@@ -328,107 +341,124 @@ def process_case_stacked(
 
     mirror_flags = (False, True) if use_mirror else (False,)
 
-    # Build the (noise_idx, sign) schedule. Anti-thetic pairs share a seed so
+    # Build per-pair sign schedule. Anti-thetic pairs share a seed so
     # +ε / −ε use the SAME draw of ε (otherwise it would just be 2K i.i.d.).
-    if antithetic and sigma > 0.0:
-        schedule = [(k, sign) for k in range(K_passes) for sign in (+1.0, -1.0)]
-    else:
-        schedule = [(k, +1.0) for k in range(K_passes)]
+    any_perturbed = any(s > 0.0 for s in sigma_list)
 
-    for k, sign in schedule:
-        # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
-        t_p = time.time()
-        if sigma > 0.0:
-            seed = (seed_base + k) * 100003
-            perturb_relative_(
-                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
-            )
+    for k in range(K_passes):
+        sigma_k = sigma_list[k]
+        if antithetic and sigma_k > 0.0:
+            pair_signs = (+1.0, -1.0)
         else:
-            restore_clean_params(eval_module, clean)
-        timing["perturb_seconds"] += time.time() - t_p
+            pair_signs = (+1.0,)
 
-        for R in resolutions:
-            dataset = DrivAerMLSurfaceDataset(
-                case_ids=[case_id],
-                store=store,
-                max_surface_points=cfg.eval_surface_points,
-                max_volume_points=R,
-                sampling_mode="eval_chunk",
-            )
-            loader_iter = torch.utils.data.DataLoader(
-                dataset,
-                batch_size=cfg.batch_size,
-                shuffle=False,
-                num_workers=cfg.num_workers,
-                pin_memory=cfg.pin_memory,
-                collate_fn=pad_collate,
-                persistent_workers=False,
-                prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
-            )
-            for batch in loader_iter:
-                batch = batch.to(device)
-                metas_cached = list(batch.metadata)
-                for mirror in mirror_flags:
-                    t0 = time.time()
-                    model_input = mirror_inputs(batch) if mirror else batch
-                    with autocast_context(device, cfg.amp_mode):
-                        out = eval_module(
-                            surface_x=model_input.surface_x,
-                            surface_mask=model_input.surface_mask,
-                            volume_x=model_input.volume_x,
-                            volume_mask=model_input.volume_mask,
-                        )
-                    surface_pred_real = transform.invert_surface(out["surface_preds"].float())
-                    volume_pred_real = transform.invert_volume(out["volume_preds"].float())
-                    if mirror:
-                        surface_pred_real = unmirror_surface_real(surface_pred_real)
-                    timing["forward_seconds"] += time.time() - t0
-                    timing["n_forwards"] += int(batch.surface_x.shape[0])
+        for sign in pair_signs:
+            # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
+            t_p = time.time()
+            if sigma_k > 0.0:
+                seed = (seed_base + k) * 100003
+                perturb_relative_(
+                    eval_module, clean, sigma=sigma_k, seed=seed, device=device, sign=sign
+                )
+            else:
+                restore_clean_params(eval_module, clean)
+            timing["perturb_seconds"] += time.time() - t_p
 
-                    t1 = time.time()
-                    surface_pred_real_cpu = surface_pred_real.detach().cpu()
-                    volume_pred_real_cpu = volume_pred_real.detach().cpu()
-                    surface_mask_cpu = batch.surface_mask.detach().cpu()
-                    volume_mask_cpu = batch.volume_mask.detach().cpu()
-                    for i in range(len(batch.case_ids)):
-                        meta = metas_cached[i]
-                        s_view_idx = int(meta["surface_view_index"])
-                        s_view_count = int(meta["surface_view_count"])
-                        v_view_idx = int(meta["volume_view_index"])
-                        v_view_count = int(meta["volume_view_count"])
+            for R in resolutions:
+                dataset = DrivAerMLSurfaceDataset(
+                    case_ids=[case_id],
+                    store=store,
+                    max_surface_points=cfg.eval_surface_points,
+                    max_volume_points=R,
+                    sampling_mode="eval_chunk",
+                )
+                loader_iter = torch.utils.data.DataLoader(
+                    dataset,
+                    batch_size=cfg.batch_size,
+                    shuffle=False,
+                    num_workers=cfg.num_workers,
+                    pin_memory=cfg.pin_memory,
+                    collate_fn=pad_collate,
+                    persistent_workers=False,
+                    prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
+                )
+                for batch in loader_iter:
+                    batch = batch.to(device)
+                    metas_cached = list(batch.metadata)
+                    for mirror in mirror_flags:
+                        t0 = time.time()
+                        model_input = mirror_inputs(batch) if mirror else batch
+                        with autocast_context(device, cfg.amp_mode):
+                            out = eval_module(
+                                surface_x=model_input.surface_x,
+                                surface_mask=model_input.surface_mask,
+                                volume_x=model_input.volume_x,
+                                volume_mask=model_input.volume_mask,
+                            )
+                        surface_pred_real = transform.invert_surface(out["surface_preds"].float())
+                        volume_pred_real = transform.invert_volume(out["volume_preds"].float())
+                        if mirror:
+                            surface_pred_real = unmirror_surface_real(surface_pred_real)
+                        timing["forward_seconds"] += time.time() - t0
+                        timing["n_forwards"] += int(batch.surface_x.shape[0])
 
-                        if s_view_idx < s_view_count:
-                            s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf)
-                            s_mask_i = surface_mask_cpu[i].bool()
-                            s_chunk = surface_pred_real_cpu[i][s_mask_i]
-                            if s_global.shape[0] != s_chunk.shape[0]:
-                                raise RuntimeError(
-                                    f"surface global-index mismatch case={case_id} K={R} "
-                                    f"view_idx={s_view_idx}/{s_view_count}: "
-                                    f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
-                                )
-                            if s_global.numel() > 0:
-                                surf_sum.index_add_(0, s_global, s_chunk)
-                                surf_cnt.index_add_(
-                                    0, s_global, torch.ones_like(s_global, dtype=torch.int32)
-                                )
+                        t1 = time.time()
+                        surface_pred_real_cpu = surface_pred_real.detach().cpu()
+                        volume_pred_real_cpu = volume_pred_real.detach().cpu()
+                        surface_mask_cpu = batch.surface_mask.detach().cpu()
+                        volume_mask_cpu = batch.volume_mask.detach().cpu()
+                        for i in range(len(batch.case_ids)):
+                            meta = metas_cached[i]
+                            s_view_idx = int(meta["surface_view_index"])
+                            s_view_count = int(meta["surface_view_count"])
+                            v_view_idx = int(meta["volume_view_index"])
+                            v_view_count = int(meta["volume_view_count"])
 
-                        if v_view_idx < v_view_count:
-                            v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
-                            v_mask_i = volume_mask_cpu[i].bool()
-                            v_chunk = volume_pred_real_cpu[i][v_mask_i]
-                            if v_global.shape[0] != v_chunk.shape[0]:
-                                raise RuntimeError(
-                                    f"volume global-index mismatch case={case_id} K={R} "
-                                    f"view_idx={v_view_idx}/{v_view_count}: "
-                                    f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
-                                )
-                            if v_global.numel() > 0:
-                                vol_sum.index_add_(0, v_global, v_chunk)
-                                vol_cnt.index_add_(
-                                    0, v_global, torch.ones_like(v_global, dtype=torch.int32)
-                                )
-                    timing["io_seconds"] += time.time() - t1
+                            if s_view_idx < s_view_count:
+                                s_global = chunk_global_indices(s_view_idx, s_view_count, n_surf)
+                                s_mask_i = surface_mask_cpu[i].bool()
+                                s_chunk = surface_pred_real_cpu[i][s_mask_i]
+                                if s_global.shape[0] != s_chunk.shape[0]:
+                                    raise RuntimeError(
+                                        f"surface global-index mismatch case={case_id} K={R} "
+                                        f"view_idx={s_view_idx}/{s_view_count}: "
+                                        f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
+                                    )
+                                if s_global.numel() > 0:
+                                    surf_sum.index_add_(0, s_global, s_chunk)
+                                    surf_cnt.index_add_(
+                                        0, s_global, torch.ones_like(s_global, dtype=torch.int32)
+                                    )
+
+                            if v_view_idx < v_view_count:
+                                v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
+                                v_mask_i = volume_mask_cpu[i].bool()
+                                v_chunk = volume_pred_real_cpu[i][v_mask_i]
+                                if v_global.shape[0] != v_chunk.shape[0]:
+                                    raise RuntimeError(
+                                        f"volume global-index mismatch case={case_id} K={R} "
+                                        f"view_idx={v_view_idx}/{v_view_count}: "
+                                        f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
+                                    )
+                                if v_global.numel() > 0:
+                                    vol_sum.index_add_(0, v_global, v_chunk)
+                                    vol_cnt.index_add_(
+                                        0, v_global, torch.ones_like(v_global, dtype=torch.int32)
+                                    )
+                        timing["io_seconds"] += time.time() - t1
+
+        # H290 per-pair restore + equality check: after each anti-thetic ±δ
+        # pair (or single +δ pass when antithetic=False / σ=0), restore the
+        # snapshot and verify bitwise that the model is back to clean weights
+        # before moving to the next pair. Catches any silent drift that could
+        # bias multi-σ averages.
+        restore_clean_params(eval_module, clean)
+        for name, p in eval_module.named_parameters():
+            if name in clean:
+                assert torch.equal(p.data, clean[name]), (
+                    f"clean-restore mismatch after pair k={k} sigma={sigma_k}: "
+                    f"param '{name}' differs from snapshot"
+                )
 
     if int(surf_cnt.min()) == 0:
         raise RuntimeError(
@@ -448,7 +478,7 @@ def process_case_stacked(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
+    k_eff = K_passes * (2 if (antithetic and any_perturbed) else 1)
     n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
@@ -542,7 +572,7 @@ def evaluate_split_stacked(
     use_mirror: bool,
     clean: dict[str, torch.Tensor],
     K_passes: int,
-    sigma: float,
+    sigma_list: list[float],
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
@@ -574,7 +604,7 @@ def evaluate_split_stacked(
             use_mirror=use_mirror,
             clean=clean,
             K_passes=K_passes,
-            sigma=sigma,
+            sigma_list=sigma_list,
             seed_base=seed_base,
             antithetic=antithetic,
         )
@@ -665,6 +695,18 @@ def main(argv: Iterable[str] | None = None) -> None:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
+    if cfg.weight_noise_sigmas.strip():
+        sigma_list = [float(s) for s in cfg.weight_noise_sigmas.split(",") if s.strip()]
+        sigma_source = "weight_noise_sigmas"
+    else:
+        sigma_list = [cfg.weight_noise_sigma] * cfg.weight_noise_passes
+        sigma_source = "weight_noise_sigma (broadcast)"
+    if len(sigma_list) != cfg.weight_noise_passes:
+        raise ValueError(
+            f"weight_noise_sigmas has {len(sigma_list)} entries but "
+            f"weight_noise_passes={cfg.weight_noise_passes}"
+        )
+
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
@@ -672,7 +714,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(f"Modes: {modes}")
         k_eff_print = cfg.weight_noise_passes * (2 if cfg.antithetic_noise else 1)
         print(
-            f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
+            f"Weight-noise TTA: sigmas={sigma_list} (source={sigma_source}) "
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
             f"seed_base={cfg.weight_noise_seed_base}"
@@ -731,6 +773,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             cfg.wandb_name
             or f"{cfg.agent}/h252-stacked-sigma-{cfg.weight_noise_sigma}-K{cfg.weight_noise_passes}"
         )
+        per_pair_sigma_config = {
+            f"weight_noise_sigma_pair_{i}": float(s)
+            for i, s in enumerate(sigma_list)
+        }
         run = wandb.init(
             project=os.environ.get("WANDB_PROJECT", cfg.wandb_project),
             entity=os.environ.get("WANDB_ENTITY", cfg.wandb_entity),
@@ -745,6 +791,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "n_val_cases": len(val_case_ids),
                 "n_test_cases": len(test_case_ids),
                 "ckpt_source": ckpt_source,
+                "weight_noise_sigma_list": sigma_list,
+                "weight_noise_sigma_source": sigma_source,
+                **per_pair_sigma_config,
             },
             tags=[
                 "h252",
@@ -787,7 +836,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
                     f"mirror={use_mirror} K={cfg.weight_noise_passes} "
                     f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-                    f"sigma={cfg.weight_noise_sigma} ===",
+                    f"sigmas={sigma_list} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -803,7 +852,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_mirror=use_mirror,
                 clean=clean,
                 K_passes=cfg.weight_noise_passes,
-                sigma=cfg.weight_noise_sigma,
+                sigma_list=sigma_list,
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
