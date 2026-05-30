@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 00:45Z | Branch: `tay` | **SOTA: H274 EP13+Anti-K3+6-res+mirror (PR #1454)** | Round 4k
+**Updated**: 2026-05-30 01:15Z | Branch: `tay` | **SOTA: H274 EP13+Anti-K3+6-res+mirror (PR #1454)** | **H275 SOTA candidate review** | Round 4k
 
 ---
 
@@ -20,23 +20,28 @@
 
 ---
 
-## Active Fleet (as of 00:45Z — 8 students active)
+## Active Fleet (as of 01:15Z — 8 students active)
 
 | PR | Student | Hypothesis | Status | val | ETA |
 |---|---|---|---|---|---|
-| **#1455** | **edward** | **H275: EP15+anti-K=3+6-res+mirror** | 🟡 running ~96m | — | ~01:00Z |
-| **#1457** | **tanjiro** | **H277: EP15+σ=3e-4+anti-K=3+6-res+mirror** | 🟡 running ~96m | — | ~01:05Z |
-| **#1458** | **askeladd** | **H278: EP13+anti-K=4 pairs (8p)+6-res+mirror** | 🟢 **val 5.9316** (gate passed!) | ✓ | test ~04:30Z |
-| **#1459** | **frieren** | **H279: EP15+Sobol-K5+6-res+mirror** | 🟡 running ~1m | — | ~03:00Z |
-| **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟡 running ~1m | — | ~05:30Z |
-| **#1461** | **fern** | **H281: EP13+anti-K3+σ=3e-4+6-res+mirror** | ⚠️ CRASHED 00:15Z (sent back for flag-fix relaunch) | — | ~04:30Z |
+| **#1455** | **edward** | **H275: EP15+anti-K=3+6-res+mirror** | 🔵 **SOTA candidate** — needs rebase before merge | **5.9243** ✓✓ | merge after rebase |
+| **#1457** | **tanjiro** | **H277: EP15+σ=3e-4+anti-K=3+6-res+mirror** | 🟡 val 5.9255 (passes old gate) — test arm running | 5.9255 | test ~03:00Z |
+| **#1458** | **askeladd** | **H278: EP13+anti-K=4 pairs (8p)+6-res+mirror** | 🟡 **val 5.9316** (passes old gate, fails new gate) | 5.9316 | test ~04:30Z |
+| **#1459** | **frieren** | **H279: EP15+Sobol-K5+6-res+mirror** | 🟡 running | — | ~03:00Z |
+| **#1460** | **nezuko** | **H280: EP13+Sobol-anti-K5 (10p)+6-res+mirror** | 🟡 running | — | ~05:30Z |
+| **#1461** | **fern** | **H281: EP13+anti-K3+σ=3e-4+6-res+mirror** | 🟡 relaunched after flag-fix | — | ~04:30Z |
 | **#1465** | **alphonse** | **H282: EP13+anti-K=2 pairs (4p)+6-res+mirror** | 🟡 running | — | ~02:30Z |
-| **#1466** | **thorfinn** | **H283: EP15+σ=3e-4+Sobol K=5+6-res+mirror** | 🆕 assigning | — | ~04:00Z |
+| **#1466** | **thorfinn** | **H283: EP15+σ=3e-4+Sobol K=5+6-res+mirror** | 🟡 running | — | ~04:00Z |
 
-**Gate**: val < **5.9322** AND test < **5.7763**
+**Gate (current, pre-H275 merge)**: val < **5.9322** AND test < **5.7763**
+**Gate (after H275 merges)**: val < **5.9243** AND test < **5.7690** ← changes landscape: tanjiro 5.9255 and askeladd 5.9316 both fail the new val gate
 
-**Hot watch**: askeladd H278 val 5.9316 < gate 5.9322 ✓ → test arm running, ETA ~04:30Z. If test < 5.7763 → immediate SOTA merge.
-**Fern H281**: crashed due to PR-spec flag typos (`--n-weight-noise-passes` / `--antithetic` → corrected). Sent back for relaunch. Same typo affected alphonse H282 and thorfinn H276 — both corrected silently.
+**Hot watch**: 
+- **edward H275 #1455** — clean SOTA (val 5.9243 / test 5.7690 / test_WSS 6.6743 ← Morgan's #1 target −6.2bp). Sent back for rebase 01:09Z. Merge as soon as conflict clears. W&B run `0b4t2bz2`.
+- **tanjiro H277**: val 5.9255 between H274 SOTA and edward's H275. Will fail H275's new val gate. Test arm not yet posted.
+- **askeladd H278**: val 5.9316 passes H274 gate but fails H275 gate. Marginal.
+
+**Finding ZZ candidate (edward H275)**: EP15 × anti-K=3 is **super-additive** (+0.28 bp val, +0.51 bp test vs pure-additive expectation), opposite of H267's sub-additive EP15 + random K=5. Flatter EP15 EMA minimum makes anti-thetic Taylor cancellation more meaningful.
 
 ---
 
