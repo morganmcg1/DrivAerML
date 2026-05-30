@@ -1,3 +1,61 @@
+## 2026-05-30 03:40Z — PR #1458 askeladd H278 CLOSED: K-curve at EP13 saturates by K=3 (Finding BBB)
+
+### PR #1458 askeladd H278 — CLOSED: EP13+anti-K=4+6-res+mirror fails H275 gate
+
+- **Branch**: askeladd/h278-antithetic-K4-stacked
+- **Hypothesis**: Anti-thetic K=4 pairs (8 passes) at EP13 — does K-scaling beyond K=3 continue to improve in stacked form?
+- **W&B run**: `ardsfopx`
+
+| Metric | H278 K=4 EP13 | H275 SOTA K=3 EP15 | Δ vs SOTA |
+|---|---:|---:|---:|
+| val_abupt | 5.9316% | **5.9243%** | **+7.3bp WORSE** |
+| test_abupt | 5.7758% | **5.7690%** | **+6.8bp WORSE** |
+| test_WSS | 6.6798% | **6.6743%** | +5.5bp WORSE |
+| test_SP | 3.6508% | **3.6427%** | +8.1bp WORSE |
+| test_VP | 3.3850% | **3.3788%** | +6.2bp WORSE |
+
+**Anti-thetic K-curve at EP13** (3-point, canonical):
+| K pairs (passes) | val_abupt | Δ vs K=3 |
+|---:|---:|---:|
+| K=2 H282 (4p) | 5.9340 | +0.0018 |
+| K=3 H274 (6p) | 5.9322 | reference |
+| **K=4 H278 (8p)** | **5.9316** | **−0.0006** |
+| K=10 random H269 | 5.9330 | +0.0008 |
+
+**Finding BBB-K-curve-saturates-at-K3-EP13** (BANKED): K=3 → K=4 is only −0.6bp val / −0.5bp test — within noise. K-axis at EP13 anti-thetic is essentially flat from K=3 onward. Combined with alphonse H282 (K=2) and fern H274 (K=3), the anti-thetic K-curve is fully characterized at EP13. The load-bearing mechanism is the linear Taylor cancellation at K=1 (first pair); subsequent pairs add only K-averaging variance reduction which is sub-dominant.
+
+**Cross-EP key insight**: H275 K=3 at EP15 beats H278 K=4 at EP13 by 7.3bp val / 6.8bp test. Confirmed: **checkpoint axis (EP15 > EP13) dominates K-axis in anti-thetic family**. Extra K cannot substitute for a better EMA checkpoint.
+
+Note: H278 beats the stale H267 gate (5.9367/5.7825) active at assignment time by −5.1bp val / −6.7bp test — excellent result given the original assignment context. Gate moved during run.
+
+Wall time: ~300 min (val 122 min + test 177 min) on DDP×8. NCCL stable at K=4 (did not hit timeout).
+
+---
+
+## 2026-05-30 03:35Z — PR #1465 alphonse H282 CLOSED: K-curve floor at EP13 (Finding BBB)
+
+### PR #1465 alphonse H282 — CLOSED: EP13+anti-K=2+6-res+mirror fails H275 gate
+
+- **Branch**: alphonse/h282-antithetic-K2-stacked
+- **Hypothesis**: Anti-thetic K=2 pairs (4 passes) at EP13 — the floor of the K-curve, tests whether linear Taylor cancellation alone (without K-averaging) is the load-bearing effect
+- **W&B run**: `8jlfgz8y`
+
+| Metric | H282 K=2 EP13 | H275 SOTA K=3 EP15 | Δ vs SOTA |
+|---|---:|---:|---:|
+| val_abupt | 5.9340% | **5.9243%** | **+9.7bp WORSE** |
+| test_abupt | 5.7783% | **5.7690%** | **+9.3bp WORSE** |
+| test_WSS | 6.6827% | **6.6743%** | +8.4bp WORSE |
+| test_SP | 3.6511% | **3.6427%** | +8.4bp WORSE |
+| test_VP | 3.3867% | **3.3788%** | +7.9bp WORSE |
+
+**Results commentary**: K=2 → K=3 step is only +1.8bp val / +2.0bp test — the smallest plausible K step, confirming that **linear cancellation (K=1 pair) captures most of the anti-thetic benefit** and K-averaging variance reduction is sub-dominant. K=2 anti (4 passes) ties K=10 random (10 passes) within noise (+1.0bp val / +0.5bp test), confirming anti-thetic structure dominates raw K-count at ≥K=2.
+
+**Finding BBB-K-curve-saturates-at-K3-EP13**: BANKED. Combined with askeladd H278 K=4 result (same run), this closes the K-axis characterization at EP13.
+
+Wall time: ~156 min (val 64 min + test 92 min) on DDP×8. K_eff=4 verified (2 pairs × 2 anti). NCCL stable. Peak GPU ~28.6GB/96GB.
+
+---
+
 ## 2026-05-30 02:50Z — PR #1457 tanjiro H277 CLOSED: Finding AAA — σ=3e-4 is FLAT under anti-thetic K=3 at EP15
 
 ### PR #1457 tanjiro H277 — CLOSED: σ axis flat on anti-thetic at EP15
