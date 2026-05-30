@@ -88,6 +88,11 @@ class EvalConfig:
     # number of forward passes per (res, mirror) is 2 * weight_noise_passes.
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
+    # H301: K-sample aggregation across the K_eff stacked perturbation samples.
+    # "mean" reproduces the H285 baseline. "best_of_k_per_channel" selects the
+    # K-sample closest to the K-mean independently per output channel, exploiting
+    # any anisotropy in which K-sample best represents each channel.
+    aggregation: str = "mean"
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -123,6 +128,9 @@ class EvalConfig:
     debug: bool = False  # 2 val + 2 test cases
 
 
+AGGREGATION_CHOICES = ("mean", "median", "best_of_k_per_channel")
+
+
 def parse_args(argv: Iterable[str] | None = None) -> EvalConfig:
     parser = argparse.ArgumentParser(description="H252 stacked weight-noise x multi-res x mirror eval")
     defaults = EvalConfig()
@@ -137,11 +145,53 @@ def parse_args(argv: Iterable[str] | None = None) -> EvalConfig:
             neg_underscored = f"--no_{f.name}"
             neg_args = [neg_dashed] if neg_dashed == neg_underscored else [neg_dashed, neg_underscored]
             parser.add_argument(*neg_args, action="store_false", dest=f.name)
+        elif f.name == "aggregation":
+            parser.add_argument(
+                *cli_args, type=str, default=v, dest=f.name, choices=AGGREGATION_CHOICES,
+                help=(
+                    "K-sample aggregation across the K_eff stacked weight-perturbation "
+                    "samples. 'mean' reproduces the H285 baseline (homogeneous). "
+                    "'median' picks the per-channel median. 'best_of_k_per_channel' "
+                    "selects the K-sample closest to the K-mean independently per "
+                    "output channel (heterogeneous)."
+                ),
+            )
         else:
             parser.add_argument(*cli_args, type=type(v), default=v, dest=f.name)
     ns = parser.parse_args(argv)
     cfg = EvalConfig(**{f.name: getattr(ns, f.name) for f in fields(EvalConfig)})
+    if cfg.aggregation not in AGGREGATION_CHOICES:
+        raise ValueError(
+            f"Unknown aggregation: {cfg.aggregation!r} (valid: {AGGREGATION_CHOICES})"
+        )
     return cfg
+
+
+@torch.no_grad()
+def aggregate_k_samples(y_k: torch.Tensor, method: str = "mean") -> torch.Tensor:
+    """Reduce a K-stack of per-point predictions to a single per-point estimate.
+
+    Args:
+        y_k: stack of per-point predictions of shape ``(K, ..., C)``. K is the
+            sample-stack dimension (one per perturbation sample); C is the
+            output channel dimension (the last axis).
+        method: one of ``"mean"``, ``"median"``, or ``"best_of_k_per_channel"``.
+
+    For ``best_of_k_per_channel`` (H301), for each ``(point, channel)`` we pick
+    the K-sample whose value has the smallest absolute deviation from the
+    K-mean. The choice is made independently per channel — heterogeneous
+    selection across the C output channels.
+    """
+    if method == "mean":
+        return y_k.mean(dim=0)
+    if method == "median":
+        return y_k.median(dim=0).values
+    if method == "best_of_k_per_channel":
+        y_mean = y_k.mean(dim=0, keepdim=True)
+        distances = (y_k - y_mean).abs()
+        best_k = distances.argmin(dim=0, keepdim=True)
+        return torch.gather(y_k, dim=0, index=best_k).squeeze(0)
+    raise ValueError(f"Unknown aggregation: {method!r} (valid: {AGGREGATION_CHOICES})")
 
 
 def parse_rff_init_sigmas(spec: str) -> list[float] | None:
@@ -299,24 +349,23 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
+    aggregation: str = "mean",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
-    averaged predictions in real units. The outer K loop perturbs the model
-    weights and reuses the perturbed copy across all (res, mirror) inner passes.
+    aggregated predictions in real units. Each K-sample is the per-point
+    average over (R, mirror) inner passes for one perturbation. The K_eff
+    per-sample stacks are then reduced via ``aggregation``.
 
     With ``antithetic=False`` K_eff = ``K_passes`` (i.i.d. samples). With
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
-    (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
-    cancels in the per-point average (Finding NN / H274).
+    (same seed) and evaluate both f(θ+ε) and f(θ−ε); under ``aggregation="mean"``
+    the linear Taylor term cancels in the per-point average (Finding NN / H274).
+    Under ``aggregation="best_of_k_per_channel"`` (H301) the per-channel
+    selection is heterogeneous across K_eff individual perturbation samples.
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
     n_vol = counts["n_volume"]
-
-    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
-    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
-    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
-    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
 
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {
@@ -334,8 +383,18 @@ def process_case_stacked(
         schedule = [(k, sign) for k in range(K_passes) for sign in (+1.0, -1.0)]
     else:
         schedule = [(k, +1.0) for k in range(K_passes)]
+    K_eff = len(schedule)
 
-    for k, sign in schedule:
+    # H301: stack K_eff per-point accumulators so that we can apply non-mean
+    # K-sample aggregations like best_of_k_per_channel. The k-th slice holds
+    # the running sum (and contributing chunk count) for the k-th perturbation
+    # sample across all (res, mirror) inner passes.
+    surf_sums = torch.zeros(K_eff, n_surf, 4, dtype=torch.float32)
+    surf_cnts = torch.zeros(K_eff, n_surf, dtype=torch.int32)
+    vol_sums = torch.zeros(K_eff, n_vol, 1, dtype=torch.float32)
+    vol_cnts = torch.zeros(K_eff, n_vol, dtype=torch.int32)
+
+    for k_idx, (k, sign) in enumerate(schedule):
         # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
         t_p = time.time()
         if sigma > 0.0:
@@ -346,6 +405,11 @@ def process_case_stacked(
         else:
             restore_clean_params(eval_module, clean)
         timing["perturb_seconds"] += time.time() - t_p
+
+        surf_sum_k = surf_sums[k_idx]
+        surf_cnt_k = surf_cnts[k_idx]
+        vol_sum_k = vol_sums[k_idx]
+        vol_cnt_k = vol_cnts[k_idx]
 
         for R in resolutions:
             dataset = DrivAerMLSurfaceDataset(
@@ -408,8 +472,8 @@ def process_case_stacked(
                                     f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
                                 )
                             if s_global.numel() > 0:
-                                surf_sum.index_add_(0, s_global, s_chunk)
-                                surf_cnt.index_add_(
+                                surf_sum_k.index_add_(0, s_global, s_chunk)
+                                surf_cnt_k.index_add_(
                                     0, s_global, torch.ones_like(s_global, dtype=torch.int32)
                                 )
 
@@ -424,32 +488,37 @@ def process_case_stacked(
                                     f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
                                 )
                             if v_global.numel() > 0:
-                                vol_sum.index_add_(0, v_global, v_chunk)
-                                vol_cnt.index_add_(
+                                vol_sum_k.index_add_(0, v_global, v_chunk)
+                                vol_cnt_k.index_add_(
                                     0, v_global, torch.ones_like(v_global, dtype=torch.int32)
                                 )
                     timing["io_seconds"] += time.time() - t1
 
-    if int(surf_cnt.min()) == 0:
+    if int(surf_cnts.min()) == 0:
         raise RuntimeError(
             f"surface coverage incomplete for case {case_id}: "
-            f"{int((surf_cnt == 0).sum())} points have zero contributing chunks"
+            f"{int((surf_cnts == 0).sum())} (K_eff,point) slots have zero "
+            f"contributing chunks"
         )
-    if int(vol_cnt.min()) == 0:
+    if int(vol_cnts.min()) == 0:
         raise RuntimeError(
             f"volume coverage incomplete for case {case_id}: "
-            f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
+            f"{int((vol_cnts == 0).sum())} (K_eff,point) slots have zero "
+            f"contributing chunks"
         )
 
-    surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
-    vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
+    # Per-K-sample per-point means -> (K_eff, n_pts, n_channels)
+    surf_means_k = surf_sums / surf_cnts.unsqueeze(-1).to(torch.float32)
+    vol_means_k = vol_sums / vol_cnts.unsqueeze(-1).to(torch.float32)
+    # Reduce K_eff stack to a single per-point estimate via the chosen aggregation.
+    surf_avg = aggregate_k_samples(surf_means_k, method=aggregation)
+    vol_avg = aggregate_k_samples(vol_means_k, method=aggregation)
 
     case = store.load_case(case_id)
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
-    n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
+    n_passes = K_eff * len(resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -546,6 +615,7 @@ def evaluate_split_stacked(
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
+    aggregation: str = "mean",
 ) -> dict[str, float]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -577,6 +647,7 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            aggregation=aggregation,
         )
         add_case_to_accumulator(
             acc,
@@ -675,7 +746,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-            f"seed_base={cfg.weight_noise_seed_base}"
+            f"seed_base={cfg.weight_noise_seed_base} "
+            f"aggregation={cfg.aggregation}"
         )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
@@ -745,15 +817,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "n_val_cases": len(val_case_ids),
                 "n_test_cases": len(test_case_ids),
                 "ckpt_source": ckpt_source,
+                "K_eff": cfg.weight_noise_passes * (2 if cfg.antithetic_noise else 1),
             },
             tags=[
                 "h252",
+                "h301",
                 "tta",
                 "stacked",
                 "weight-noise",
                 "multi-res",
                 "mirror",
                 "eval-only",
+                f"agg-{cfg.aggregation}",
                 cfg.agent,
             ],
             reinit="finish_previous",
@@ -787,7 +862,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
                     f"mirror={use_mirror} K={cfg.weight_noise_passes} "
                     f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-                    f"sigma={cfg.weight_noise_sigma} ===",
+                    f"sigma={cfg.weight_noise_sigma} agg={cfg.aggregation} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -807,6 +882,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
+                aggregation=cfg.aggregation,
             )
             dt = time.time() - t0
             if state.is_main:
