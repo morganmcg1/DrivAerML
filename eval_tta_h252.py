@@ -35,7 +35,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import timedelta
 from pathlib import Path
 from typing import Iterable
@@ -88,6 +88,13 @@ class EvalConfig:
     # number of forward passes per (res, mirror) is 2 * weight_noise_passes.
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
+
+    # H300: per-channel affine calibration. Fits alpha_c, beta_c via OLS on val
+    # predictions vs val targets (after TTA aggregation), then applies the SAME
+    # (alpha, beta) to test predictions before metric computation. Logs both raw
+    # and calibrated rel_l2-family metrics; MAE is not analytically expressible
+    # under affine + sufficient stats and is reported only on the raw output.
+    test_time_calibration: bool = False
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -453,6 +460,200 @@ def process_case_stacked(
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
+# --- H300 affine calibration helpers ---
+
+
+# Surface preds are [cp, tau_x, tau_y, tau_z]; volume preds are [volume_pressure].
+N_SURF_CHANNELS = 4
+N_VOL_CHANNELS = 1
+# Sufficient-stats column layout: [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt].
+N_STAT_COLS = 6
+
+
+@dataclass
+class CalibrationStats:
+    """Per-case per-channel sufficient stats for fitting an affine OLS
+    calibration y_hat = alpha * y + beta and recomputing per-case rel_l2
+    metrics under that affine map. Surface has 4 channels (cp, tau_x, tau_y,
+    tau_z), volume has 1 (volume_pressure)."""
+
+    surf_global: torch.Tensor = field(
+        default_factory=lambda: torch.zeros(N_SURF_CHANNELS, N_STAT_COLS, dtype=torch.float64)
+    )
+    vol_global: torch.Tensor = field(
+        default_factory=lambda: torch.zeros(N_VOL_CHANNELS, N_STAT_COLS, dtype=torch.float64)
+    )
+    surf_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
+    vol_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
+
+
+def _channel_stats(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Return (n_channels, 6) tensor with [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt].
+
+    pred, target: (N_points, n_channels) tensors in real units. Computed in float64
+    so accumulation across cases / DDP ranks does not lose precision.
+    """
+    p = pred.double()
+    t = target.double()
+    n_points = p.shape[0]
+    n_ch = p.shape[1]
+    stats = torch.empty(n_ch, N_STAT_COLS, dtype=torch.float64)
+    stats[:, 0] = float(n_points)
+    stats[:, 1] = p.sum(0)
+    stats[:, 2] = t.sum(0)
+    stats[:, 3] = (p * p).sum(0)
+    stats[:, 4] = (t * t).sum(0)
+    stats[:, 5] = (p * t).sum(0)
+    return stats
+
+
+def add_case_to_calibration(
+    cal: CalibrationStats,
+    *,
+    case_id: str,
+    surface_pred_real: torch.Tensor,
+    volume_pred_real: torch.Tensor,
+    surface_y: torch.Tensor,
+    volume_y: torch.Tensor,
+) -> None:
+    surf_stats = _channel_stats(surface_pred_real, surface_y)
+    vol_stats = _channel_stats(volume_pred_real, volume_y)
+    cal.surf_per_case[case_id] = surf_stats
+    cal.vol_per_case[case_id] = vol_stats
+    cal.surf_global += surf_stats
+    cal.vol_global += vol_stats
+
+
+def merge_calibration_stats(parts: Iterable[CalibrationStats]) -> CalibrationStats:
+    merged = CalibrationStats()
+    for part in parts:
+        merged.surf_global += part.surf_global
+        merged.vol_global += part.vol_global
+        merged.surf_per_case.update(part.surf_per_case)
+        merged.vol_per_case.update(part.vol_per_case)
+    return merged
+
+
+def fit_affine_per_channel(
+    global_stats: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """OLS alpha, beta per channel from the global sufficient stats.
+
+    alpha = cov(p, t) / var(p);  beta = mu_t - alpha * mu_p, all per channel.
+    Falls back to identity (alpha=1, beta=0) on any degenerate channel where
+    var(p) is non-positive (constant predictions).
+    """
+    N = global_stats[:, 0]
+    sum_p = global_stats[:, 1]
+    sum_t = global_stats[:, 2]
+    sum_pp = global_stats[:, 3]
+    sum_pt = global_stats[:, 5]
+    N_safe = N.clamp(min=1.0)
+    mu_p = sum_p / N_safe
+    mu_t = sum_t / N_safe
+    cov_pt = sum_pt - N * mu_p * mu_t
+    var_p = sum_pp - N * mu_p * mu_p
+    degenerate = var_p <= 1e-12
+    alpha_raw = cov_pt / var_p.clamp(min=1e-12)
+    alpha = torch.where(degenerate, torch.ones_like(alpha_raw), alpha_raw)
+    beta = torch.where(degenerate, torch.zeros_like(alpha_raw), mu_t - alpha * mu_p)
+    return alpha, beta
+
+
+def _affine_error_sq(
+    stats: torch.Tensor, alpha: torch.Tensor, beta: torch.Tensor
+) -> torch.Tensor:
+    """Sum_p (alpha * p + beta - t)^2 per channel given sufficient stats.
+
+    stats: (..., 6) with [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt].
+    alpha, beta: broadcastable to stats[..., 0] shape.
+    """
+    N = stats[..., 0]
+    sum_p = stats[..., 1]
+    sum_t = stats[..., 2]
+    sum_pp = stats[..., 3]
+    sum_tt = stats[..., 4]
+    sum_pt = stats[..., 5]
+    return (
+        alpha * alpha * sum_pp
+        + 2.0 * alpha * beta * sum_p
+        - 2.0 * alpha * sum_pt
+        + beta * beta * N
+        - 2.0 * beta * sum_t
+        + sum_tt
+    )
+
+
+def compute_calibrated_metrics(
+    cal: CalibrationStats,
+    alpha_surf: torch.Tensor,
+    beta_surf: torch.Tensor,
+    alpha_vol: torch.Tensor,
+    beta_vol: torch.Tensor,
+) -> dict[str, float]:
+    """Per-case averaged rel_l2 metrics on calibrated predictions.
+
+    Mirrors the keys produced by ``finalize_eval_accumulator`` for the rel_l2
+    family. MAE-style metrics are not analytically computable from these
+    sufficient stats under an affine map and are omitted.
+    """
+    surf_ids = sorted(cal.surf_per_case.keys())
+    if not surf_ids:
+        raise RuntimeError("CalibrationStats is empty; cannot compute calibrated metrics")
+
+    surf_per_channel_rel_l2: list[torch.Tensor] = []
+    vec_rel_l2_list: list[torch.Tensor] = []
+    for case_id in surf_ids:
+        s = cal.surf_per_case[case_id]  # (4, 6)
+        e_sq = _affine_error_sq(s, alpha_surf, beta_surf)  # (4,)
+        t_sq = s[..., 4]  # sum of squared targets per channel
+        rel = torch.sqrt(e_sq.clamp(min=0.0) / t_sq.clamp(min=1e-12))
+        surf_per_channel_rel_l2.append(rel)
+
+        s_vec = s[1:4]  # (3, 6): tau_x, tau_y, tau_z
+        e_sq_vec = _affine_error_sq(s_vec, alpha_surf[1:4], beta_surf[1:4])  # (3,)
+        t_sq_vec = s_vec[..., 4]
+        rel_vec = torch.sqrt(e_sq_vec.sum().clamp(min=0.0) / t_sq_vec.sum().clamp(min=1e-12))
+        vec_rel_l2_list.append(rel_vec)
+    surf_rel_l2 = torch.stack(surf_per_channel_rel_l2, dim=0)  # (n_cases, 4)
+    vec_rel_l2 = torch.stack(vec_rel_l2_list, dim=0)  # (n_cases,)
+
+    vol_ids = sorted(cal.vol_per_case.keys())
+    vol_per_channel_rel_l2: list[torch.Tensor] = []
+    for case_id in vol_ids:
+        v = cal.vol_per_case[case_id]  # (1, 6)
+        e_sq = _affine_error_sq(v, alpha_vol, beta_vol)  # (1,)
+        t_sq = v[..., 4]
+        rel = torch.sqrt(e_sq.clamp(min=0.0) / t_sq.clamp(min=1e-12))
+        vol_per_channel_rel_l2.append(rel)
+    vol_rel_l2 = torch.stack(vol_per_channel_rel_l2, dim=0)  # (n_cases, 1)
+
+    sp = float(surf_rel_l2[:, 0].mean().item())
+    tx = float(surf_rel_l2[:, 1].mean().item())
+    ty = float(surf_rel_l2[:, 2].mean().item())
+    tz = float(surf_rel_l2[:, 3].mean().item())
+    ws_vec = float(vec_rel_l2.mean().item())
+    vp = float(vol_rel_l2[:, 0].mean().item())
+    abupt = (sp + tx + ty + tz + vp) / 5.0
+    return {
+        "surface_pressure_rel_l2": sp,
+        "surface_pressure_rel_l2_pct": sp * 100.0,
+        "wall_shear_rel_l2": ws_vec,
+        "wall_shear_rel_l2_pct": ws_vec * 100.0,
+        "wall_shear_x_rel_l2": tx,
+        "wall_shear_x_rel_l2_pct": tx * 100.0,
+        "wall_shear_y_rel_l2": ty,
+        "wall_shear_y_rel_l2_pct": ty * 100.0,
+        "wall_shear_z_rel_l2": tz,
+        "wall_shear_z_rel_l2_pct": tz * 100.0,
+        "volume_pressure_rel_l2": vp,
+        "volume_pressure_rel_l2_pct": vp * 100.0,
+        "abupt_axis_mean_rel_l2": abupt,
+        "abupt_axis_mean_rel_l2_pct": abupt * 100.0,
+        "cases": float(len(surf_ids)),
+    }
+
+
 def add_case_to_accumulator(
     acc: EvalAccumulator,
     *,
@@ -546,7 +747,8 @@ def evaluate_split_stacked(
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
-) -> dict[str, float]:
+    collect_calibration: bool = False,
+) -> tuple[dict[str, float], CalibrationStats | None]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
         distributed_state.world_size
@@ -556,6 +758,7 @@ def evaluate_split_stacked(
     my_cases = case_ids[rank::world_size]
 
     acc = EvalAccumulator()
+    cal = CalibrationStats() if collect_calibration else None
     total_t0 = time.time()
     total_forward = 0.0
     total_io = 0.0
@@ -587,6 +790,15 @@ def evaluate_split_stacked(
             volume_y=vol_y,
             transform=transform,
         )
+        if cal is not None:
+            add_case_to_calibration(
+                cal,
+                case_id=case_id,
+                surface_pred_real=surf_avg,
+                volume_pred_real=vol_avg,
+                surface_y=surf_y,
+                volume_y=vol_y,
+            )
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
         total_perturb += timing["perturb_seconds"]
@@ -612,13 +824,23 @@ def evaluate_split_stacked(
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(world_size)]
         dist.all_gather_object(gathered, acc)
+        gathered_cal: list[CalibrationStats | None] | None = None
+        if cal is not None:
+            gathered_cal = [None for _ in range(world_size)]
+            dist.all_gather_object(gathered_cal, cal)
         if not distributed_state.is_main:
-            return {}
+            return {}, None
         merged = merge_eval_accumulators(g for g in gathered if g is not None)
+        merged_cal = (
+            merge_calibration_stats(c for c in gathered_cal if c is not None)
+            if gathered_cal is not None
+            else None
+        )
     else:
         merged = acc
+        merged_cal = cal
 
-    return finalize_eval_accumulator(merged)
+    return finalize_eval_accumulator(merged), merged_cal
 
 
 def resolve_checkpoint_path(cfg: EvalConfig, state) -> tuple[Path, str]:
@@ -765,8 +987,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     ]
 
     summary: dict[str, dict[str, dict[str, float]]] = {}
+    cal_summary: dict[str, dict[str, CalibrationStats | None]] = {}
+    log_prefix_by_split: dict[str, str] = {}
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
+        cal_summary[split_name] = {}
+        log_prefix_by_split[split_name] = log_prefix
         for mode in modes:
             if mode == "weight_noise_only":
                 # K-pass weight-noise average at a single resolution, no mirror.
@@ -787,11 +1013,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
                     f"mirror={use_mirror} K={cfg.weight_noise_passes} "
                     f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-                    f"sigma={cfg.weight_noise_sigma} ===",
+                    f"sigma={cfg.weight_noise_sigma} "
+                    f"calibration={cfg.test_time_calibration} ===",
                     flush=True,
                 )
             t0 = time.time()
-            metrics = evaluate_split_stacked(
+            metrics, cal_stats = evaluate_split_stacked(
                 split_name=f"{split_name}/{mode}",
                 case_ids=case_ids,
                 model=model,
@@ -807,12 +1034,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
+                collect_calibration=cfg.test_time_calibration,
             )
             dt = time.time() - t0
             if state.is_main:
                 print(f"  total {split_name}/{mode}: {dt:.1f}s")
                 print_metrics(f"{split_name}/{mode}", metrics)
                 summary[split_name][mode] = metrics
+                cal_summary[split_name][mode] = cal_stats
 
                 log_obj: dict[str, float] = {}
                 log_obj.update(primary_metric_log(f"{log_prefix}_primary/{mode}", metrics))
@@ -823,6 +1052,90 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     # Always restore clean weights at the end.
     restore_clean_params(eval_module, clean)
+
+    # H300: per-channel affine calibration applied on val, transferred to test.
+    cal_metrics_by_split_mode: dict[str, dict[str, dict[str, float]]] = {}
+    if cfg.test_time_calibration and state.is_main:
+        for mode in modes:
+            val_cal = cal_summary.get("val_surface", {}).get(mode)
+            test_cal = cal_summary.get("test_surface", {}).get(mode)
+            if val_cal is None or test_cal is None:
+                print(
+                    f"[calibration] mode={mode}: missing cal stats "
+                    f"(val={val_cal is not None}, test={test_cal is not None}); skipping",
+                    flush=True,
+                )
+                continue
+            alpha_surf, beta_surf = fit_affine_per_channel(val_cal.surf_global)
+            alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
+
+            channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
+            print(f"\n=== H300 calibration (fit on val, mode={mode}) ===", flush=True)
+            for c, name in enumerate(channel_names):
+                print(
+                    f"  surface[{name:6s}]  alpha={alpha_surf[c].item():+.6f} "
+                    f"beta={beta_surf[c].item():+.6f}",
+                    flush=True,
+                )
+            print(
+                f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
+                f"beta={beta_vol[0].item():+.6f}",
+                flush=True,
+            )
+
+            val_cal_metrics = compute_calibrated_metrics(
+                val_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
+            )
+            test_cal_metrics = compute_calibrated_metrics(
+                test_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
+            )
+            cal_metrics_by_split_mode.setdefault("val_surface", {})[mode] = val_cal_metrics
+            cal_metrics_by_split_mode.setdefault("test_surface", {})[mode] = test_cal_metrics
+
+            print(
+                f"  val  (raw -> cal)  abupt {summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                f"-> {val_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                flush=True,
+            )
+            print(
+                f"  test (raw -> cal)  abupt {summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                f"-> {test_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                flush=True,
+            )
+
+            if run is not None:
+                # Log alpha/beta to W&B summary so they appear on the run page.
+                for c, name in enumerate(channel_names):
+                    run.summary[f"calibration/{mode}/alpha_{name}"] = float(alpha_surf[c].item())
+                    run.summary[f"calibration/{mode}/beta_{name}"] = float(beta_surf[c].item())
+                run.summary[f"calibration/{mode}/alpha_volume_pressure"] = float(alpha_vol[0].item())
+                run.summary[f"calibration/{mode}/beta_volume_pressure"] = float(beta_vol[0].item())
+
+                # Log calibrated primary metrics to W&B history (and as
+                # split-level summary keys for downstream parsing).
+                val_log = {
+                    f"full_val_primary_calibrated/{mode}/{k}": v
+                    for k, v in val_cal_metrics.items()
+                }
+                test_log = {
+                    f"test_primary_calibrated/{mode}/{k}": v
+                    for k, v in test_cal_metrics.items()
+                }
+                wandb.log({**val_log, **test_log})
+
+                # Single-line paper-facing primary metrics (no mode suffix).
+                run.summary["val_abupt_h300_calibrated"] = float(
+                    val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                )
+                run.summary["test_abupt_h300_calibrated"] = float(
+                    test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                )
+                run.summary["val_abupt_h300_raw"] = float(
+                    summary["val_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
+                )
+                run.summary["test_abupt_h300_raw"] = float(
+                    summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
+                )
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
@@ -845,6 +1158,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"{modes_dict[m][k]:>22.4f}" for m in mode_keys
                 )
                 print(row)
+            cal_modes = cal_metrics_by_split_mode.get(split, {})
+            if cal_modes:
+                print(f"  --- calibrated (alpha,beta fit on val) ---")
+                for k in keys_to_show:
+                    row = f"  {k:<36s} " + " ".join(
+                        f"{cal_modes[m][k]:>22.4f}" if m in cal_modes else f"{'n/a':>22s}"
+                        for m in mode_keys
+                    )
+                    print(row)
 
         if run is not None:
             for split, modes_dict in summary.items():
@@ -852,6 +1174,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     for k, v in metrics.items():
                         try:
                             run.summary[f"{split}/{mode}/{k}"] = float(v)
+                        except Exception:
+                            pass
+            for split, modes_dict in cal_metrics_by_split_mode.items():
+                for mode, metrics in modes_dict.items():
+                    for k, v in metrics.items():
+                        try:
+                            run.summary[f"{split}_calibrated/{mode}/{k}"] = float(v)
                         except Exception:
                             pass
             run.finish()
