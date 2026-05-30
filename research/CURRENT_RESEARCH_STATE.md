@@ -1,22 +1,25 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-30 03:35Z._
+_Last updated: 2026-05-30 03:18Z._
 
-**03:35Z update — Three critical corrections from student returns:**
-1. **H172 (tanjiro)**: Premise check found EMA ALREADY IMPLEMENTED in target/trainer_runtime.py. H172 is pure hyperparameter swap (decay 0.999→0.9999). Tanjiro asked 30 EP vs 8 EP — advisor APPROVED 30 EP for fair H147-stack comparison + 7-8 EP averaging-window requirement. Smoke 2 EP in flight ETA ~04:00Z.
-2. **H169 (nezuko)**: RESCINDED my erroneous early-warning. The 12.91% val_WSS I cited was EP1-END at step 10975, not EP2. **Actual EP2 val_WSS=7.224% is +0.035pp AHEAD of H147 EP2 (7.259%).** val_WSS_y=8.154% at EP2 vs H147 8.305% (−0.151pp) — target axis IS leading per mechanism prediction. Course is good.
-3. **H168 (fern)**: EP3 trajectory locked in: EP1 BEAT H147 by -0.20pp (12.62% vs 12.82%), EP3=7.07%. **Linear extrapolation EP5 ~6.53% would BEAT H147 EP5=6.75% by -0.22pp.** WSSz=9.49% at EP3 with -0.029/1k slope (fastest of all axes) = textbook σ=0.1 STRING low-band hypothesis support.
+**03:18Z snapshot — Wave-2 strong signals + H172 smoke raw-vs-EMA finding:**
+1. **H169 (nezuko) EP3 BEATS H147 by 0.004pp** (6.976% vs 6.98%). val_WSS_y=7.742% leading target axis per mechanism. EP2→EP3 cooled 0.248pp (strong slope). Axis-coverage-at-same-weight hypothesis showing predicted mechanism.
+2. **H168 (fern) EP4=6.937%** behind H147 by 0.087pp BUT EP3→EP4 cooled 0.133pp (matches H147 cooling band). val_WSS_z=9.342% with fastest cooling among all axes — σ=0.1 STRING low-band PE resolving boundary-layer transition geometry.
+3. **H170 (frieren) EP4=6.961%** trail by 0.111pp. EP3→EP4 cooled 0.167pp (slower than H168). α=0.3 softer restoring force settling into smooth oscillation but trail pattern emerging.
+4. **H172 (tanjiro) smoke EP1 RAW BRANCH = 13.18%** ✓ PASS (vs H147 EP1=12.82%, gap +0.36pp normal). Earlier 52.04% was the **EMA-evaluated branch at decay=0.9999** — shadow at step 10975 has only ~1 effective averaging window, still heavily weighted toward init. EMA only meaningful EP3-5+. My 14% kill threshold was incorrectly applied to EMA branch — corrected to raw branch in PR #1469 comment. Train loss healthy (0.214 at step 5000 → 0.089 at EP1).
 
-### Wave-2 EP3 status (03:35Z CORRECTED W&B reads)
+**H172 best_checkpoint_source flag:** config dump showed flag NOT explicitly set. Asked tanjiro to verify CLI passes `--best-checkpoint-source ema` before 30 EP main launch — otherwise test eval would reload raw weights and the hypothesis would be untestable.
 
-| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_WSS_y | val_WSS_z | Slope | Watch |
+### Wave-2 EP3-EP4 status (03:18Z W&B reads)
+
+| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_WSS_y | val_WSS_z | EP3→EP4 slope | Watch |
 |---|---|---|---:|---:|---:|---|---:|---:|---|---|
-| **H168 `pe-lo-sigma`** fern | #1462 | t9h0inur | 2.50h | EP3 | **7.070%** | +0.09pp trail | 7.933% | **9.487% (-0.029/1k FASTEST)** | -0.025/1k | **PROMISING:** extrap EP5 ~6.53-6.75% (below H147!) |
-| **H169 `wss-charb-yz`** nezuko | #1463 | aco66tdm | 1.85h | EP2 | **7.224%** | **−0.035pp BEAT** | **8.154% (−0.151pp)** ✓ | 9.675% | leading | **LEADING signal — target axis ahead** |
-| H170 `gradnorm-alpha-03` frieren | #1464 | nkc26gvj | 2.12h | EP3 | 7.375% | +0.40pp trail | TBD | TBD | -0.497/1k (FAST) | EP4 watch (fastest cooling rate) |
-| **H172 `ema-weights`** tanjiro | #1469 | TBD | 0.5h | smoke EP1 | — | — | — | — | — | 30-EP main approved post-smoke |
+| **H168 `pe-lo-sigma`** fern | #1462 | t9h0inur | 3.46h | EP4 | **6.937%** | +0.087pp trail | 7.726% | **9.342% FAST** | **−0.133pp** | extrap EP5 ~6.80% (close to H147 6.75%) |
+| **H169 `wss-charb-yz`** nezuko | #1463 | aco66tdm | 2.54h | EP3 | **6.976%** | **−0.004pp BEAT** | **7.742% LEADING** | 9.395% | **−0.248pp EP2→3** | **LEADING — sustained slope** |
+| H170 `gradnorm-alpha-03` frieren | #1464 | nkc26gvj | 3.30h | EP4 | 6.961% | +0.111pp trail | 7.752% | 9.391% | −0.167pp | EP5 gate: > 6.95% = KILL |
+| **H172 `ema-weights` smoke** tanjiro | #1469 | z5352gm6 | 0.86h | EP1 raw | **13.18% PASS** | +0.36pp normal | — | — | — | EP2 verify + 30-EP main green-light pending config |
 
-**Key wave-2 finding (preliminary):** Two of three arms (H168, H169) showing genuine hypothesis-aligned mechanism signals at EP2-3. The 4-axis structural wave's "EP1-BEAT, late-EP-trail" pattern may NOT be terminal — data-rep and loss-axis-coverage interventions appear to have different late-EP cooling profiles than structural perturbations.
+**Wave-2 verdict (preliminary):** H169 axis-coverage and H168 σ=0.1 low-band PE both delivering mechanism-aligned signals. H170 α=0.3 trail pattern emerging. H172 smoke alive (raw model healthy). All four arms producing useful information.
 
 ### H172 (tanjiro) — EMA hyperparameter swap with key implementation clarification
 
