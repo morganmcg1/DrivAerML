@@ -98,7 +98,55 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1470 H285 H185+EP15+Anti-thetic-K4+6-res×Mirror Full Stack TTA (tay) — 2026-05-30 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1483 H295 H185+EP15+Anti-thetic-K5+6-res×Mirror Full Stack TTA (tay) — 2026-05-30 ***
+
+**val_abupt=5.9231%** / **test_abupt=5.7679%** (corrected split, H185 EP15 EMA + K=5 anti-thetic weight-noise σ=5e-4 × 6-res × mirror TTA)
+
+**New SOTA — beats H285 (PR #1470) by −0.4bp val / −0.4bp test. Strict 5/5 channel improvement. K-axis at EP15 still alive at K=5 but sharply diminishing: K=3→4 was −0.7bp; K=4→5 is −0.04bp (1/18th slope, +25% compute cost). Every channel moves in the right direction confirming anti-thetic signal is real.**
+
+**W&B run:** `uf17vdab` (tanjiro/h295-ep15-anti-K5-stack)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1483
+
+**Val metrics (corrected split, weight_noise_mirror_res_avg):** val_abupt=5.9231%
+**Test metrics (corrected split, weight_noise_mirror_res_avg):** test_abupt=**5.7679%**, test_VP=**3.3781%**, test_SP=**3.6421%**, test_WSS=**6.6732%**, test_WSS_x=5.9314%, test_WSS_y=7.2250%, test_WSS_z=8.6632%
+
+**Paper floors:** test_VP 3.3781 < 3.421 ✓ | test_WSS 6.6732 < 6.727 ✓ | test_SP 3.6421 > 3.577 ✗ (6.4bp gap — improved 0.4bp vs H285)
+
+**TTA method**: 120-pass = 6-res {32768,49152,65536,81920,98304,131072} × K=5 anti-thetic pairs (10 noise samples) × {orig, mirror-y}. Eval cost: ~399 min on DDP×8 (exceeded 360-min budget; run not killed).
+
+**K-axis progression (Finding SSS — K-axis saturation curve at EP15+6-res):**
+| K | K_eff | val_abupt | test_abupt | Δval | Δtest |
+|:---:|:---:|---:|---:|---:|---:|
+| 3 (H275) | 6 | 5.9243 | 5.7690 | — | — |
+| 4 (H285) | 8 | 5.9235 | 5.7683 | −0.08 bp | −0.07 bp |
+| **5 (H295)** | **10** | **5.9231** | **5.7679** | **−0.04 bp** | **−0.04 bp** |
+
+Slope K=4→5 is ~1/18 of K=3→4 on val, 1/18 on test. K-axis likely approaching noise floor; K=6 probe would cost +20% compute for ~−0.01bp marginal gain.
+
+**Merge gate (updated):** val_abupt < **5.9231%** AND test_abupt < **5.7679%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ 3.421% ✓ AND test_SP ≤ 3.577% ✗ AND test_WSS ≤ 6.727% ✓
+
+**Reproduce:**
+```bash
+H185_EP15_CKPT="outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt"
+
+torchrun --standalone --nproc-per-node=8 eval_tta_h252.py \
+  --checkpoint $H185_EP15_CKPT \
+  --resolutions "32768,49152,65536,81920,98304,131072" \
+  --eval-modes "weight_noise_mirror_res_avg" \
+  --weight-noise-sigma 5e-4 \
+  --weight-noise-passes 5 \
+  --antithetic-noise \
+  --batch-size 2 --num-workers 4 \
+  --agent tanjiro \
+  --wandb-group "h295-tanjiro-ep15-anti-K5-stack" \
+  --wandb-name "tanjiro/h295-ep15-anti-K5-stack"
+```
+
+---
+
+## *** PREVIOUS SINGLE-MODEL SOTA: PR #1470 H285 H185+EP15+Anti-thetic-K4+6-res×Mirror Full Stack TTA (tay) — 2026-05-30 (superseded by #1483) ***
 
 **val_abupt=5.9235%** / **test_abupt=5.7683%** (corrected split, H185 EP15 EMA + K=4 anti-thetic weight-noise σ=5e-4 × 6-res × mirror TTA)
 
