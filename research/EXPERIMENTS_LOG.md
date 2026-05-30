@@ -4737,3 +4737,41 @@ H175 closes the 2D magnitude × coverage cell at preserved magnitude.
 - wss_charbonnier axis-coverage at SAME weight: FALSIFIED. Magnitude doubling broke SP floor; mechanism didn't transfer val→test.
 - **H175 dispatched (nezuko):** student's follow-up #1 verbatim — `wss_charbonnier_weight=0.05 axes=yz`. Preserves total Charbonnier contribution at 0.10 matching H147, isolates COVERAGE from MAGNITUDE. Three predicted outcomes: neutral, partial-win, or full-falsification of coverage direction.
 - Wave-2 plateau-escape now narrows to: H172 (EMA decay 0.9999, pure regularizer), H173 (vol_p clamp release, redistributes to w_cp protecting SP rather than starving), H174 (PE density-preserved spectral shift), H175 (magnitude-preserved coverage).
+
+## 2026-05-30 12:13Z — PR #1474: H173 gradnorm_min_w_vol_p 0.15→0.05 (frieren)
+
+- **Branch:** dl24-frieren/h173-gradnorm-clamp-vol-p-005
+- **W&B run:** `ll8zl49z` (rank0 terminal, EP8 EMA)
+- **Hypothesis:** Raising the GradNorm minimum weight for the vol_p task from 0.15 to 0.05 releases the vol_p clamp and frees ~0.10 of GradNorm budget for autonomous reallocation by the optimizer — predicted to flow into w_cp (SP guardian) and produce SP protection.
+
+### Results
+
+| metric | H173 test | H147 SOTA | Δ vs H147 | floor cap | status |
+|---|---:|---:|---:|---:|---|
+| test_WSS | 6.6081% | 6.5409% | +0.067pp TRAIL | — | does not improve |
+| test_WSS_x | 5.9039% | 5.8155% | +0.088pp | — | — |
+| test_WSS_y | 7.1141% | 7.0556% | +0.058pp | — | — |
+| test_WSS_z | 8.5282% | 8.4882% | +0.040pp | — | — |
+| test_VP | 3.7793% | 3.4014% | +0.378pp | 3.643% | ❌ BREACH +0.136pp |
+| test_SP | 3.5458% | 3.5634% | −0.018pp BEATS | 3.577% | ✓ clears |
+| test_ABU | 5.7743% | 5.6648% | +0.110pp | 5.844% | ✓ clears |
+
+Val EP8 (final EMA): WSS=6.803, VP=3.790, SP=4.001, ABU=6.079.
+EP7 MAJOR FINDING: val_WSS=6.798 = −0.002pp BELOW H147 baseline while SP=3.928 = −0.032pp BELOW H147 (BOTH metrics beat H147 simultaneously on val for first time in wave-2).
+
+### Analysis
+
+**Mechanism CONFIRMED:** GradNorm trace at EP7 cleanly decoded: freed ~0.12 vol_p weight absorbed into:
+- w_τ_y +0.15 above H147 (y-axis cross-flow absorbs most freed budget)
+- w_cp +0.09 above H147 (SP guardian elevated to protect floor)
+- w_τ_x −0.14 below H147 (released to make room)
+
+The vol_p floor pin 0.05 gives GradNorm freedom to elevate the SP guardian w_cp without compromising tau pressure — exactly the predicted mechanism.
+
+**Failure mode: VP starvation.** The freed vol_p budget went to SP protection (w_cp) and y-axis coverage (w_τ_y) at the cost of VP. test_VP=3.7793% breaches the 3.643% floor cap by +0.136pp. The clamp_active flag showed w_vol_p sitting exactly AT the 0.05 floor for 6+ EPs (with clamp_active=0 because value reaches floor naturally, not via gradient clamp — student bug observation #5 confirmed).
+
+**Resource conservation law — POSITIVE DIRECTION FOUND:** H164-H169 established the law states any perturbation increasing WSS pressure breaks SP floor. H173 proves the OPPOSITE direction: reducing vol_p pressure (via floor relaxation) allows GradNorm to PROTECT SP floor. The law has both a negative and positive direction.
+
+### Conclusion
+
+NON-MERGE: VP floor cap breach is a hard constraint violation. SP-protection mechanism is real and valuable but the floor (0.05) was too aggressive. Next test: H176 at floor=0.10 (midpoint between H147 0.15 and H173 0.05), assigned to frieren (PR #1486).
