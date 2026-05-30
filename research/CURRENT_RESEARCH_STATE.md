@@ -1,25 +1,49 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-30 03:18Z._
+_Last updated: 2026-05-30 03:58Z._
 
-**03:18Z snapshot — Wave-2 strong signals + H172 smoke raw-vs-EMA finding:**
-1. **H169 (nezuko) EP3 BEATS H147 by 0.004pp** (6.976% vs 6.98%). val_WSS_y=7.742% leading target axis per mechanism. EP2→EP3 cooled 0.248pp (strong slope). Axis-coverage-at-same-weight hypothesis showing predicted mechanism.
-2. **H168 (fern) EP4=6.937%** behind H147 by 0.087pp BUT EP3→EP4 cooled 0.133pp (matches H147 cooling band). val_WSS_z=9.342% with fastest cooling among all axes — σ=0.1 STRING low-band PE resolving boundary-layer transition geometry.
-3. **H170 (frieren) EP4=6.961%** trail by 0.111pp. EP3→EP4 cooled 0.167pp (slower than H168). α=0.3 softer restoring force settling into smooth oscillation but trail pattern emerging.
-4. **H172 (tanjiro) smoke EP1 RAW BRANCH = 13.18%** ✓ PASS (vs H147 EP1=12.82%, gap +0.36pp normal). Earlier 52.04% was the **EMA-evaluated branch at decay=0.9999** — shadow at step 10975 has only ~1 effective averaging window, still heavily weighted toward init. EMA only meaningful EP3-5+. My 14% kill threshold was incorrectly applied to EMA branch — corrected to raw branch in PR #1469 comment. Train loss healthy (0.214 at step 5000 → 0.089 at EP1).
+**03:58Z snapshot — H170 CLOSED (α-axis bracketed), H173 dispatched, H172 smoke EP2 PASS:**
 
-**H172 best_checkpoint_source flag:** config dump showed flag NOT explicitly set. Asked tanjiro to verify CLI passes `--best-checkpoint-source ema` before 30 EP main launch — otherwise test eval would reload raw weights and the hypothesis would be untestable.
+1. **H170 (frieren) CLOSED PR #1464** — EP5 kill 6.899% > 6.80% gate. α=0.3 mechanism falsified in OPPOSITE direction: w_τ_z oscillation 3.2× larger, drift upward 1.21→1.55. KEY FINDING: w_vol_p pinned at 0.15 clamp for 100% of run (H147 too). GradNorm wants to push vol_p lower but clamp blocks. α-axis bracketed (H874 0.75 blow-up, H170 0.3 kill) — α=0.5 TIGHT.
+2. **H173 dispatched to frieren PR #1474** — gradnorm_min_w_vol_p 0.15→0.05. Tests if releasing the vol_p clamp lets GradNorm route more budget to WSS heads. Direct H170 follow-on.
+3. **H172 (tanjiro) smoke EP2 PASS** — raw val_WSS=8.03% at step 21951. Expected trail vs H147 EP2=7.26% due to slower LR drop in 30-EP cosine schedule. EMA shadow still warming (49.35% — expected). **30-EP main launched pending tanjiro verification of `--best-checkpoint-source ema` and `--ema-decay 0.9999` flags.** Status:wip; kill ladder updated.
 
-### Wave-2 EP3-EP4 status (03:18Z W&B reads)
+### Wave-2 EP4-EP5 status (03:58Z W&B reads)
 
-| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_WSS_y | val_WSS_z | EP3→EP4 slope | Watch |
+| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_WSS_y | val_WSS_z | Last slope | Watch |
 |---|---|---|---:|---:|---:|---|---:|---:|---|---|
-| **H168 `pe-lo-sigma`** fern | #1462 | t9h0inur | 3.46h | EP4 | **6.937%** | +0.087pp trail | 7.726% | **9.342% FAST** | **−0.133pp** | extrap EP5 ~6.80% (close to H147 6.75%) |
-| **H169 `wss-charb-yz`** nezuko | #1463 | aco66tdm | 2.54h | EP3 | **6.976%** | **−0.004pp BEAT** | **7.742% LEADING** | 9.395% | **−0.248pp EP2→3** | **LEADING — sustained slope** |
-| H170 `gradnorm-alpha-03` frieren | #1464 | nkc26gvj | 3.30h | EP4 | 6.961% | +0.111pp trail | 7.752% | 9.391% | −0.167pp | EP5 gate: > 6.95% = KILL |
-| **H172 `ema-weights` smoke** tanjiro | #1469 | z5352gm6 | 0.86h | EP1 raw | **13.18% PASS** | +0.36pp normal | — | — | — | EP2 verify + 30-EP main green-light pending config |
+| **H168 `pe-lo-sigma`** fern | #1462 | t9h0inur | 4.20h | **EP5** | **6.858%** | +0.108pp | 7.593% | **9.248% FASTEST** | −0.079pp EP4→5 | BORDERLINE — above 6.85% gate by 0.008pp, **CONTINUE** on WSSz signal |
+| **H169 `wss-charb-yz`** nezuko | #1463 | aco66tdm | 3.26h | **EP4** | **6.886%** | +0.036pp | **7.563% LEADING** | 9.299% | −0.090pp EP3→4 | Lost EP3 BEAT, mechanism partially intact (WSS_y still leading); continue to terminal |
+| **H170 `gradnorm-alpha-03`** frieren | #1464 | nkc26gvj | 3.58h | EP5 | **6.899% KILL** | +0.149pp | — | — | −0.062pp EP4→5 | **CLOSED** PR #1464 — α=0.5 bracketed, α-axis closed |
+| **H172 `ema-weights` smoke** tanjiro | #1469 | z5352gm6 | 1.49h | EP2 raw | **8.03% PASS** | +0.77pp (schedule diff) | — | — | — | 30-EP main pending config verify + launch |
+| **H173 `gradnorm-clamp-vol-p`** frieren | #1474 | TBD | 0h | not started | — | — | — | — | — | Smoke EP1 then 8-EP main |
 
-**Wave-2 verdict (preliminary):** H169 axis-coverage and H168 σ=0.1 low-band PE both delivering mechanism-aligned signals. H170 α=0.3 trail pattern emerging. H172 smoke alive (raw model healthy). All four arms producing useful information.
+### Wave-2 trail pattern — CONFIRMED EXPANDING
+
+| Run | Mechanism class | EP trail pattern | α-axis? | Outcome |
+|---|---|---|---|---|
+| H164 slices=192 | Structural | EP1-only-gain, late trail | — | CLOSED |
+| H165 pe=12 | Structural | EP1-only-gain, late trail | — | CLOSED |
+| H166 surfw=3 | Structural | EP1-only-gain, late trail | — | CLOSED |
+| H168 pe-lo-sigma | Data-rep (PE freq) | EP5 borderline, WSSz signal | — | **Continuing** |
+| H169 wss-charb-yz | Loss-axis-coverage | EP3 BEAT → EP4 trail +0.036 | — | **Continuing** |
+| **H170 gradnorm-α** | **Loss-allocation** | **EP2→5 widening trail → KILL** | **BRACKETED** | **CLOSED** |
+
+**Emerging conclusion:** single-flag perturbations fail across structural, PE-freq, Charbonnier-coverage, AND GradNorm-allocation axes. The 4-axis structural wave finding extends to the loss-allocation dimension. Next plateau-escape requires either (a) multi-flag joint moves, (b) architecture, or (c) optimizer-level (Lookahead, LLRD). H168/H169 are the last two single-flag arms in flight with mechanism-aligned signals.
+
+### H173 (frieren) — vol_p clamp probe
+
+**Mechanism:** H170 trace showed w_vol_p pinned at clamp=0.15 throughout (H147 same). GradNorm wants to route less budget to vol_p but floor blocks it. Lowering clamp to 0.05 lets GradNorm optimize freely — may free WSS budget.
+
+**H147 test_VP headroom:** 3.4014% vs floor 3.643% = 0.242pp headroom. Safe margin for vol_p budget reduction.
+
+**If H173 ALSO trails** → GradNorm clamp axis is also closed → next move must be multi-flag joint (H168+H169 mechanisms combined) or architectural.
+
+### H172 (tanjiro) — 30-EP EMA decay=0.9999 main run key flags
+- `--ema-decay 0.9999` (switch from H147's 0.999)
+- `--best-checkpoint-source ema` (required for EMA test eval)  
+- `--ema-start-step 500` (default)
+- Kill ladder: EP5 raw > 8.50%, EP10 EMA > 6.80%, EP15 EMA > 6.65%, EP25 EMA > 6.55%
 
 ### H172 (tanjiro) — EMA hyperparameter swap with key implementation clarification
 
