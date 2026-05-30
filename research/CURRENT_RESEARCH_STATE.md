@@ -1,21 +1,34 @@
 # SENPAI Research State
 
-_Last updated: 2026-05-30 03:05Z._
+_Last updated: 2026-05-30 03:35Z._
 
-**03:05Z update — H171 CLOSED no-execute (tanjiro premise check: H147 already runs mirror-y aug at p=0.5). H172 EMA-model-weights dispatched to tanjiro (PR #1469). Wave-2 EP3 reads: H168 flat slope (7.07%, marginal), H169 SEVERE MISS (+5.65pp at EP2, early-kill watch), H170 fast slope (7.38%, most promising). Fleet fully staffed.**
+**03:35Z update — Three critical corrections from student returns:**
+1. **H172 (tanjiro)**: Premise check found EMA ALREADY IMPLEMENTED in target/trainer_runtime.py. H172 is pure hyperparameter swap (decay 0.999→0.9999). Tanjiro asked 30 EP vs 8 EP — advisor APPROVED 30 EP for fair H147-stack comparison + 7-8 EP averaging-window requirement. Smoke 2 EP in flight ETA ~04:00Z.
+2. **H169 (nezuko)**: RESCINDED my erroneous early-warning. The 12.91% val_WSS I cited was EP1-END at step 10975, not EP2. **Actual EP2 val_WSS=7.224% is +0.035pp AHEAD of H147 EP2 (7.259%).** val_WSS_y=8.154% at EP2 vs H147 8.305% (−0.151pp) — target axis IS leading per mechanism prediction. Course is good.
+3. **H168 (fern)**: EP3 trajectory locked in: EP1 BEAT H147 by -0.20pp (12.62% vs 12.82%), EP3=7.07%. **Linear extrapolation EP5 ~6.53% would BEAT H147 EP5=6.75% by -0.22pp.** WSSz=9.49% at EP3 with -0.029/1k slope (fastest of all axes) = textbook σ=0.1 STRING low-band hypothesis support.
 
-### Wave-2 EP3 status (03:00Z W&B reads)
+### Wave-2 EP3 status (03:35Z CORRECTED W&B reads)
 
-| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_VP | val_SP | Slope | Watch |
+| Run | PR | rank0 | rt | ~EP | val_WSS | vs H147 ref | val_WSS_y | val_WSS_z | Slope | Watch |
 |---|---|---|---:|---:|---:|---|---:|---:|---|---|
-| H168 `pe-lo-sigma` fern | #1462 | t9h0inur | 2.26h | EP3 | **7.070%** | +0.09pp above H147 EP3=6.98 | 4.42% | 4.18% | −0.025/1k (FLAT) | EP5 kill-gate close: EP5 est ~6.9–7.0% |
-| H169 `wss-charb-yz` nezuko | #1463 | aco66tdm | 1.35h | EP2 | **12.909%** | +5.65pp above H147 EP2=7.26 ⚠️ | 13.88% | 9.02% | n/a | **SEVERE MISS** — early-kill watch |
-| H170 `gradnorm-alpha-03` frieren | #1464 | nkc26gvj | 2.12h | EP3 | **7.375%** | +0.40pp above H147 EP3=6.98 | 4.98% | 4.28% | −0.497/1k (FAST) | Most promising slope; watch EP4-5 |
-| H172 `ema-weights` tanjiro | #1469 | TBD | 0h | smoke | — | — | — | — | — | NEW — just dispatched |
+| **H168 `pe-lo-sigma`** fern | #1462 | t9h0inur | 2.50h | EP3 | **7.070%** | +0.09pp trail | 7.933% | **9.487% (-0.029/1k FASTEST)** | -0.025/1k | **PROMISING:** extrap EP5 ~6.53-6.75% (below H147!) |
+| **H169 `wss-charb-yz`** nezuko | #1463 | aco66tdm | 1.85h | EP2 | **7.224%** | **−0.035pp BEAT** | **8.154% (−0.151pp)** ✓ | 9.675% | leading | **LEADING signal — target axis ahead** |
+| H170 `gradnorm-alpha-03` frieren | #1464 | nkc26gvj | 2.12h | EP3 | 7.375% | +0.40pp trail | TBD | TBD | -0.497/1k (FAST) | EP4 watch (fastest cooling rate) |
+| **H172 `ema-weights`** tanjiro | #1469 | TBD | 0.5h | smoke EP1 | — | — | — | — | — | 30-EP main approved post-smoke |
 
-**H169 alert:** Prior run rha7q5tp crashed at EP1 val_WSS=12.86%; aco66tdm (restart) shows same pattern at EP2=12.91%. val_VP=13.88% (+9.5pp above expected) = loss balance completely collapsed. Charbonnier yz at weight 0.1 doubled the effective WSS contribution covering two axes simultaneously. EP3 must drop below 9% val_WSS AND below 6% val_VP or self-abort is warranted. Advisor sent early-kill warning to nezuko.
+**Key wave-2 finding (preliminary):** Two of three arms (H168, H169) showing genuine hypothesis-aligned mechanism signals at EP2-3. The 4-axis structural wave's "EP1-BEAT, late-EP-trail" pattern may NOT be terminal — data-rep and loss-axis-coverage interventions appear to have different late-EP cooling profiles than structural perturbations.
 
-**H170 note:** Pod had 1 restart 9h ago; current 8-run set is a fresh restart. Slope −0.497%/1k is ~20x faster than H168 — approximately 1.5k steps from now should bring H170 below H147 EP3=6.98% baseline. This is the arm to watch.
+### H172 (tanjiro) — EMA hyperparameter swap with key implementation clarification
+
+**Premise check result (tanjiro):** EMA is already wired in `target/trainer_runtime.py:45-92` (EMA class with update/store/copy_to/restore) + `train.py` Config flags `use_ema=True, ema_decay=0.999, ema_start_step=50, best_checkpoint_source="ema"`. H147 already runs `--ema-decay 0.999 --ema-start-step 500`. **H172 is a pure 0.999→0.9999 hyperparameter swap, no code change needed.**
+
+**Advisor 30 EP decision rationale:** decay=0.9999 has effective averaging window = 1/(1-0.9999) = 10,000 steps. At ~1.4k steps/rank per EP, 8 EP only delivers 1.13 EPs of averaging vs needed 7-8 EPs to reach steady-state shadow. The 30 EP test is the only fair contract.
+
+**Prior EMA failures (re-analyzed):**
+- PR #944 (decay=0.9999, EP5 KILLED 8.79%): PRE-H147 6L STRING + GradNorm stack; EP5 = 7k steps = only 70% of EMA window. Kill was premature.
+- PR #954 (decay=0.999, EP10 KILLED 7.92%): different decay, different stack. Not informative for 0.9999 on H147.
+
+H172 is the first clean 0.9999 test on H147 stack with full 30-EP cosine.
 
 ### H171 premise-check finding (tanjiro, 02:00Z)
 
