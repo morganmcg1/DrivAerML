@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 09:56Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 11:03Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
 
 ---
 
@@ -30,7 +30,7 @@
 | **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | 🆕 just assigned (compound K-axis+res-axis; Finding KKK orthogonality proven) | — | ~13:30Z |
 | **#1477** | **frieren** | **H291: 8-res LOWER ladder {16K-131K} at EP15+anti-K3** | 🟡 aqcgnn1z val 5.9252 (fails gate +1.7bp, likely close), test pending | 5.9252 | ~11:00Z |
 | **#1481** | **nezuko** | **H293: Laplace noise at EP15+anti-K3+6-res** | 🟡 hu472xfk running, no metrics yet | — | ~12:30Z |
-| **#1476** | **thorfinn** | **H290: EP15+multi-σ{3e-4,5e-4,7e-4}+anti-K=3** | 🟡 slzcnzs7 val 5.9241 (fails gate +0.6bp), test pending | 5.9241 | ~11:00Z |
+| **#1485** | **thorfinn** | **H297: Per-layer noise stratification (σ_attn=0, σ_mlp=5e-4, K=4)** | 🆕 just assigned (SP-floor targeted; ~314 min ETA) | — | ~15:00Z |
 | **#1479** | **edward** | **H292: EP15+anti-K3+8-res UPPER {32K-192K}** | 🟡 xyy8f895 running, no metrics yet | — | ~13:00Z |
 
 **Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
@@ -48,6 +48,7 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1476 thorfinn H290 | EP15+anti-K3+multi-σ{3e-4,5e-4,7e-4}+6-res | **CLOSED (11:03Z)** — Finding LLL-multi-σ-diversity-null: val 5.9241/test 5.7689 fails H285 gate (+0.6bp both axes). σ-diversity subsumed by K-axis: K=3→K=4 at fixed σ gives 4–7× the gain vs σ-mixing at K=3. → H297 (per-layer noise stratification) assigned to thorfinn. | 5.9241 | 5.7689 |
 | #1473 fern H288 | EP15+anti-K3+8-res densified | **CLOSED (09:56Z)** — Finding KKK-8res-K3-val-passes-test-marginal-fail: val 5.9229 (passes gate), test 5.7685 (fails +0.02bp). VP improves −2.1bp vs H275; SP degrades +1.1bp. K-axis and res-axis are orthogonal. → H296 (K=4+8-res compound) assigned to fern. | 5.9229 | 5.7685 |
 | #1470 tanjiro H285 | EP15+anti-K4+6-res+mirror | **MERGED as NEW SOTA** — Finding JJJ-K4-K-axis-alive-at-EP15 (K=3→K=4 = −0.8bp val / −0.7bp test, sign-consistent 5/5 channels, slope diminishing) | 5.9235 | 5.7683 |
 | #1472 askeladd H287 | EP14 checkpoint anti-K3 | **Finding III-EP-axis-fully-exhausted** (EP14 val 5.9326/test 5.7764 fails gate; EP13≈EP14<EP15(peak)>EP16; all accessible checkpoints below EP15 confirmed worse across all 3 channels) | 5.9326 | 5.7764 |
@@ -71,10 +72,11 @@
 
 ---
 
-## Findings Bank (39 banked, KKK added 09:56Z)
+## Findings Bank (40 banked, LLL added 11:03Z)
 
 | ID | Source | Summary |
 |---|---|---|
+| **LLL-multi-σ-diversity-null-at-EP15-anti-K3** | H290 thorfinn (closed 11:03Z) | At EP15+anti-K3+6-res, mixing σ∈{3e-4,5e-4,7e-4} gives val ~H275 (−0.02bp), all channels FAIL H285 gate (+0.6bp both axes). σ-diversity subsumed by K-axis: K=3→K=4 at fixed σ=5e-4 gives 4–7× more gain than σ-mixing at K=3. SP channel unimproved (3.6428 vs target 3.577). → H297 per-layer noise stratification assigned to thorfinn. |
 | **KKK-8res-K3-val-passes-test-marginal-fail** | H288 fern (closed 09:56Z) | At EP15+anti-K3, 6→8 res (mid densification: +40960,+57344) gives val −1.4bp vs H275 but test only −0.05bp. Channel asymmetric: VP −2.1bp (large), SP +1.1bp (regression). K-axis and res-axis are **orthogonal** — distinct channel signatures → K=4+8-res compound (H296) should stack both gains additively. K=4+6-res (H285) beats K=3+8-res on test_abupt by 0.02bp within noise floor. |
 | **JJJ-K4-K-axis-alive-at-EP15** | H285 tanjiro (merged 08:37Z as NEW SOTA) | K=3→K=4 anti-thetic at EP15+6-res gives val −0.8bp / test −0.7bp. Sign-consistent across all 5 paper-facing channels (5/5). K-axis still alive but slope diminishing: K=2→3 compound was super-additive (Finding ZZ); K=3→4 is weakly additive. K=5 next (H295 tanjiro) to close axis. Merge gate updated to val<5.9235, test<5.7683. |
 | **III-EP-axis-fully-exhausted** | H287 askeladd (closed 08:10Z) | EP14+anti-K3+6-res val 5.9326/test 5.7764 fails gate. Combined with FFF (EP16), HHH (EP13), EP12 unavailable: EP-curve at H275 recipe fully closed as EP13≈EP14<EP15(peak)>EP16. No checkpoint variation can improve SOTA without new training. |
@@ -109,14 +111,14 @@ AXES FULLY CLOSED (do not revisit without new training):
 - **Sobol×anti K=3 compound**: Non-additive. Finding GGG closes this.
 
 IN-FLIGHT (do not duplicate):
-- **K=4+8-res compound** (fern H296 PR #1484) — highest-EV K×res cell; Finding KKK orthogonality proven
-- **K=5 at EP15** (tanjiro H295) — val arm ~12:00Z; closes K-axis definitively
-- **Resolution lower ladder** (frieren H291) — 8-res {16K-131K}; val 5.9252 (fails gate, close)
-- **Resolution upper ladder** (edward H292) — 8-res {32K-192K}
-- **Aggregation operators** (alphonse H286) — mean/median/trimmed/Huber sweep; val 5.9242 (fails gate)
-- **Multi-σ diversity** (thorfinn H290) — σ={3e-4,5e-4,7e-4} per anti pair; val 5.9241 (fails gate)
-- **Laplace noise** (nezuko H293) — noise family heavy-tail moderate
-- **Student-t noise df=3** (askeladd H294) — noise family heavy-tail max finite-var
+- **K=4+8-res compound** (fern H296 PR #1484) — highest-EV K×res cell; Finding KKK orthogonality proven; val arm ~13:30Z
+- **K=5 at EP15** (tanjiro H295) — closes K-axis; val arm ~12:00Z
+- **Per-layer noise stratification σ_attn=0** (thorfinn H297 PR #1485) — next SP-targeted intervention; ~15:00Z
+- **Resolution lower ladder** (frieren H291 PR #1477) — test relaunch in progress; val 5.9252 fails gate but want full result
+- **Resolution upper ladder** (edward H292) — 8-res {32K-192K}; no val yet
+- **Aggregation operators** (alphonse H286) — multi-mode sweep; val 5.9242 (fails gate), test arm pending
+- **Laplace noise** (nezuko H293) — val 5.9246 (fails gate by +0.11bp), test pending
+- **Student-t noise df=3** (askeladd H294) — val 5.9248 (fails gate by +0.13bp), test pending
 
 PRIORITY NEXT ROUND (when students become idle):
 1. Student-t df=1.5 (Cauchy-like, infinite variance but check stability) — if H294 wins
@@ -157,7 +159,8 @@ PRIORITY NEXT ROUND (when students become idle):
 | EP15 + anti-K=3 + 8-res LOWER (+16384+24576) + mirror | 🆕 H291 frieren (just assigned) |
 | EP15 + anti-K=3 + 8-res UPPER (+163840+196608) + mirror | 🆕 H292 edward (just assigned) |
 | EP15 + Sobol × anti-thetic K=3 + 6-res + mirror | ✗ H284 5.9242/5.7697 — Finding GGG (Sobol×anti non-additive at K=3; anti exhausts linear variance) |
-| EP15 + multi-σ{3e-4,5e-4,7e-4} + anti-K=3 + 6-res + mirror | 🆕 H290 thorfinn (just assigned) |
+| EP15 + multi-σ{3e-4,5e-4,7e-4} + anti-K=3 + 6-res + mirror | ✗ H290 val 5.9241/test 5.7689 — Finding LLL (multi-σ null vs H285; σ-diversity subsumed by K-axis) |
+| EP15 + anti-K=4 + 6-res + mirror (σ_attn=0, σ_mlp=5e-4) | 🆕 H297 thorfinn (PR #1485, just assigned) |
 | EP16 checkpoint axis | ✗ H289 (closed, checkpoint deleted; FFF banked) |
 | EP13 + Hutchinson curvature-σ | ✗ H272 Finding TT |
 | EP13 + Taylor 2nd-order correction | ✗ H273 Finding SS |

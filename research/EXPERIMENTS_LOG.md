@@ -1,3 +1,30 @@
+## 2026-05-30 11:03Z — PR #1476 thorfinn H290 CLOSED: Finding LLL — multi-σ diversity null at EP15+anti-K3 vs H285
+
+### PR #1476 thorfinn H290 — CLOSED: EP15+anti-K3+σ={3e-4,5e-4,7e-4}+6-res+mirror
+
+- **Branch**: thorfinn/h290-multi-sigma-anti
+- **Hypothesis**: Mixing σ∈{3e-4,5e-4,7e-4} across 3 anti-thetic pairs tests whether σ-diversity adds complementary channel information not captured by single-σ
+
+### Results (W&B run slzcnzs7, 244 min runtime, DDP×8)
+
+| Recipe | σ scheme | val_abupt | test_abupt | test_WSS | test_VP | test_SP |
+|---|---|---:|---:|---:|---:|---:|
+| **H285 K=4 6-res ← CURRENT SOTA** | σ=5e-4 uniform | **5.9235** | **5.7683** | **6.6735** | **3.3783** | **3.6425** |
+| **H290 multi-σ K=3 (this PR)** | σ={3e-4,5e-4,7e-4} | 5.9241 | 5.7689 | 6.6739 | 3.3786 | 3.6428 |
+| H275 K=3 6-res (reference) | σ=5e-4 uniform | 5.9243 | 5.7690 | 6.6743 | 3.3788 | 3.6427 |
+
+**Gate verdict vs H285**: val 5.9241 ❌ (+0.6bp), test 5.7689 ❌ (+0.6bp). All 5 channels marginally worse than H285.
+
+**Note**: Student compared to H275 (old SOTA, gates appeared passed) — but H285 merged while run was in-flight. Correct gate is H285.
+
+### Analysis: Finding LLL-multi-σ-diversity-null-at-EP15-anti-K3 banked
+
+Multi-σ at K=3 produces values essentially equivalent to K=3 single-σ (vs H275: val −0.02bp, test −0.01bp — noise floor). Compared to H285 (K=4 single-σ), all channels slightly degrade.
+
+Key insight: **σ-diversity is subsumed by K-axis scaling**. Increasing K=3→K=4 at single σ=5e-4 provides 4–7× the gain that σ-mixing at K=3 provides. "Soft averaging in σ-space" ≠ complementary channel signals.
+
+**SP channel remains at 3.6428 — far from 3.577 target (6.5bp gap)**. σ diversity doesn't address SP. Assigned thorfinn H297: per-layer noise stratification (σ_attn=0, σ_mlp=5e-4) as next SP-targeted intervention.
+
 ## 2026-05-30 09:56Z — PR #1473 fern H288 CLOSED: Finding KKK — 8-res mid densification val-passes/test-marginal-fail
 
 ### PR #1473 fern H288 — CLOSED: EP15+anti-K3+8-res densified (+40960,+57344)
