@@ -1,3 +1,25 @@
+## 2026-05-30 13:45Z — PR #1477 frieren H291 CLOSED: Finding RRR — 8-res lower ladder fails gate
+
+### PR #1477 frieren H291 — CLOSED: EP15+anti-K3+8-res-LOWER {16K-131K}+mirror
+
+- **Branch**: frieren/h291-extended-res-lower
+- **Hypothesis**: Extending resolution ladder downward to {16384, 24576} would capture global geometry context that 32K+ ladder misses; should help WSS via lower-spatial-frequency information
+
+### Results (W&B run rowu861p, DDP×8)
+
+| Recipe | Resolution set | val_abupt | test_abupt |
+|---|---|---:|---:|
+| H285 SOTA (6-res) | {32K,49K,65K,81K,98K,131K} | 5.9235 | 5.7683 |
+| H291 8-res lower | {16K,24K,32K,49K,65K,81K,98K,131K} | 5.9252 | 5.7693 |
+
+Gate verdict vs H285: val 5.9252 ❌ (+1.7bp fail), test 5.7693 ❌ (+1.0bp fail). Both gates fail by ~1bp.
+
+### Finding RRR: 8-res lower ladder {16K, 24K, 32K-131K} fails both gates by ~1bp — resolution axis exhausted below 32K
+
+**Statement**: Extending resolution downward to 16K/24K degrades both val (+1.7bp) and test (+1.0bp) vs H285 SOTA. The lower-resolution samples introduce more noise per Taylor-cancellation step than they add information. Combined with Finding PPP (8-res upper {160K, 192K} +11.8bp val degradation): resolution axis is **fully exhausted below 32K and above 131K** — current 6-res ladder {32K-131K} is optimal. Resolution-axis fully closed asymmetrically: small-K low-res samples add too much variance; high-res samples saturate. → Suggests channel-asymmetric resolution selection (different ladders for different output heads) as the remaining unexplored direction. The 6-res ladder is a global Pareto optimum in {n_res, resolution_range} space.
+
+---
+
 ## 2026-05-30 12:26Z — PR #1482 askeladd H294 CLOSED: Finding QQQ — Student-t noise family null
 
 ### PR #1482 askeladd H294 — CLOSED: EP15+anti-K3+Student-t-df3+6-res+mirror

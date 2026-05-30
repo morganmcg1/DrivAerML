@@ -1,13 +1,15 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 13:28Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 13:48Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
 
 **🔥🔥 TWO val winners pending test arms:**
-- **Fern H296 K=4+8-res compound val=5.9221** (W&B at1jadnv) → **−1.4bp vs H285 gate** — STRONGEST val candidate (PR #1484)
-- **Tanjiro H295 K=5 val=5.9231** (W&B uf17vdab) → −0.4bp vs gate (PR #1483)
-- Both compound/extension gains stack as Finding KKK predicted. Test arms ETA 14:00-15:00Z. **First test arm to land AND pass <5.7683 = merge candidate.**
+- **Fern H296 K=4+8-res compound val=5.9221** (W&B at1jadnv) → **−1.4bp vs H285 gate** — STRONGEST val candidate (PR #1484). Val arm done 12:48Z, test arm started ~13:00Z, ETA ~15:45Z.
+- **Tanjiro H295 K=5 val=5.9231** (W&B uf17vdab) → −0.4bp vs gate (PR #1483). Test arm running, ETA ~14:36Z (50 min away).
+- Both compound/extension gains stack as Finding KKK predicted. **First test arm to land AND pass <5.7683 = merge candidate.**
 
-**4 students re-assigned** (PRs #1487-1490) after H286/H292/H293/H294 closed 12:13-12:26Z with Findings MMM/OOO/PPP/QQQ.
+**Cycle 13:45Z**: PR #1477 frieren H291 CLOSED → **Finding RRR**: 8-res lower ladder fails both gates by ~1bp; res-axis exhausted below 32K (mirrors PPP above 131K). **Frieren now idle** — fresh hypothesis being generated.
+
+**Thorfinn H297 val arm done 13:41Z @ val=5.9237 — FAILS gate by 0.2bp**. Test arm still running but likely null.
 
 ---
 
@@ -27,25 +29,25 @@
 
 ---
 
-## Active Fleet (as of 13:05Z — 8 students active)
+## Active Fleet (as of 13:48Z — 7 students active, frieren idle pending H302)
 
 | PR | Student | Hypothesis | val_abupt | Status | ETA |
 |---|---|---|---:|---|---|
-| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | **5.9231 ✓** | 🟢 uf17vdab — **val PASSES gate −0.4bp**, test arm running | ~14:34Z |
-| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | **5.9221 ✓✓** | 🟢 at1jadnv — **val BEATS gate −1.4bp, BEATS H295 by 1.0bp** — STRONGEST candidate | test arm ~16:30Z |
-| **#1485** | **thorfinn** | **H297: Per-layer noise (σ_attn=0, σ_mlp=5e-4, K=4)** | — | 🟡 1ie6ksw6 running (started 11:34Z, ETA ~16:48Z) | ~16:48Z |
-| **#1477** | **frieren** | **H291: 8-res LOWER test relaunch** | 5.9252 ✗ | 🟡 rowu861p test-only (primary crashed), close pending test result | ~13:30Z |
-| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ_coord∈{1e-4,5e-4,1e-3})** | — | 🆕 assigned 13:05Z (just picked up) | ~19:00Z |
-| **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🆕 assigned 13:05Z | ~18:00Z |
-| **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val, apply test)** | — | 🆕 assigned 13:05Z | ~18:00Z |
-| **#1491** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🆕 re-assigned 13:25Z (PR #1490 auto-closed by stray merge) | ~18:30Z |
+| **#1483** | **tanjiro** | **H295: EP15+anti-K=5 pairs+6-res+mirror** | **5.9231 ✓** | 🟢 uf17vdab — **val PASSES gate −0.4bp**, test arm running | ~14:36Z |
+| **#1484** | **fern** | **H296: K=4+8-res compound at EP15** | **5.9221 ✓✓** | 🟢 at1jadnv — val arm done 12:48Z; **val BEATS gate −1.4bp**, test arm running | ~15:45Z |
+| **#1485** | **thorfinn** | **H297: Per-layer noise (σ_attn=0, σ_mlp=5e-4, K=4)** | **5.9237 ✗** | 🟡 1ie6ksw6 — val done 13:41Z FAILS gate (+0.2bp), test arm still running | ~16:35Z |
+| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ_coord∈{1e-4,5e-4,1e-3})** | — | 🟢 wlqp94sd — first σ arm running | ~19:00Z |
+| **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🟢 assigned 13:05Z | ~18:00Z |
+| **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val, apply test)** | — | 🟢 assigned 13:05Z | ~18:00Z |
+| **#1491** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🟢 assigned 13:25Z | ~18:30Z |
+| **idle** | **frieren** | H291 closed 13:45Z → **assigning H302** | — | 🆕 researcher-agent generating hypothesis | TBD |
 
 **Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
 
 **Hot watch**: 
-- **Tanjiro H295 K=5** (#1483): val=5.9231 **PASSES gate**. Test arm ETA ~14:34Z; SENPAI_TIMEOUT cuts ~14:46Z. → merge if test < 5.7683 (new K=5 SOTA)
-- **Fern H296** (#1484): K=4+8-res compound — HIGHEST-EV cell on K×res matrix per Finding KKK. Val arm ETA ~13:30Z.
-- **Frieren H291** (#1477): val fails; test-only relaunch rowu861p for informational close ~13:30Z.
+- **Tanjiro H295 K=5** (#1483): val=5.9231 **PASSES gate**. Test arm ETA ~14:36Z; SENPAI_TIMEOUT cuts ~14:46Z (~10min margin). → merge if test < 5.7683 (new K=5 SOTA)
+- **Fern H296** (#1484): K=4+8-res compound — STRONGEST val candidate; test arm ETA ~15:45Z. → merge if test < 5.7683 (compound SOTA)
+- If BOTH pass: pick by test_abupt (lower wins).
 
 ---
 
@@ -53,6 +55,7 @@
 
 | PR | Student | Finding | val | test |
 |---|---|---|---|---|
+| #1477 frieren H291 | EP15+anti-K3+8-res-LOWER {16K,24K,32K-131K}+mirror | **CLOSED (13:45Z)** — **Finding RRR**: 8-res lower fails both gates by ~1bp (val 5.9252 +1.7bp, test 5.7693 +1.0bp). Lower-res samples add Taylor variance without info gain. Combined with PPP: resolution axis fully closed asymmetrically below 32K and above 131K; 6-res {32K-131K} is global Pareto optimum. → H302 (channel-asymmetric resolution) assigned to frieren. | 5.9252 | 5.7693 |
 | #1476 thorfinn H290 | EP15+anti-K3+multi-σ{3e-4,5e-4,7e-4}+6-res | **CLOSED (11:03Z)** — Finding LLL-multi-σ-diversity-null: val 5.9241/test 5.7689 fails H285 gate (+0.6bp both axes). σ-diversity subsumed by K-axis: K=3→K=4 at fixed σ gives 4–7× the gain vs σ-mixing at K=3. → H297 (per-layer noise stratification) assigned to thorfinn. | 5.9241 | 5.7689 |
 | #1473 fern H288 | EP15+anti-K3+8-res densified | **CLOSED (09:56Z)** — Finding KKK-8res-K3-val-passes-test-marginal-fail: val 5.9229 (passes gate), test 5.7685 (fails +0.02bp). VP improves −2.1bp vs H275; SP degrades +1.1bp. K-axis and res-axis are orthogonal. → H296 (K=4+8-res compound) assigned to fern. | 5.9229 | 5.7685 |
 | #1470 tanjiro H285 | EP15+anti-K4+6-res+mirror | **MERGED as NEW SOTA** — Finding JJJ-K4-K-axis-alive-at-EP15 (K=3→K=4 = −0.8bp val / −0.7bp test, sign-consistent 5/5 channels, slope diminishing) | 5.9235 | 5.7683 |
@@ -77,10 +80,11 @@
 
 ---
 
-## Findings Bank (44 banked, MMM/OOO/PPP/QQQ added 12:13-12:26Z)
+## Findings Bank (45 banked, RRR added 13:45Z; MMM/OOO/PPP/QQQ added 12:13-12:26Z)
 
 | ID | Source | Summary |
 |---|---|---|
+| **RRR-8res-lower-degrades** | H291 frieren (closed 13:45Z) | 8-res lower {16K, 24K, 32K-131K} fails both gates by ~1bp (val +1.7bp, test +1.0bp). Lower-res samples add Taylor variance without info gain. Combined with PPP (8-res upper +11.8bp val): resolution axis fully closed asymmetrically — current 6-res {32K-131K} is global Pareto optimum in {n_res, resolution_range} space. Remaining unexplored direction: channel-asymmetric resolution selection. |
 | **QQQ-student-t-null** | H294 askeladd (closed 12:26Z) | Student-t df=3 ≈ Gaussian at matched RMS σ=5e-4 (val 5.9248 +1.3bp). Combined with MMM: noise distribution family axis definitively closed. Leading-order anti-thetic cancellation is distribution-free. |
 | **PPP-8res-upper-degrades** | H292 edward (closed 12:26Z) | 8-res upper {32K-192K} degrades val by 11.8bp vs H285 SOTA. Resolution ceiling confirmed at ≤131K. More high-res samples add variance without Taylor-cancellation benefit. |
 | **OOO-aggregation-null** | H286 alphonse (closed 12:24Z) | All 5 homogeneous operators (mean, median, trimmed_mean_10/20, Huber) fail H285 gate. Best alternative (trimmed_mean_10) is 0.7bp worse than mean. Linear Taylor-cancellation already provides optimal pooling. → H301 tests heterogeneous per-channel selection. |
@@ -116,8 +120,12 @@
 AXES FULLY CLOSED (do not revisit without new training):
 - **EP axis**: EP12 unavailable, EP13/EP14 fail gate, EP15=SOTA, EP16 hurts. Findings FFF+HHH+III close this completely.
 - **σ axis (single-σ)**: σ=5e-4 optimal. Findings AAA+XX-Sobol close this.
+- **σ-diversity axis (multi-σ at K=3)**: σ-mixing subsumed by K-axis. Finding LLL closes this.
 - **Sobol×EP15 axis**: Anti beats Sobol at both EPs. Findings DDD+EEE close this.
 - **Sobol×anti K=3 compound**: Non-additive. Finding GGG closes this.
+- **Aggregation operator (homogeneous)**: mean/median/trimmed/Huber all null. Finding OOO closes this.
+- **Noise distribution family**: Gaussian ≈ Laplace ≈ Student-t df=3 at matched RMS σ=5e-4. Findings MMM+QQQ close this.
+- **Resolution axis (extent)**: 8-res upper (+160K,+192K) +11.8bp val; 8-res lower (+16K,+24K) +1.7bp val / +1.0bp test. Current 6-res {32K-131K} is Pareto optimum. Findings PPP+RRR close this asymmetrically.
 
 IN-FLIGHT (do not duplicate):
 - **K=4+8-res compound** (fern H296 PR #1484) — highest-EV K×res cell; Finding KKK orthogonality proven; val arm ~13:30Z
@@ -165,7 +173,7 @@ PRIORITY NEXT ROUND (when students become idle):
 | EP15 + Student-t df=3 noise + anti-K=3 + 6-res + mirror | 🆕 H294 askeladd (just assigned, PR #1482) |
 | EP15 + anti-K=3 + 8-res densified (+40960+57344) + mirror | ✗ H288 val 5.9229/test 5.7685 — Finding KKK (val passes gate, test +0.02bp miss; VP−2.1bp gain, SP+1.1bp regression; K-axis⊥res-axis) |
 | EP15 + anti-K=4 + 8-res densified (+40960+57344) + mirror | 🆕 H296 fern (PR #1484, just assigned) |
-| EP15 + anti-K=3 + 8-res LOWER (+16384+24576) + mirror | 🆕 H291 frieren (just assigned) |
+| EP15 + anti-K=3 + 8-res LOWER (+16384+24576) + mirror | ✗ H291 val 5.9252 / test 5.7693 — Finding RRR (fails both gates by ~1bp; res-axis closed below 32K) |
 | EP15 + anti-K=3 + 8-res UPPER (+163840+196608) + mirror | 🆕 H292 edward (just assigned) |
 | EP15 + Sobol × anti-thetic K=3 + 6-res + mirror | ✗ H284 5.9242/5.7697 — Finding GGG (Sobol×anti non-additive at K=3; anti exhausts linear variance) |
 | EP15 + multi-σ{3e-4,5e-4,7e-4} + anti-K=3 + 6-res + mirror | ✗ H290 val 5.9241/test 5.7689 — Finding LLL (multi-σ null vs H285; σ-diversity subsumed by K-axis) |
