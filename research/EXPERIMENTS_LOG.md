@@ -1,3 +1,36 @@
+## 2026-05-30 07:20Z — PR #1467 edward H284 CLOSED: Finding GGG — Sobol×anti non-additive at K=3 EP15
+
+### PR #1467 edward H284 — CLOSED: EP15+Sobol-anti-K=3+6-res+mirror fails H275 SOTA gate
+
+- **Branch**: edward/h284-ep15-sobol-anti-K3-stack
+- **Hypothesis**: Sobol QMC × anti-thetic K=3 × EP15 triple compound — do Sobol and anti-thetic stack?
+
+### Results (W&B run 63606nil, 4.72h runtime)
+
+| Recipe | val_abupt | test_abupt | test_WSS | test_SP | test_VP |
+|---|---:|---:|---:|---:|---:|
+| H275 EP15+anti-K3 SOTA | 5.9243% | 5.7690% | 6.6743% | 3.6427% | 3.3788% |
+| **H284 EP15+Sobol-anti-K3 (this)** | 5.9242% | 5.7697% | 6.6745% | 3.6453% | 3.3786% |
+| Δ vs SOTA | −0.01bp | +0.07bp | +0.02bp | +0.26bp | −0.02bp |
+
+### Analysis: Finding GGG-Sobol-anti-non-stacking-at-K3-EP15 banked
+
+Sobol×anti compound at K=3 EP15 produces near-zero net movement vs H275. Student's mechanistic explanation is correct:
+- Anti-thetic K=3 already cancels the dominant linear Taylor variance source (∇f·ε = 0 exactly for each ±ε pair)
+- Sobol QMC variance reduction targets the SAME residual variance budget — they're not orthogonal mechanisms
+- At K=3, anti-thetic has already saturated the linear-cancellation gain; Sobol pattern adds no further reduction
+
+Combined with Finding EEE (anti dominates Sobol at EP15 by +4.8/+4.4bp), this fully closes the Sobol×EP15 search space:
+- Sobol alone at EP15 (H279): fails gate +4.8/+4.4bp
+- Sobol×anti at EP15 (H284): essentially zero delta vs anti alone
+
+**Bank Finding GGG**: at K=3 EP15, anti-thetic and Sobol are not orthogonal. Do not pursue Sobol-on-anti combinations at K≤3.
+
+### Decision
+Close. Assigned H292 edward (8-res UPPER {32K-192K}) as next fresh axis.
+
+---
+
 ## 2026-05-30 06:10Z — PR #1475 frieren H289 CLOSED: Finding FFF — EP-axis fully exhausted at H275 recipe (no runs needed)
 
 ### PR #1475 frieren H289 — CLOSED: EP-axis exhausted, checkpoints unavailable
