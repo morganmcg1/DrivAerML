@@ -1,3 +1,21 @@
+## 2026-05-30 01:17Z — PR #1455 edward H275 MERGED: New SOTA — EP15+anti-K=3+6-res×mirror (Finding ZZ)
+
+### PR #1455 edward H275 — MERGED as SOTA: EP15 × anti-thetic K=3 full stack super-additive
+
+- **Branch**: edward/h275-ep15-antithetic-stack
+- **Hypothesis**: Does EP15 EMA + anti-thetic K=3 in 6-res × mirror full stack compound super-additively, given EP13+anti already beat EP13+Sobol?
+- **W&B run**: `0b4t2bz2`
+
+| Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP |
+|---|---:|---:|---:|---:|---:|
+| H274 EP13+anti-K3 (prior SOTA) | 5.9322% | 5.7763% | 6.6805% | 3.3846% | 3.6515% |
+| **H275 EP15+anti-K3 (this)** | **5.9243%** | **5.7690%** | **6.6743%** | **3.3788%** | **3.6427%** |
+| Δ vs H274 | **−7.9bp** | **−7.3bp** | **−6.2bp** | **−5.8bp** | **−8.8bp** |
+
+**Results commentary**: All channels improve over H274. The EP15 × anti-K=3 interaction is **super-additive** — the observed −1.75bp val / −1.57bp test gain vs H253 baseline exceeds the pure-additive expectation of −1.47bp / −1.06bp (+0.28bp / +0.51bp bonus). This is the opposite of H267's sub-additive EP15+random K=5 (Finding QQ). The most likely mechanism: the flatter EP15 EMA loss minimum amplifies the anti-thetic Taylor linear-term cancellation benefit (less curvature noise drowning out the linear term). test_WSS 6.6743% is the new program best, −6.2bp below H274. test_SP gap to paper floor narrowed 1.0bp (3.6427 vs 3.6515, floor 3.577). 
+
+**Finding ZZ-EP15-anti-super-additive**: banked. EP15 EMA × anti-thetic pairing is synergistic, not redundant. Sets new gate: val < 5.9243 / test < 5.7690.
+
 ## 2026-05-30 00:40Z — PR #1456 thorfinn H276 CLOSED: Finding XX — σ=3e-4 at EP15 gives SP/VP win but WSS regression
 
 ### PR #1456 thorfinn H276 — CLOSED: EP15+σ=3e-4+K=5 passes val gate, fails test gate by 0.05bp; structural WSS regression
