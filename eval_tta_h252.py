@@ -121,6 +121,7 @@ class EvalConfig:
 
     amp_mode: str = "bf16"
     debug: bool = False  # 2 val + 2 test cases
+    skip_val: bool = False  # H291: val already logged in prior W&B run, run test-only
 
 
 def parse_args(argv: Iterable[str] | None = None) -> EvalConfig:
@@ -651,7 +652,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     # straggler waits >600s before the next collective, triggering a wait-timeout
     # on the lazy NCCL communicator init for the first post-val all_gather_object.
     # Bump to 120 min (same shape as thorfinn #1433 / nezuko #1432 plumbing).
-    state = init_distributed(timeout=timedelta(minutes=120))
+    state = init_distributed(timeout=timedelta(minutes=180))
     cfg = parse_args(argv)
     device = state.device
 
@@ -763,6 +764,10 @@ def main(argv: Iterable[str] | None = None) -> None:
         ("val_surface", val_case_ids, "full_val"),
         ("test_surface", test_case_ids, "test"),
     ]
+    if cfg.skip_val:
+        splits = [s for s in splits if s[0] != "val_surface"]
+        if state.is_main:
+            print("skip_val=True: dropping val_surface from splits, running test only")
 
     summary: dict[str, dict[str, dict[str, float]]] = {}
     for split_name, case_ids, log_prefix in splits:
