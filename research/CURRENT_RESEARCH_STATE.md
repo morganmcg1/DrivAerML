@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-30 19:15Z**
+- **2026-05-30 20:25Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
@@ -61,11 +61,11 @@ Wave-3 was constructed to probe whether GradNorm restoring force (α) or floor p
 - ETA EP30 natural cap: ~23:00-00:30Z
 - Verdict pending terminal — most promising active arm
 
-**H176 (frieren, PR #1486) — vol_p_floor 0.10, α=0.5, 8-EP — EP7 reading:**
-- Step 78879, rt 5.07h, val_WSS=6.7852 (+0.09 vs H147), val_VP=3.8199 (+0.16), val_SP=3.9948 (+0.09)
-- w_vol_p=0.10 pinned exactly at floor (clamp OFF)
-- VP slowly converging; will not beat H147 at EP8
-- ETA EP8 terminal: ~19:50Z (very soon)
+**H176 (frieren, PR #1486) — CLOSED NON-MERGE 20:24Z — `xupvpsxg`:**
+- test_WSS=6.6790 (+0.138pp vs H147), test_VP=3.6646 (+0.022pp BREACH cap), test_SP=3.6616 (+0.085pp BREACH cap), test_ABU=5.8256 PASS
+- Worst-of-both-worlds: lost H173's SP-protection (collapsed by EP2) AND failed to fix VP starvation
+- Frontier finding: w_τ_y emerged as dominant absorber of freed budget (1.29→1.53 across 8 EPs), suggesting τ_y-pin as a future mechanism axis
+- **Wave-4 H181 (EMA decay 0.99995) DISPATCHED to frieren (PR #1503)**
 
 **H178 (fern, PR #1493) — vol_p_floor 0.05, α=0.5, 16-EP — EP9-ish:**
 - Step 53625, rt 3.35h, val_WSS=6.96, **val_VP=4.46 (+0.73 vs H147 EP5 ref step 54879)**
@@ -85,7 +85,7 @@ Wave-3 was constructed to probe whether GradNorm restoring force (α) or floor p
 | Experiment | floor | cosine_EPs | α | Status | Verdict |
 |---|---:|---:|---:|---|---|
 | H173 (closed) | 0.05 | 8 | 0.5 | NON-MERGE | VP breach +0.136 from floor clamping |
-| H176 (running) | 0.10 | 8 | 0.5 | EP7 alive | won't beat H147; w_vol_p pinned at floor=0.10 |
+| H176 (closed) | 0.10 | 8 | 0.5 | NON-MERGE 20:24Z | test_WSS +0.138; VP BREACH +0.022; SP BREACH +0.085 (worst-of-both) |
 | H178 (running) | 0.05 | 16 | 0.5 | EP9 VP +0.73 | 16-EP doesn't fix starvation |
 | H180 (running) | 0.05 | 8 | 1.0 | EP4 VP parity | α=1.0 prevents clamping; WSS +0.09 persistent |
 | H172 (running) | — | — | — | EP20 below H147 EP6 ref | EMA decay 0.9999, most productive in wave |
@@ -117,14 +117,15 @@ Pre-condition: H172 must finish productive (val_WSS ≤ 6.62 at EP30). If H172 t
 6. DDP8 only (no split GPU arms)
 7. Ensembles BANNED
 
-## Terminations ETA cluster (next 5h)
+## Terminations ETA cluster (remaining)
 
 | Run | PR | Student | ETA | Action |
 |---|---|---|---|---|
-| H176 | #1486 | frieren | ~19:50Z | Likely NON-MERGE; dispatch H181 EMA 0.99995 |
-| H178 | #1493 | fern | ~21:30Z | NON-MERGE VP breach expected; dispatch H183 EMA+long-cosine |
-| H180 | #1494 | nezuko | ~22:00Z | NON-MERGE WSS regression; dispatch H182 EMA+LR |
-| H172 | #1469 | tanjiro | ~23:00-00:30Z | Verdict-dependent; if productive → dispatch H184 EMA+structural |
+| H176 | #1486 | frieren | ✓ CLOSED 20:24Z | H181 EMA 0.99995 dispatched (PR #1503) |
+| H178 | #1493 | fern | ~21:30Z | NON-MERGE VP breach expected; dispatch H183 EMA+extended-cosine (cap ≤32 EP) |
+| H180 | #1494 | nezuko | ~22:00Z | NON-MERGE WSS regression; dispatch H182 EMA+LR 1.3× |
+| H172 | #1469 | tanjiro | ~23:00-00:30Z | Verdict-dependent; if productive → dispatch H184 EMA+heads (verify `--model-heads` flag first) |
+| H181 | #1503 | frieren | ~21:00Z + 20h main | smoke first, then main 30-EP |
 
 ## H147 actual EP boundaries (from k6q4c3on val history, authoritative reference)
 

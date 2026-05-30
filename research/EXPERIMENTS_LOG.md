@@ -4775,3 +4775,36 @@ The vol_p floor pin 0.05 gives GradNorm freedom to elevate the SP guardian w_cp 
 ### Conclusion
 
 NON-MERGE: VP floor cap breach is a hard constraint violation. SP-protection mechanism is real and valuable but the floor (0.05) was too aggressive. Next test: H176 at floor=0.10 (midpoint between H147 0.15 and H173 0.05), assigned to frieren (PR #1486).
+
+## 2026-05-30 20:20Z — PR #1486: H176 gradnorm_min_w_vol_p 0.10 midpoint (frieren)
+
+- **Branch:** dl24-frieren/h176-gradnorm-min-w-vol-p-010
+- **W&B run:** `xupvpsxg` (rank0 terminal, 8-EP, 5.86h)
+- **Hypothesis:** floor=0.10 midpoint between H147 0.15 and H173 0.05 should preserve H173's SP-protection mechanism (w_cp absorbs freed budget) without VP starvation that breached H173's floor.
+
+### Results
+
+| metric | H176 test | H147 SOTA | Δ vs H147 | H173 test | floor cap | status |
+|---|---:|---:|---:|---:|---:|---|
+| test_WSS | 6.6790% | 6.5409% | +0.138pp | 6.6081% | — | regress vs both |
+| test_VP | 3.6646% | 3.4014% | +0.263pp | 3.7793% | **3.643%** | ❌ BREACH +0.022pp (-0.115pp better than H173) |
+| test_SP | 3.6616% | 3.5634% | +0.098pp | **3.5458%** | **3.577%** | ❌ BREACH +0.085pp (LOST H173's -0.018 beat) |
+| test_ABU | 5.8256% | 5.6648% | +0.161pp | — | 5.844% | ✓ PASS (margin -0.018) |
+
+### Analysis
+
+**Worst-of-both-worlds confirmed:** H176 breached BOTH the VP and SP floor caps. The midpoint floor=0.10 LOST the SP-protection mechanism that H173 demonstrated (w_cp elevation collapsed by EP2 — smaller budget freed vs H173 0.10 was insufficient to sustain w_cp) AND failed to fully resolve the VP starvation. test_SP regressed from H173's −0.018pp BEAT to H176's +0.085pp BREACH.
+
+**GradNorm trace (8/8 EPs, w_vol_p AT floor 0.10 throughout):**
+- w_cp decay: EP1 0.965 → EP7 0.733 (slow collapse, no sustained SP-routing)
+- w_τ_y absorption: EP1 1.29 → EP7 1.53 (cross-flow tangential dominates freed budget late-cosine)
+- w_τ_z descending late: EP5 1.46 → EP7 1.39 (τ_z giving up its share to τ_y)
+- clamp_active=0 throughout (floor reached naturally, not clamped)
+
+**Frontier finding:** w_τ_y emerged as the dominant absorber of freed budget post-EP4. Suggests a future experiment could pin w_τ_y instead of vol_p floor to test whether cross-flow tangential routing matters more than vol_p routing — would be a NEW mechanism axis distinct from the GradNorm-α grid.
+
+### Conclusion
+
+NON-MERGE. Wave-3 GradNorm-α/floor grid verdict sealed: none of α=0.5 floor=0.05 (H173), α=0.5 floor=0.10 (H176), α=0.5 floor=0.05 16-EP (H178 in flight), α=1.0 floor=0.05 (H180 in flight) produces a H147-beater. The productive lever in wave-3 was H172's EMA decay 0.9999 (val_WSS 6.6521 at EP20, materially below H147 EP6 ref).
+
+Wave-4 H181 (EMA decay 0.99995, longer averaging window) dispatched to frieren (PR #1503).
