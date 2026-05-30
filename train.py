@@ -156,7 +156,8 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         ),
         "wss_charbonnier_axes": (
             "Which WSS channels the supplementary Charbonnier loss applies to. "
-            "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b)."
+            "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b). "
+            "'yz' = tau_y + tau_z (H175 coverage extension)."
         ),
         "surface_out_width_factor": (
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
@@ -164,7 +165,7 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         ),
     }
     choices_text = {
-        "wss_charbonnier_axes": ["all", "z"],
+        "wss_charbonnier_axes": ["all", "z", "yz"],
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -451,6 +452,12 @@ def train_loss(
             if wss_charbonnier_axes == "z":
                 pred_wss = out["surface_preds"][..., 3:4]
                 target_wss = surface_target[..., 3:4]
+            elif wss_charbonnier_axes == "yz":
+                # H175: tau_y (idx 2) + tau_z (idx 3) coverage extension at
+                # magnitude-preserving per-axis weight (0.05 vs H147's 0.10 on z).
+                # surface_preds channel layout is [cp, tau_x, tau_y, tau_z].
+                pred_wss = out["surface_preds"][..., 2:4]
+                target_wss = surface_target[..., 2:4]
             elif wss_charbonnier_axes == "all":
                 pred_wss = out["surface_preds"][..., 1:4]
                 target_wss = surface_target[..., 1:4]
@@ -806,12 +813,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                     if "loss_wss_charb_unweighted" in batch_loss_metrics:
                         # H10b diagnostics: key suffix follows --wss-charbonnier-axes
-                        # so dashboards can compare "wss" (all-axes) vs "tau_z" (z-only).
-                        wss_axes_label = (
-                            "tau_z"
-                            if config.wss_charbonnier_axes == "z"
-                            else "wss"
-                        )
+                        # so dashboards can compare "wss" (all-axes) vs "tau_z" (z-only)
+                        # vs "tau_yz" (H175 yz coverage extension).
+                        if config.wss_charbonnier_axes == "z":
+                            wss_axes_label = "tau_z"
+                        elif config.wss_charbonnier_axes == "yz":
+                            wss_axes_label = "tau_yz"
+                        else:
+                            wss_axes_label = "wss"
                         target_mse = batch_loss_metrics["loss_wss_charb_target_mse"]
                         charb_unw = batch_loss_metrics["loss_wss_charb_unweighted"]
                         charb_w = batch_loss_metrics["loss_wss_charb_weighted"]
