@@ -1,68 +1,59 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 18:40Z | Branch: `tay` | **SOTA: H296 → H300 INCOMING (test 5.7678 → 5.7399, -28bp)** | Round 4k+1
+**Updated**: 2026-05-30 18:55Z | Branch: `tay` | **SOTA: H300 per-channel calibration — MERGED 18:48Z** | Round 4k+2
 
-🚨 **MAJOR SOTA BREAKTHROUGH INCOMING (18:36Z)**: Edward H300 per-channel affine calibration delivers test_abupt=**5.7399** (-28bp vs H296 SOTA gate). val_cal=5.9011 (-21bp). All 5 channels Pareto-improve. SP -30bp (gap to floor closes 67→36bp), WSS_z -44bp (largest channel improvement). Awaiting edward terminal SENPAI-RESULT marker; merge imminent. **THIS OPENS A NEW ORTHOGONAL RESEARCH AXIS: post-hoc calibration.**
+## Today's SOTA progression (3 merges in 4 hours):
+1. H295 (K=5+6-res, 15:45Z) → test 5.7679
+2. H296 (K=4+8-res, 17:05Z) → test 5.7678 (−0.15bp)
+3. **H300 (per-channel calibration, 18:48Z) → test_cal 5.7399** (−28bp) ← **CURRENT SOTA**
 
-**🎉🎉 TWO SOTA JUMPS IN <2 HOURS (17:05Z):**
-- H295 (K=5+6-res, tanjiro, PR #1483) merged 15:45Z → val 5.9231 / test 5.7679
-- **H296 (K=4+8-res, fern, PR #1484) merged 17:05Z → val 5.9221 / test 5.7678** ← CURRENT SOTA
-
-**Finding TTT**: K=4+8-res Pareto-dominates K=5+6-res. Res-axis compound beats K-axis escalation at this operating point.
-
-**H297 thorfinn CLOSED (17:05Z)**: val=5.9237/test=5.7684 fails new gate. Finding "per-layer-noise-attn0-mlp-null".
-
-**NEW Finding 'coord-noise-harmful' (17:48Z)**: H298B alphonse (σ=5e-4 input-coord noise + K=4 anti weight + 6-res + mirror) → val_abupt=**7.8189%** (+190bp regression vs gate). All channels regress severely (WSS_z hits 12.38%). Input-coord perturbation breaks geometry encoder. TTA noise budget MUST stay in weight/output space, never input space. H298C (σ=1e-3) confirms slope.
-
-**New assignments (17:05Z):**
-- **Thorfinn → H305 (PR #1496)**: Physics BC enforcement — zero WSS normal component τ·n̂=0 post-TTA. Zero extra forward passes. Targets WSS_z (8.6635%, largest sub-channel gap).
-- **Fern → H306 (PR #1497)**: Per-point inverse-variance TTA aggregation (temperature sweep T=1,5). Distinct from Finding OOO (which tested homogeneous operators). Targets uncertain surface points.
+**Finding 'calibration-dominates-TTA-refinement'**: A single affine correction (10 OLS parameters fit on 34-car val) gains 28bp — more than all TTA refinements (H285→H296) combined. Orthogonal axis now open.
 
 ---
 
-## Current SOTA
+## Current SOTA (H300 calibrated)
 
 | Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP | W&B |
 |---|---:|---:|---:|---:|---:|---|
-| **H296 EP15+anti-K4+8-res+mirror ← CURRENT SOTA** | **5.9221%** | **5.7678%** | **6.6728%** | **3.3763%** | **3.6436%** | at1jadnv |
+| **H300 H285+cal ← CURRENT SOTA** | **5.9011%** | **5.7399%** | **6.6404%** | **3.3763%** | **3.6132%** | 59r4noqh |
+| H296 EP15+anti-K4+8-res+mirror | 5.9221% | 5.7678% | 6.6728% | 3.3763% | 3.6436% | at1jadnv |
 | H295 EP15+anti-K5+6-res+mirror | 5.9231% | 5.7679% | 6.6732% | 3.3781% | 3.6421% | uf17vdab |
 | H285 EP15+anti-K4+6-res+mirror | 5.9235% | 5.7683% | 6.6735% | 3.3783% | 3.6425% | 4vvc40zs |
-| H275 EP15+anti-K3+6-res+mirror | 5.9243% | 5.7690% | 6.6743% | 3.3788% | 3.6427% | 0b4t2bz2 |
-| Transolver-3 target (Morgan Issue #1056) | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% | — |
+| Transolver-3 target | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% | — |
 
-**Merge gate (UPDATED)**: val_abupt < **5.9221%** AND test_abupt < **5.7678%**
-**Paper floors**: test_VP 3.3763 ≤ 3.421 ✓ | test_WSS 6.6728 ≤ 6.727 ✓ | test_SP 3.6436 > 3.577 ✗ (6.6bp gap)
-
-**Key findings**: Finding TTT (K=4+8-res beats K=5+6-res: Pareto frontier at (K=4,8-res)), Finding SSS (K-axis saturation at K=5), Finding KKK (8-res adds VP, costs SP slightly), Finding JJJ, Finding ZZ
+**Merge gate (UPDATED)**: val_abupt_calibrated < **5.9011%** AND test_abupt_calibrated < **5.7399%**
+**Paper floors**: test_VP 3.3763 < 3.421 ✓ | test_WSS 6.6404 < 6.727 ✓ | test_SP 3.6132 > 3.577 ✗ (3.6bp gap, was 6.6bp pre-calibration)
+**WSS gap**: 6.6404 → 5.85 target = **0.790pp remaining**
 
 ---
 
-## Active Fleet (as of 17:10Z — 8 students active)
+## Active Fleet (as of 18:55Z — 8 students active)
 
 | PR | Student | Hypothesis | val_abupt | Status | ETA |
 |---|---|---|---:|---|---|
-| **#1496** | **thorfinn** | **H305: BC enforcement — zero WSS normal component τ·n̂=0** | — | 🆕 assigned 17:05Z | ~21:30Z |
-| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T sweep)** | — | 🆕 assigned 17:05Z | ~21:30Z |
-| **#1487** | **alphonse** | **H298: Input-coord noise TTA sweep (σ∈{1e-4,5e-4,1e-3})** | **B: 7.8189 ✗✗** | 🔴 H298B σ=5e-4 done (+190bp DEAD); H298C σ=1e-3 n5jgfgtb running | ~19:50Z |
-| **#1488** | **askeladd** | **H299: Embedding-only noise (σ=5e-4, anti-K4)** | **5.9244 ✗** | 🟡 val FAILS gate (+2.3bp); test arm running | ~21:00Z |
-| **#1489** | **edward** | **H300: Per-channel test-time calibration** | **5.9235 ✗** | 🟡 val FAILS gate (+1.4bp vs new gate); test arm running | ~21:00Z |
-| **#1491** | **nezuko** | **H301: Per-channel best-of-K (heterogeneous aggregation)** | **5.9262 ✗** | 🟡 val FAILS gate (+4.1bp, hurts); test arm running | ~21:00Z |
-| **#1492** | **frieren** | **H302: Asymmetric modality resolution (surf-7 × vol-6, K=4 anti)** | — | 🟢 b3724r40 running shared-loop primary | ~20:52Z |
-| **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | ⚠️ STILL 5 smokes only (debug=True, 2-car); nudged 17:48Z to launch full primary | ~21:30Z if launches now |
+| **#1498** | **edward** | **H312: H296 (K=4+8-res+mirror) + calibration** | — | 🆕 assigned 18:48Z | ~01:30Z |
+| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | — | 🟢 spsor9f8 primary running (launched 18:26Z) | ~01:00Z |
+| **#1496** | **thorfinn** | **H305: BC enforcement — zero WSS normal component τ·n̂=0** | — | 🟢 evc7lnkf running (17:45Z, first run crashed) | ~00:30Z |
+| **#1495** | **tanjiro** | **H303: σ=3e-4 probe at K=5 anti-thetic EP15+6-res×mirror** | — | 🟢 uhx782vd primary launched 18:05Z | ~00:30Z |
+| **#1492** | **frieren** | **H302: Asymmetric modality resolution (surf-denser × vol-baseline, K=4)** | 5.9259% (interim) | 🟡 b3724r40 running rt=191min | ~20:52Z |
+| **#1491** | **nezuko** | **H301: Per-channel best-of-K (heterogeneous aggregation)** | 5.9262% ✗ | 🟡 val FAILS gate (+4.1bp); test arm pending | ~21:00Z |
+| **#1487** | **alphonse** | **H298C: Input-coord noise σ=1e-3 (confirming dead direction)** | — | 🔴 n5jgfgtb running — will fail harder than H298B (val=7.82%) | ~19:50Z |
 
-**Hot watch (17:55Z)**:
-- **Alphonse H298 DEAD direction**: H298B val=7.8189% catastrophic. H298C will confirm slope (~19:50Z) → close PR #1487, assign H310 (2nd EP15 seed). Coord-noise direction permanently closed.
-- **3 likely-close test arms** (askeladd/edward/nezuko H299/H300/H301): all val failed new gate; test arms at ~21:00Z → close all 3, bank Findings, assign H308/H309/H311.
-- **Tanjiro H303 LAUNCH WATCH**: 5 debug smokes only, no full primary. Nudged 17:48Z; if no launch by 18:48Z escalate.
-- **Thorfinn H305 / Fern H306**: physics BC enforcement and per-point confidence weighting — both running, ETA ~21:30Z. Thorfinn has 2 runs (likely re-launch due to ckpt path issue).
-- **Frieren H302**: shared-loop primary running, ETA ~20:52Z.
+(Askeladd H299 closed 18:48Z — Finding UUU-embed-noise-null)
 
-**Queue for next idle students**:
-- **H307 BLOCKED**: weight-space interpolation needs 2+ EP15 ckpts; only `0gjfv45i` exists → unblock via H310.
-- **H308**: surface-volume consistency loss at TTA time (cross-modal anchoring).
-- **H309**: per-channel best-K (heterogeneous K_eff per output) OR surface-only TTA (skip volume noise where unhelpful).
-- **H310 (HIGH PRIORITY)**: commission 2nd EP15 seed retrain (~5h training) → enables H307 weight-space averaging / Model Soups. NOT ensembling (single forward at eval).
-- **H311**: physics-informed test-time refinement on tau_z (highest-error channel) via tangent-plane regularization (orthogonal to H305 hard projection).
+**Hot watch (18:55Z)**:
+- **Alphonse H298C** (~19:50Z) → close H298, assign H310 (2nd EP15 seed retrain for weight-space averaging)
+- **Frieren H302** (~20:52Z) → likely fails raw gate; apply calibration overlay before closing decision
+- **Nezuko H301** (~21:00Z) → test arm landing; apply calibration overlay before closing decision
+- **Thorfinn H305 / Tanjiro H303** (~00:30Z) → SOTA candidates if they pass calibrated gate
+- **Edward H312** (~01:30Z) → highest-probability next SOTA (H296+cal, expected −0.5bp vs H300)
+- **Fern H306** (~01:00Z) → per-point confidence weighting, uncertain if additive with calibration
+
+**Queue for next idle students (alphonse idle ~19:50Z, nezuko ~21:00Z)**:
+- **H310**: commission 2nd EP15 seed retrain from different seed (~5h training) → enables H307 weight-space averaging
+- **H313**: quadratic per-channel calibration (add α₂x² term, same 34-car val fit) — richer bias correction
+- **H314**: H301 (best-of-K) + calibration overlay — if H301 raw test < 5.77, combine
+- **H315**: H302 (asym ladders) + calibration overlay if interesting raw number
 
 ---
 
@@ -98,7 +89,17 @@
 
 ---
 
-## Findings Bank (46 banked, SSS added 15:45Z — K-axis saturation at K=5)
+## Findings Bank (48 banked — UUU and calibration-dominates-TTA added 18:55Z)
+
+| ID | Source | Summary |
+|---|---|---|
+| **calibration-dominates-TTA-refinement** | H300 edward (merged 18:48Z) | Per-channel affine calibration (10 OLS params fit on 34-car val) gains 28bp test — more than H285→H296 TTA refinements combined. VP bias β≈−0.86 is model-intrinsic, not TTA-dependent. All 5 channels Pareto-improve. Calibration axis is orthogonal to TTA axis. |
+| **UUU-embed-noise-null** | H299 askeladd (closed 18:48Z) | Restricting weight noise to embedding/pos-encoding layers only (inverse of H297 layer stratification): val=5.9244/test=5.7689, fails H296 gate by 2.3/1.1bp. Layer-stratification axis fully closed (H297 full-model = H299 embed-only = same aggregation). |
+| **coord-noise-harmful** | H298B alphonse (znmtxzdk, val only) | Input-coord perturbation (σ=5e-4, K=4 anti + 6-res + mirror) → val=7.82% (+190bp). Geometry encoder is spatially sensitive — any coordinate noise destroys surface predictions. TTA noise budget must stay in weight-space. H298C σ=1e-3 expected to fail harder (monotone slope). |
+| **TTT-K4+8res-Pareto-dominates** | H296 fern (merged 17:05Z) | K=4+8-res (test 5.7678) beats K=5+6-res (5.7679) on both gates. Res-axis compound > K-axis escalation at current operating point. Pareto frontier: (K=4, 8-res). |
+| **per-layer-noise-attn0-mlp-null** | H297 thorfinn (closed 17:05Z) | Noise routed only to MLP layers (attn σ=0) at EP15+K=4 anti-thetic: channels within 0.001 of H295 baseline. Noise-routing-insensitive at this operating point. Layer stratification axis closed. |
+
+## Prior Findings Bank (43 banked prior to today)
 
 | ID | Source | Summary |
 |---|---|---|
