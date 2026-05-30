@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 13:48Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 14:00Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
 
 **🔥🔥 TWO val winners pending test arms:**
 - **Fern H296 K=4+8-res compound val=5.9221** (W&B at1jadnv) → **−1.4bp vs H285 gate** — STRONGEST val candidate (PR #1484). Val arm done 12:48Z, test arm started ~13:00Z, ETA ~15:45Z.
@@ -29,7 +29,7 @@
 
 ---
 
-## Active Fleet (as of 13:48Z — 7 students active, frieren idle pending H302)
+## Active Fleet (as of 14:00Z — 8 students active)
 
 | PR | Student | Hypothesis | val_abupt | Status | ETA |
 |---|---|---|---:|---|---|
@@ -40,7 +40,7 @@
 | **#1488** | **askeladd** | **H299: Embedding/pos-encoding-only noise (σ=5e-4, anti-K4)** | — | 🟢 assigned 13:05Z | ~18:00Z |
 | **#1489** | **edward** | **H300: Per-channel test-time calibration (affine fit on val, apply test)** | — | 🟢 assigned 13:05Z | ~18:00Z |
 | **#1491** | **nezuko** | **H301: Per-channel best-of-K selection (heterogeneous aggregation)** | — | 🟢 assigned 13:25Z | ~18:30Z |
-| **idle** | **frieren** | H291 closed 13:45Z → **assigning H302** | — | 🆕 researcher-agent generating hypothesis | TBD |
+| **#1492** | **frieren** | **H302: Asymmetric per-modality resolution — surf-8hi (32K-163K) × vol-6 (32K-131K)** | — | 🆕 assigned 14:00Z (PR #1492) | ~19:00Z |
 
 **Gate**: val < **5.9235** AND test < **5.7683** (H285 NEW SOTA merged 08:37Z)
 
