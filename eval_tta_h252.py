@@ -83,6 +83,11 @@ class EvalConfig:
     weight_noise_sigma: float = 5e-4
     weight_noise_passes: int = 5
     weight_noise_seed_base: int = 42
+    # H277: anti-thetic K-pairs. When True, each k in 0..K-1 generates a PAIR
+    # of perturbations (+delta, -delta) sharing the same seed/eps but opposite
+    # sign. Total weight-perturbed forwards per (res, mirror) cell = 2*K, with
+    # the linear-Taylor variance term cancelled inside each pair.
+    antithetic: bool = False
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -257,8 +262,15 @@ def perturb_relative_(
     sigma: float,
     seed: int,
     device: torch.device,
+    sign: float = 1.0,
 ) -> None:
-    """p <- clean_p + randn(seed) * sigma * |clean_p|, identical across DDP ranks."""
+    """p <- clean_p + sign * randn(seed) * sigma * |clean_p|, identical across DDP ranks.
+
+    Anti-thetic pairing (H277): for fixed seed, calling with sign=+1.0 then
+    sign=-1.0 yields p = clean + delta and p = clean - delta using the same
+    underlying noise tensor. The linear-Taylor variance term cancels in the
+    average of these two evaluations.
+    """
     gen = torch.Generator(device=device)
     gen.manual_seed(seed)
     for name, p in module.named_parameters():
@@ -266,7 +278,7 @@ def perturb_relative_(
             continue
         clean_p = clean[name]
         noise = torch.randn(p.shape, generator=gen, device=device, dtype=p.dtype)
-        noise.mul_(sigma).mul_(clean_p.abs())
+        noise.mul_(sigma * sign).mul_(clean_p.abs())
         p.data.copy_(clean_p).add_(noise)
 
 
@@ -288,10 +300,17 @@ def process_case_stacked(
     K_passes: int,
     sigma: float,
     seed_base: int,
+    antithetic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run K x R x M (mirror) TTA passes for one case and return per-point averaged
     predictions in real units. The K outer loop perturbs the model weights and
     reuses the perturbed copy across all (res, mirror) inner passes.
+
+    When `antithetic=True`, each k generates a PAIR of perturbations sharing
+    the same seed/eps but opposite sign (sign in {+1, -1}). The two forwards
+    in the pair share the same (R, mirror) sub-grid but the linear-Taylor
+    variance term cancels under the average, leaving only O(sigma^4) residual.
+    Total weight-perturbed forwards per (R, mirror) cell: 2*K_passes.
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -311,13 +330,32 @@ def process_case_stacked(
     }
 
     mirror_flags = (False, True) if use_mirror else (False,)
+    # Anti-thetic pairing only meaningful when sigma > 0 (else both signs
+    # collapse to clean). With sigma=0 and antithetic=True we degrade to K
+    # redundant clean passes — guard against that.
+    sign_steps: tuple[float, ...] = (
+        (+1.0, -1.0) if (antithetic and sigma > 0.0) else (+1.0,)
+    )
 
-    for k in range(K_passes):
-        # Perturb once per k; reuse across (res, mirror) inner passes.
+    # Flatten (k, sign) into a single perturbation sequence so the rest of the
+    # loop body keeps its original indentation. For anti-thetic K=3 this gives
+    # 6 perturbations per case: (0,+), (0,-), (1,+), (1,-), (2,+), (2,-).
+    perturbations: list[tuple[int, float]] = [
+        (k, sign) for k in range(K_passes) for sign in sign_steps
+    ]
+
+    for k, sign in perturbations:
+        # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
+        # Same seed for +sign and -sign within a pair -> identical noise tensor,
+        # opposite sign, giving f(w+delta) and f(w-delta). Restore is implicit:
+        # perturb_relative_ writes p = clean + sign*sigma*|clean|*eps from the
+        # pre-loop snapshot every call, so there is no drift across pairs.
         t_p = time.time()
         if sigma > 0.0:
             seed = (seed_base + k) * 100003
-            perturb_relative_(eval_module, clean, sigma=sigma, seed=seed, device=device)
+            perturb_relative_(
+                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign,
+            )
         else:
             restore_clean_params(eval_module, clean)
         timing["perturb_seconds"] += time.time() - t_p
@@ -423,7 +461,8 @@ def process_case_stacked(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    n_passes = K_passes * len(resolutions) * (2 if use_mirror else 1)
+    sign_count = 2 if (antithetic and sigma > 0.0) else 1
+    n_passes = K_passes * sign_count * len(resolutions) * (2 if use_mirror else 1)
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -519,6 +558,7 @@ def evaluate_split_stacked(
     sigma: float,
     seed_base: int,
     distributed_state,
+    antithetic: bool = False,
 ) -> dict[str, float]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -549,6 +589,7 @@ def evaluate_split_stacked(
             K_passes=K_passes,
             sigma=sigma,
             seed_base=seed_base,
+            antithetic=antithetic,
         )
         add_case_to_accumulator(
             acc,
@@ -639,9 +680,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(f"Device: {device}{ddp_suffix}")
         print(f"Resolutions: {resolutions}")
         print(f"Modes: {modes}")
+        sign_count = 2 if cfg.antithetic else 1
         print(
             f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
-            f"K_passes={cfg.weight_noise_passes} seed_base={cfg.weight_noise_seed_base}"
+            f"K_passes={cfg.weight_noise_passes} seed_base={cfg.weight_noise_seed_base} "
+            f"antithetic={cfg.antithetic} "
+            f"(perturbed forwards per (res,mirror) = {cfg.weight_noise_passes * sign_count})"
         )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
@@ -749,7 +793,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(
                     f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
                     f"mirror={use_mirror} K={cfg.weight_noise_passes} "
-                    f"sigma={cfg.weight_noise_sigma} ===",
+                    f"sigma={cfg.weight_noise_sigma} "
+                    f"antithetic={cfg.antithetic} ===",
                     flush=True,
                 )
             t0 = time.time()
@@ -768,6 +813,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 sigma=cfg.weight_noise_sigma,
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
+                antithetic=cfg.antithetic,
             )
             dt = time.time() - t0
             if state.is_main:
