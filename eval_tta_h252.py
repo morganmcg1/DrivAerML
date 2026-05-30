@@ -657,6 +657,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
+    # PR-convention alias used by H275 instructions; semantically identical.
+    mode_aliases = {"mirror_res_weight_noise_avg": "weight_noise_mirror_res_avg"}
+    modes = [mode_aliases.get(m, m) for m in modes]
     valid_modes = ("weight_noise_only", "weight_noise_mirror_res_avg")
     for mode in modes:
         if mode not in valid_modes:
