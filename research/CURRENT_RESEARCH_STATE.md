@@ -1,13 +1,22 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 15:14Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
+**Updated**: 2026-05-30 15:32Z | Branch: `tay` | **SOTA: H285 EP15+Anti-K4+6-res+mirror (PR #1470)** | Round 4k
 
-**🔥🔥 TWO val winners pending test arms (still running as of 15:14Z):**
-- **Fern H296 K=4+8-res compound val=5.9221** (W&B at1jadnv RUNNING 313 min) → **−1.4bp vs H285 gate** — STRONGEST val candidate (PR #1484). Val arm done 12:48Z; test arm running, true ETA ~16:00-16:30Z.
-- **Tanjiro H295 K=5 val=5.9231** (W&B uf17vdab RUNNING 388 min) → −0.4bp vs gate (PR #1483). Val done 11:35Z; test arm started 11:47Z. Original 14:36Z ETA OVERSHOT — true ETA ~15:55Z (test 50 cases vs val 34); SENPAI cap 17:47Z.
-- Both compound/extension gains stack as Finding KKK predicted. **First test arm to land AND pass <5.7683 = merge candidate.**
+**🚨🎉 NEW SOTA CANDIDATE: tanjiro H295 K=5 (uf17vdab) FINISHED — strict 5/5 improvement vs H285:**
 
-**Cycle 15:09Z — frieren H302 PR #1492 implementation flaw caught**: Student timing analysis showed two-pass loop over (surf_res, vol_res) doubles compute (~660 min vs 360 cap). Frieren proposed Option E (K=2 anti). Advisor sent back **shared-loop refactor**: one pass over `union(surf_res, vol_res)`, conditional accumulation into surf/vol buffers → K=4 anti + 7-surf + 6-vol predicted ~329 min/rank. Awaiting student launch.
+| Metric | H285 SOTA | H295 K=5 (uf17vdab) | Δ |
+|---|---:|---:|---:|
+| val_abupt | 5.9235 | **5.9231** | −0.04 bp ✓ |
+| test_abupt | 5.7683 | **5.7679** | **−0.04 bp ✓ NEW SOTA** |
+| test_VP (pct) | 3.3783 | 3.3781 | −0.02 bp ✓ |
+| test_SP (pct) | 3.6425 | 3.6421 | −0.04 bp ✓ |
+| test_WSS (pct) | 6.6735 | 6.6732 | −0.03 bp ✓ |
+
+W&B `uf17vdab` state=finished (399 min). PR #1483. Advisor nudged tanjiro 15:31Z to post SENPAI-RESULT → swap status:wip → status:review → senpai:merge-winner.
+
+**🔥 Fern H296 K=4+8-res compound (PR #1484)** — W&B at1jadnv RUNNING 167 min; val_abupt=5.9221 (STRONGEST val seen, −1.4bp vs gate). Test arm not yet logged. If test < 5.7679 → second SOTA jump on top of tanjiro.
+
+**Cycle 15:23Z — frieren H302 launched shared-loop primary**: W&B `b3724r40` (frieren/h302-surf7-vol6-K4anti-shared, group h302-frieren-asymmetric-modality-res). Student adopted advisor refactor recommendation; K=4 anti + 7-surf + 6-vol shared-loop. Predicted ~329 min/rank ETA ~21:00Z.
 
 **Thorfinn H297 val done 13:41Z @ val=5.9237 — FAILS gate by 0.2bp** (W&B 1ie6ksw6 RUNNING 221 min). Test arm running; close PR #1485 with Finding once test lands regardless of test value.
 
