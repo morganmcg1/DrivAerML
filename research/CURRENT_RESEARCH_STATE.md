@@ -1,9 +1,19 @@
 # SENPAI Research State
 
-- **2026-05-30 22:45Z**
+- **2026-05-30 23:10Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 23:10Z snapshot — wave-4 EMA-derivative thesis NEAR-FALSIFIED at H172 EP25
+
+- **H172 EP25 val_WSS=6.693 ASCENDING** (+0.040 from EP24=6.653, +0.041 from EP20 local-min=6.652). The descent has fully reversed during cosine cooldown. Revised EP30 projection: test_WSS 6.65-6.70 = +0.11-0.16pp BEHIND H147 SOTA. VP=3.648 brushing the 3.643 floor cap.
+- **H178 EP10 val_VP=4.078 BREACHED** the 3.643 floor cap by +0.435pp; WSS=6.828 trailing H147 EP10=6.624 by +0.20pp. Extrapolation to EP16 still NON-MERGE on VP.
+- **H181 EP1 val_WSS=53.81** consistent with EMA-99995 longer-window saturation lag (effective N=20k vs H172's 10k). EP3-EP10 will determine whether the longer window extends descent durability or over-smooths.
+- **H182 smoke** at step 5741, pre-EP1 — main launch authorization gated on EP1 normality.
+- **Wave-5 catalog committed (`99097d2`):** H-W5-1 WSD LR Schedule (HIGH/LOW), H-W5-2 Per-Channel Decoder Heads, H-W5-3 τ_y GradNorm Floor, H-W5-4 Muon Optimizer, H-W5-5 Sobolev Aux Loss. Dispatch order on idleness: H-W5-1 → H-W5-2 → H-W5-3.
+
+**Path B (EMA-derivative falsified) is now near-confirmed.** Wave-5 architecture/schedule pivot ready to dispatch on next idleness.
 
 ---
 
@@ -139,16 +149,16 @@ Revised based on H180 walkback, H172 EP20→EP23 stall, and H172 leadership weak
 6. DDP8 only (no split GPU arms)
 7. Ensembles BANNED
 
-## Terminations ETA cluster (22:45Z)
+## Terminations ETA cluster (23:10Z)
 
 | Run | PR | Student | ETA | Action |
 |---|---|---|---|---|
 | H176 | #1486 | frieren | ✓ CLOSED 20:24Z | H181 EMA 0.99995 dispatched (PR #1503) |
 | H180 | #1494 | nezuko | ✓ CLOSED 22:39Z | H182 EMA+LR 1.3× dispatched (PR #1506) |
-| H181 | #1503 | frieren | 2026-05-31 ~20:30Z | main 30-EP running, smoke validated, kill ladder posted |
-| H182 | #1506 | nezuko | 2026-05-31 ~21:00Z | smoke + main pending |
-| H178 | #1493 | fern | ~23:00-23:30Z | NON-MERGE VP breach expected; dispatch H183 EMA+extended-cosine (cap ≤32 EP) |
-| H172 | #1469 | tanjiro | ~23:30-01:00Z | Verdict-dependent on EP25-EP30; if stall persists → NON-MERGE, dispatch H184 |
+| H181 | #1503 | frieren | 2026-05-31 ~20:30Z | EP1 val_WSS=53.81 (normal); main 30-EP running |
+| H182 | #1506 | nezuko | 2026-05-31 ~21:00Z | smoke at step 5741, pre-EP1; main pending |
+| H178 | #1493 | fern | ~02:30-03:30Z | EP10 VP=4.078 BREACH; NON-MERGE certain; dispatch **H-W5-1 WSD LR Schedule** |
+| H172 | #1469 | tanjiro | ~03:40Z | EP25 val_WSS=6.693 ASCENDING; NON-MERGE near-certain; dispatch **H-W5-2 Per-Channel Decoder Heads** |
 
 ## H147 actual EP boundaries (from k6q4c3on val history, authoritative reference)
 
