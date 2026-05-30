@@ -33,6 +33,7 @@ Modes:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import time
 from dataclasses import asdict, dataclass, fields
@@ -88,6 +89,13 @@ class EvalConfig:
     # number of forward passes per (res, mirror) is 2 * weight_noise_passes.
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
+    # H293: noise distribution family for unit-RMS sampling. Both options
+    # produce noise with RMS=1 before the per-tensor sigma * |clean_p|
+    # multiplication, so anti-thetic ± cancellation of the linear Taylor
+    # term holds for any choice. Laplace has heavier (exponential) tails
+    # than Gaussian (kurtosis 6 vs 3) and may yield more diverse Taylor
+    # neighborhoods per pass at matched RMS.
+    noise_distribution: str = "gaussian"
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -255,6 +263,39 @@ def restore_clean_params(module: nn.Module, clean: dict[str, torch.Tensor]) -> N
             p.data.copy_(clean[name])
 
 
+def _sample_unit_rms_noise(
+    shape: torch.Size,
+    *,
+    distribution: str,
+    generator: torch.Generator,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Sample noise with unit RMS (variance 1) under the given distribution.
+
+    Both gaussian and laplace samplers use the SAME ``generator`` state and
+    consume a deterministic number of uniform/normal draws per call, so a
+    matched ``seed`` produces an anti-thetic ±ε pair when called twice with
+    opposite signs in the caller. RMS=1 keeps the downstream
+    ``sigma * |clean_p|`` relative-scaling semantics distribution-agnostic.
+    """
+    if distribution == "gaussian":
+        return torch.randn(shape, generator=generator, device=device, dtype=dtype)
+    if distribution == "laplace":
+        # Inverse-CDF Laplace with scale b = 1/sqrt(2):
+        #   variance = 2 * b^2 = 1, RMS = 1.
+        # u ~ Uniform[0, 1); v = u - 0.5 in [-0.5, 0.5).
+        # x = -b * sign(v) * log1p(-2|v|) — log1p(-2|v|) = log(1 - 2|v|).
+        # Clamp |v| strictly below 0.5 to avoid log(0).
+        u = torch.rand(shape, generator=generator, device=device, dtype=dtype)
+        v = u - 0.5
+        eps = torch.finfo(dtype).eps
+        v_abs = v.abs().clamp(max=0.5 - eps)
+        b = 1.0 / math.sqrt(2.0)
+        return -b * torch.sign(v) * torch.log1p(-2.0 * v_abs)
+    raise ValueError(f"Unknown noise distribution: {distribution!r}")
+
+
 @torch.no_grad()
 def perturb_relative_(
     module: nn.Module,
@@ -263,11 +304,16 @@ def perturb_relative_(
     seed: int,
     device: torch.device,
     sign: float = 1.0,
+    distribution: str = "gaussian",
 ) -> None:
-    """p <- clean_p + sign * randn(seed) * sigma * |clean_p|, identical across DDP ranks.
+    """p <- clean_p + sign * sample(seed) * sigma * |clean_p|, identical across DDP ranks.
 
     With matched ``seed`` and ``sign=±1.0`` calls, produces an anti-thetic pair
     whose linear Taylor term cancels in the average (Finding NN / H274).
+    ``distribution`` selects the unit-RMS sampler family ("gaussian" or
+    "laplace"); residual second-order curvature term ½εᵀHε scales identically
+    for matched-RMS samplers, but the heavier-tailed Laplace draws explore a
+    different per-pass Taylor neighborhood (Hypothesis H293).
     """
     gen = torch.Generator(device=device)
     gen.manual_seed(seed)
@@ -275,7 +321,13 @@ def perturb_relative_(
         if not p.dtype.is_floating_point:
             continue
         clean_p = clean[name]
-        noise = torch.randn(p.shape, generator=gen, device=device, dtype=p.dtype)
+        noise = _sample_unit_rms_noise(
+            p.shape,
+            distribution=distribution,
+            generator=gen,
+            device=device,
+            dtype=p.dtype,
+        )
         noise.mul_(sigma * sign).mul_(clean_p.abs())
         p.data.copy_(clean_p).add_(noise)
 
@@ -299,6 +351,7 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
+    noise_distribution: str = "gaussian",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
@@ -341,7 +394,13 @@ def process_case_stacked(
         if sigma > 0.0:
             seed = (seed_base + k) * 100003
             perturb_relative_(
-                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
+                eval_module,
+                clean,
+                sigma=sigma,
+                seed=seed,
+                device=device,
+                sign=sign,
+                distribution=noise_distribution,
             )
         else:
             restore_clean_params(eval_module, clean)
@@ -546,6 +605,7 @@ def evaluate_split_stacked(
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
+    noise_distribution: str = "gaussian",
 ) -> dict[str, float]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -577,6 +637,7 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            noise_distribution=noise_distribution,
         )
         add_case_to_accumulator(
             acc,
@@ -807,6 +868,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
+                noise_distribution=cfg.noise_distribution,
             )
             dt = time.time() - t0
             if state.is_main:
