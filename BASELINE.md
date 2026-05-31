@@ -98,7 +98,47 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1489 H300 H296+Per-Channel Affine Calibration (tay) — 2026-05-30 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1498 H312 H296+8-res+Per-Channel Affine Calibration (tay) — 2026-05-31 ***
+
+**val_abupt_calibrated=5.8994%** / **test_abupt_calibrated=5.7388%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA → per-channel affine α/β calibration on H296 base)
+
+**New SOTA — beats H300 by −1.7bp val / −1.1bp test (razor-thin but sign-consistent). Every channel except surface_p tightens vs H300: test_WSS −1.3bp, test_WSS_x −1.2bp, test_WSS_y −1.6bp, test_WSS_z −1.3bp, test_VP −2.0bp. Surface_p ties (+0.5bp within noise). Confirms "better raw → better cal": H296 base (val_raw 5.9221) gives tighter calibration than H285 base (val_raw 5.9275). Calibration on 8-res is near saturation for this single-model setup.**
+
+**W&B run:** `enf61qrr` (edward/h312-K4-8res-mirror-cal)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1498
+
+**Val metrics (calibrated):** val_abupt=5.8994%
+**Test metrics (calibrated):** test_abupt=**5.7388%**, test_VP=**3.3743%**, test_SP=**3.6137%**, test_WSS=**6.6391%**, test_WSS_x=5.9021%, test_WSS_y=7.1857%, test_WSS_z=8.6182%
+
+**Per-channel calibration coefficients (re-fit on H296 val outputs):**
+- surface[cp  ]: α=+0.994888, β=−0.002322
+- surface[τ_x ]: α=+0.994397, β=−0.007027
+- surface[τ_y ]: α=+0.994083, β=−0.000236
+- surface[τ_z ]: α=+0.991722, β=−0.000146
+- volume[VP   ]: α=+0.999687, β=−0.832811
+
+**Paper floors:** test_VP 3.3743 < 3.421 ✓ | test_WSS 6.6391 < 6.727 ✓ | test_SP 3.6137 > 3.577 ✗ (3.7bp gap)
+**Stretch goal:** test_WSS < 5.85% — gap = **0.789pp** (was 0.790pp at H300)
+
+**Merge gate (updated):** val_abupt_calibrated < **5.8994%** AND test_abupt_calibrated < **5.7388%**
+
+**Reproduce:**
+```bash
+H185_EP15_CKPT="outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt"
+
+torchrun --standalone --nproc-per-node=8 eval_tta_h252.py \
+  --checkpoint $H185_EP15_CKPT \
+  --resolutions "32768,40960,49152,57344,65536,81920,98304,131072" \
+  --eval-modes "weight_noise_mirror_res_avg" \
+  --weight-noise-sigma 5e-4 --weight-noise-passes 4 --antithetic-noise \
+  --test-time-calibration \
+  --batch-size 2 --num-workers 4
+```
+
+---
+
+## *** PRIOR SINGLE-MODEL SOTA: PR #1489 H300 H285+Per-Channel Affine Calibration (tay) — 2026-05-30 (superseded by #1498) ***
 
 **val_abupt_calibrated=5.9011%** / **test_abupt_calibrated=5.7399%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA → per-channel affine α/β calibration)
 
