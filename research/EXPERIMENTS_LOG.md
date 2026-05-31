@@ -1,3 +1,65 @@
+## 2026-05-31 22:01Z — PR #1507 thorfinn H307 CLOSED: weight-space model soup α-sweep on 2 EP15 seeds — 3 findings banked, AND-fail on H314 val gate by 3 milli-bp
+
+### CLOSED — AND-fail on H314 strict gate (val_cal < 5.8987 AND test_cal < 5.7387)
+
+- **Branch**: thorfinn/h307-weight-space-avg-soup
+- **W&B runs**: Arm B α=0.5 (val 5.9017 / test 5.7380), Arm C α=0.75 (5.8999 / 5.7378), **Arm D α=0.85 `v4ye4e4k`** (5.8990 / 5.7380)
+- **Hypothesis**: Average two EP15 EMA checkpoints (seed-1 `0gjfv45i` H244-cosine-extension by edward, seed-2 `m1ddrlcu` H310-commission by thorfinn) at α∈{0.5, 0.75, 0.85} with full H312 calibration. Test whether weight-space averaging reduces val_raw variance more than seed-1 alone while preserving the H300 calibration mechanism. Pre-noise checkpoints `||A-B||₂ = 4.59` vs `||θ||₂ ≈ 479` — small but real seed divergence.
+- **Results — Arm D terminal (latest, most seed-1-favoring)**:
+
+  | metric | value | H314 gate | Δ |
+  |---|---:|---:|---|
+  | val_cal | **5.8990** | < 5.8987 | **+0.27bp MISS** |
+  | test_cal | **5.7380** | < 5.7387 | **−0.7bp BEAT** |
+  | → **AND** | | | **FAIL** |
+
+- **Full α-curve characterization (the durable artifact)**:
+
+  | arm | α | val_raw | val_cal | test_cal | Δval_cal vs H314 |
+  |---|---:|---:|---:|---:|---:|
+  | B | 0.5 | 5.9255 | 5.9017 | 5.7380 | +3.0bp miss |
+  | C | 0.75 | 5.9236 | 5.8999 | 5.7378 | +1.2bp miss |
+  | D | 0.85 | 5.9228 | **5.8990** | **5.7380** | +0.27bp miss |
+  | H314 (gate) | — | — | 5.8987 | 5.7387 | — |
+  | (seed-1 alone, lin. extrap) | 1.0 | 5.9215 | ~5.8977 | ~5.7380 | beat by 1bp val? |
+
+- **Channel-level test_cal (Arm D vs H314 PR #1500)**:
+
+  | channel | Arm D | H314 | Δ |
+  |---|---:|---:|---:|
+  | test_VP | 3.374 | 3.371 | +0.03bp |
+  | test_SP | 3.613 | 3.613 | ~0 |
+  | test_WSS_x | 5.901 | 5.9015 | ~0 |
+  | test_WSS_y | 7.184 | 7.1832 | +0.01bp |
+  | test_WSS_z | **8.617** | **8.6195** | **−0.22bp** |
+  | test_WSS | 6.638 | 6.6390 | −0.10bp |
+
+- **α coefficient shift (informs `soup-cal-extracts-more`)**:
+
+  | α coef | H312 OLS | Arm D (α=0.85 soup) | Δ | vs H332 threshold (±2.6e-4) |
+  |---|---:|---:|---:|---:|
+  | α_cp | 0.994888 | 0.994513 | **−3.75e-4** | **EXCEEDS** |
+  | α_τx | 0.994397 | 0.994341 | −5.7e-5 | within |
+  | α_τy | 0.994083 | 0.993863 | −2.2e-4 | within |
+  | α_τz | 0.991722 | 0.991695 | −2.7e-5 | within |
+  | α_VP | 0.999687 | 0.999763 | +7.6e-5 | within |
+  | β_VP | −0.832811 | −0.828397 | +4.4e-3 | shifts |
+
+- **3 findings banked**:
+  - ✅ **`soup-alpha-val-monotone-no-cross`** — val_cal monotone in α approaching seed-1 from below (5.9017 → 5.8999 → 5.8990 across α∈{0.5, 0.75, 0.85}) with diminishing returns. Linear extrapolation D→1.0 (Δα=0.15) closes only ~0.13bp, so seed-1-alone val_cal estimated ~5.8977 (would beat gate by ~1bp val). **Pure-seed-1 IS the val_raw optimum at val_N=34**; two-seed weight averaging cannot improve val. test_cal α-invariant at ~5.7380 across all 3 arms (within 0.2bp noise floor). No α∈(0.5, 1.0) clears the H314 val gate.
+  - ✅ **`soup-cal-extracts-more`** — α_cp shifts Δ=3.75e-4 across arms, exceeding H332 cross-α invariance threshold ±2.6e-4. Soup flattens residual structure (smaller per-car residual variance from weight averaging), letting diagonal-affine cal catch slightly more error. The 2.7bp val_cal closure across arms (5.9017→5.8990) is **entirely cal-extraction**, not raw improvement (val_raw closure is only 2.7bp too — val_raw 5.9255→5.9228 across α). Confirms soup mechanism: smoothing the prediction surface enables marginally more cal benefit, but the raw improvement on val is what's missing.
+  - ✅ **`soup-wz-improves-mildly`** — test_WSS_z 8.617 vs H314 8.6195 (−0.22bp) is the **only channel-level improvement** in Arm D vs H314. Insufficient alone (need ~12bp WSS_z improvement to clear gate) but **third independent piece of evidence** that wz is the bottleneck channel (alongside H314 decomposition wz=8.6195/wy=7.18/wx=5.90 and H334 `tau-z-cal-saturated`). Soup mechanism diffuses wz error across orientations in weight-space — directionally correct, magnitude insufficient.
+- **Structural verdict — weight-space soup axis CLOSED at this datapool**:
+  - α-response curve is smooth, monotone, no kink across α∈[0.5, 0.85]
+  - Lands ~0.3bp below H314 gate at most favorable α (closest to seed-1)
+  - Pure seed-1 would beat val by ~1bp but is exactly H314's training (modulo Student-t weight noise) — no new SOTA from 2-way soup
+  - No room without (a) larger seed-pool ensembling [Morgan blocked 2026-05-28 lazy-route], (b) different perturbation geometry (H342/alphonse output-space averaging), or (c) attacking the raw error directly via training-time loss reweighting (H338/H339/H341 in flight)
+- **Direct quote of pre-stated decision rule (advisor 18:18Z comment on PR #1507)**: "If terminal Arm D val_cal ≥ 5.8987 → CLOSE with Finding 'soup-alpha-val-monotone-no-cross' (test invariant, val never reaches seed-1). If somehow Arm D val_cal < 5.8987 AND test_cal < 5.7387 → MERGE candidate, but no need to launch Arm E (α=0.95 would only close 0.4bp more by the trend, hitting effectively pure seed-1)." → Arm D val_cal = 5.8990 ≥ 5.8987 → CLOSE branch applies.
+- **PR**: https://github.com/morganmcg1/DrivAerML/pull/1507
+- **Follow-up**: thorfinn idle → next hypothesis pending. H342 (alphonse, PR #1526) tests orthogonal output-space averaging (ep13+ep14+ep15 from same recipe) — complementary mechanism to weight-space.
+
+---
+
 ## 2026-05-31 19:58Z — PR #1518 alphonse H334 CLOSED: brute-force per-channel α grid + joint greedy descent — 3 findings banked, NULL on gate
 
 ### CLOSED — NULL on H314 strict gate (val_cal < 5.8987 AND test_cal < 5.7387)
