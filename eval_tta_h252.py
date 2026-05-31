@@ -95,6 +95,15 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H313: regional/zonal per-channel calibration on top of H300. Accepts a
+    # comma-separated list of zone counts, e.g. "6" or "4,6"; the TTA outputs
+    # are aggregated into per-(N_zone, zone, channel) sufficient stats once,
+    # and an OLS (alpha, beta) is fit per zone x surface channel for each N
+    # in the list. Volume pressure keeps the H300 global affine (no volume
+    # zoning, per researcher recommendation given tight test_VP headroom).
+    # Supported partitions: 4 (nose/rear/underbody/body) and 6
+    # (nose/roof/sides/underbody/rear/body).
+    regional_num_zones: str = ""
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -163,6 +172,24 @@ def parse_resolutions(spec: str) -> list[int]:
 
 def parse_modes(spec: str) -> list[str]:
     return [m.strip() for m in spec.split(",") if m.strip()]
+
+
+def parse_zone_counts(spec: str) -> list[int]:
+    """Parse a CSV like "4,6" into [4, 6]. Empty string -> []."""
+    out: list[int] = []
+    for piece in spec.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        n = int(piece)
+        if n not in (4, 6):
+            raise ValueError(
+                f"regional_num_zones values must be 4 or 6 (got {n!r}); supported "
+                "partitions are 4 (nose/rear/underbody/body) and 6 "
+                "(nose/roof/sides/underbody/rear/body)."
+            )
+        out.append(n)
+    return out
 
 
 def build_model(cfg: EvalConfig) -> SurfaceTransolver:
@@ -306,7 +333,15 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    int,
+    dict,
+]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
     weights and reuses the perturbed copy across all (res, mirror) inner passes.
@@ -454,10 +489,11 @@ def process_case_stacked(
     case = store.load_case(case_id)
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
+    surf_xyz = case.surface_x[:, 0:3].float()
 
     k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
     n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
-    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
+    return surf_avg, vol_avg, surf_y, vol_y, surf_xyz, n_passes, timing
 
 
 # --- H300 affine calibration helpers ---
@@ -475,7 +511,14 @@ class CalibrationStats:
     """Per-case per-channel sufficient stats for fitting an affine OLS
     calibration y_hat = alpha * y + beta and recomputing per-case rel_l2
     metrics under that affine map. Surface has 4 channels (cp, tau_x, tau_y,
-    tau_z), volume has 1 (volume_pressure)."""
+    tau_z), volume has 1 (volume_pressure).
+
+    Optionally also tracks H313 per-zone surface stats when zone assignments
+    are provided. ``surf_zonal_global`` is a dict keyed by partition size
+    (n_zones) with values of shape (n_zones, N_SURF_CHANNELS, N_STAT_COLS).
+    ``surf_zonal_per_case`` is a dict[n_zones -> dict[case_id -> tensor of
+    same shape]].
+    """
 
     surf_global: torch.Tensor = field(
         default_factory=lambda: torch.zeros(N_SURF_CHANNELS, N_STAT_COLS, dtype=torch.float64)
@@ -485,6 +528,8 @@ class CalibrationStats:
     )
     surf_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
     vol_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
+    surf_zonal_global: dict[int, torch.Tensor] = field(default_factory=dict)
+    surf_zonal_per_case: dict[int, dict[str, torch.Tensor]] = field(default_factory=dict)
 
 
 def _channel_stats(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -507,6 +552,105 @@ def _channel_stats(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return stats
 
 
+def _channel_stats_zonal(
+    pred: torch.Tensor, target: torch.Tensor, zone: torch.Tensor, n_zones: int
+) -> torch.Tensor:
+    """Per-zone sufficient stats. Returns (n_zones, n_channels, 6).
+
+    Each zone slot holds the same six columns as `_channel_stats` summed only
+    over points assigned to that zone. Empty zones produce all-zero rows.
+    """
+    p = pred.double()
+    t = target.double()
+    n_ch = p.shape[1]
+    stats = torch.zeros(n_zones, n_ch, N_STAT_COLS, dtype=torch.float64)
+    for z_idx in range(n_zones):
+        mask = zone == z_idx
+        if not mask.any():
+            continue
+        p_z = p[mask]
+        t_z = t[mask]
+        stats[z_idx, :, 0] = float(p_z.shape[0])
+        stats[z_idx, :, 1] = p_z.sum(0)
+        stats[z_idx, :, 2] = t_z.sum(0)
+        stats[z_idx, :, 3] = (p_z * p_z).sum(0)
+        stats[z_idx, :, 4] = (t_z * t_z).sum(0)
+        stats[z_idx, :, 5] = (p_z * t_z).sum(0)
+    return stats
+
+
+def compute_zone_thresholds(
+    store: DrivAerMLCaseStore, case_ids: Iterable[str]
+) -> dict[str, float]:
+    """Pool surface xyz across ``case_ids`` and return percentile thresholds
+    used by `assign_zones`. Keys: x_20, x_80, z_20, z_70, abs_y_60.
+    """
+    import numpy as np  # noqa: PLC0415 — small local import keeps top-of-file clean
+
+    xyz_chunks: list[np.ndarray] = []
+    for case_id in case_ids:
+        case = store.load_case(case_id)
+        xyz_chunks.append(case.surface_x[:, 0:3].numpy())
+    xyz = np.concatenate(xyz_chunks, axis=0)
+    return {
+        "x_20": float(np.percentile(xyz[:, 0], 20)),
+        "x_80": float(np.percentile(xyz[:, 0], 80)),
+        "z_20": float(np.percentile(xyz[:, 2], 20)),
+        "z_70": float(np.percentile(xyz[:, 2], 70)),
+        "abs_y_60": float(np.percentile(np.abs(xyz[:, 1]), 60)),
+    }
+
+
+def assign_zones(
+    xyz: torch.Tensor, thresholds: dict[str, float], n_zones: int
+) -> torch.Tensor:
+    """Assign each surface point to a spatial zone (returned as int64 indices).
+
+    n_zones=6:
+        0 = nose      (x < x_20)
+        1 = roof      (mid-x band, z > z_70)
+        2 = sides     (mid-x band, |y| > abs_y_60, z in [z_20, z_70])
+        3 = underbody (mid-x band, z < z_20)
+        4 = rear/wake (x > x_80)
+        5 = body remainder (default)
+
+    n_zones=4 (collapses roof/sides into body):
+        0 = nose      (x < x_20)
+        1 = rear/wake (x > x_80)
+        2 = underbody (mid-x band, z < z_20)
+        3 = body remainder (default)
+
+    The mid-x and underbody/roof rules are applied first (lower priority); the
+    boundary x rules overwrite afterwards (higher priority). Points falling
+    only inside the body remainder go to the default index.
+    """
+    if n_zones not in (4, 6):
+        raise ValueError(f"regional_num_zones must be 4 or 6, got {n_zones}")
+    x = xyz[:, 0]
+    y = xyz[:, 1]
+    z = xyz[:, 2]
+    abs_y = y.abs()
+    x_20 = thresholds["x_20"]
+    x_80 = thresholds["x_80"]
+    z_20 = thresholds["z_20"]
+    z_70 = thresholds["z_70"]
+    abs_y_60 = thresholds["abs_y_60"]
+    mid_x = (x >= x_20) & (x <= x_80)
+    if n_zones == 6:
+        zone = torch.full((xyz.shape[0],), 5, dtype=torch.long)
+        zone[mid_x & (abs_y > abs_y_60)] = 2
+        zone[mid_x & (z < z_20)] = 3
+        zone[mid_x & (z > z_70)] = 1
+        zone[x < x_20] = 0
+        zone[x > x_80] = 4
+    else:
+        zone = torch.full((xyz.shape[0],), 3, dtype=torch.long)
+        zone[mid_x & (z < z_20)] = 2
+        zone[x < x_20] = 0
+        zone[x > x_80] = 1
+    return zone
+
+
 def add_case_to_calibration(
     cal: CalibrationStats,
     *,
@@ -515,6 +659,7 @@ def add_case_to_calibration(
     volume_pred_real: torch.Tensor,
     surface_y: torch.Tensor,
     volume_y: torch.Tensor,
+    surface_zones_by_n: dict[int, torch.Tensor] | None = None,
 ) -> None:
     surf_stats = _channel_stats(surface_pred_real, surface_y)
     vol_stats = _channel_stats(volume_pred_real, volume_y)
@@ -522,6 +667,17 @@ def add_case_to_calibration(
     cal.vol_per_case[case_id] = vol_stats
     cal.surf_global += surf_stats
     cal.vol_global += vol_stats
+    if surface_zones_by_n:
+        for n_zones, zone in surface_zones_by_n.items():
+            zonal_stats = _channel_stats_zonal(
+                surface_pred_real, surface_y, zone, n_zones
+            )
+            cal.surf_zonal_per_case.setdefault(n_zones, {})[case_id] = zonal_stats
+            if n_zones not in cal.surf_zonal_global:
+                cal.surf_zonal_global[n_zones] = torch.zeros_like(zonal_stats)
+            cal.surf_zonal_global[n_zones] = (
+                cal.surf_zonal_global[n_zones] + zonal_stats
+            )
 
 
 def merge_calibration_stats(parts: Iterable[CalibrationStats]) -> CalibrationStats:
@@ -531,6 +687,14 @@ def merge_calibration_stats(parts: Iterable[CalibrationStats]) -> CalibrationSta
         merged.vol_global += part.vol_global
         merged.surf_per_case.update(part.surf_per_case)
         merged.vol_per_case.update(part.vol_per_case)
+        for n_zones, gstats in part.surf_zonal_global.items():
+            if n_zones not in merged.surf_zonal_global:
+                merged.surf_zonal_global[n_zones] = torch.zeros_like(gstats)
+            merged.surf_zonal_global[n_zones] = (
+                merged.surf_zonal_global[n_zones] + gstats
+            )
+        for n_zones, by_case in part.surf_zonal_per_case.items():
+            merged.surf_zonal_per_case.setdefault(n_zones, {}).update(by_case)
     return merged
 
 
@@ -582,6 +746,111 @@ def _affine_error_sq(
         - 2.0 * beta * sum_t
         + sum_tt
     )
+
+
+def fit_affine_per_zone_per_channel(
+    zonal_global_stats: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Vectorised OLS over (n_zones, n_channels) sufficient stats.
+
+    zonal_global_stats: (n_zones, n_channels, 6) with the same column layout
+    as `_channel_stats`. Returns alpha, beta of shape (n_zones, n_channels).
+    Empty or near-constant zones (var_p <= 1e-12) fall back to identity.
+    """
+    N = zonal_global_stats[..., 0]
+    sum_p = zonal_global_stats[..., 1]
+    sum_t = zonal_global_stats[..., 2]
+    sum_pp = zonal_global_stats[..., 3]
+    sum_pt = zonal_global_stats[..., 5]
+    N_safe = N.clamp(min=1.0)
+    mu_p = sum_p / N_safe
+    mu_t = sum_t / N_safe
+    cov_pt = sum_pt - N * mu_p * mu_t
+    var_p = sum_pp - N * mu_p * mu_p
+    degenerate = var_p <= 1e-12
+    alpha_raw = cov_pt / var_p.clamp(min=1e-12)
+    alpha = torch.where(degenerate, torch.ones_like(alpha_raw), alpha_raw)
+    beta = torch.where(degenerate, torch.zeros_like(alpha_raw), mu_t - alpha * mu_p)
+    return alpha, beta
+
+
+def compute_calibrated_metrics_regional(
+    cal: CalibrationStats,
+    n_zones: int,
+    alpha_surf_zonal: torch.Tensor,
+    beta_surf_zonal: torch.Tensor,
+    alpha_vol: torch.Tensor,
+    beta_vol: torch.Tensor,
+) -> dict[str, float]:
+    """Per-case rel_l2 under H313 regional surface calibration + H300 global
+    volume calibration. Per-zone (alpha, beta) maps are summed in error space
+    inside each case before computing the per-channel rel_l2 ratio. Mirrors
+    `compute_calibrated_metrics` keys for downstream parsing.
+    """
+    surf_zonal_per_case = cal.surf_zonal_per_case.get(n_zones)
+    if not surf_zonal_per_case:
+        raise RuntimeError(
+            f"CalibrationStats has no zonal stats for n_zones={n_zones}; cannot compute regional metrics"
+        )
+    surf_ids = sorted(surf_zonal_per_case.keys())
+
+    surf_per_channel_rel_l2: list[torch.Tensor] = []
+    vec_rel_l2_list: list[torch.Tensor] = []
+    for case_id in surf_ids:
+        s = surf_zonal_per_case[case_id]  # (n_zones, 4, 6)
+        e_sq_z = _affine_error_sq(s, alpha_surf_zonal, beta_surf_zonal)  # (n_zones, 4)
+        e_sq_total = e_sq_z.sum(dim=0)  # (4,)
+        t_sq_total = s[..., 4].sum(dim=0)  # (4,)
+        rel = torch.sqrt(e_sq_total.clamp(min=0.0) / t_sq_total.clamp(min=1e-12))
+        surf_per_channel_rel_l2.append(rel)
+
+        s_vec = s[:, 1:4]  # (n_zones, 3, 6)
+        e_sq_vec_z = _affine_error_sq(
+            s_vec, alpha_surf_zonal[:, 1:4], beta_surf_zonal[:, 1:4]
+        )  # (n_zones, 3)
+        e_sq_vec_total = e_sq_vec_z.sum()
+        t_sq_vec_total = s_vec[..., 4].sum()
+        rel_vec = torch.sqrt(
+            e_sq_vec_total.clamp(min=0.0) / t_sq_vec_total.clamp(min=1e-12)
+        )
+        vec_rel_l2_list.append(rel_vec)
+    surf_rel_l2 = torch.stack(surf_per_channel_rel_l2, dim=0)
+    vec_rel_l2 = torch.stack(vec_rel_l2_list, dim=0)
+
+    vol_ids = sorted(cal.vol_per_case.keys())
+    vol_per_channel_rel_l2: list[torch.Tensor] = []
+    for case_id in vol_ids:
+        v = cal.vol_per_case[case_id]  # (1, 6)
+        e_sq = _affine_error_sq(v, alpha_vol, beta_vol)
+        t_sq = v[..., 4]
+        rel = torch.sqrt(e_sq.clamp(min=0.0) / t_sq.clamp(min=1e-12))
+        vol_per_channel_rel_l2.append(rel)
+    vol_rel_l2 = torch.stack(vol_per_channel_rel_l2, dim=0)
+
+    sp = float(surf_rel_l2[:, 0].mean().item())
+    tx = float(surf_rel_l2[:, 1].mean().item())
+    ty = float(surf_rel_l2[:, 2].mean().item())
+    tz = float(surf_rel_l2[:, 3].mean().item())
+    ws_vec = float(vec_rel_l2.mean().item())
+    vp = float(vol_rel_l2[:, 0].mean().item())
+    abupt = (sp + tx + ty + tz + vp) / 5.0
+    return {
+        "surface_pressure_rel_l2": sp,
+        "surface_pressure_rel_l2_pct": sp * 100.0,
+        "wall_shear_rel_l2": ws_vec,
+        "wall_shear_rel_l2_pct": ws_vec * 100.0,
+        "wall_shear_x_rel_l2": tx,
+        "wall_shear_x_rel_l2_pct": tx * 100.0,
+        "wall_shear_y_rel_l2": ty,
+        "wall_shear_y_rel_l2_pct": ty * 100.0,
+        "wall_shear_z_rel_l2": tz,
+        "wall_shear_z_rel_l2_pct": tz * 100.0,
+        "volume_pressure_rel_l2": vp,
+        "volume_pressure_rel_l2_pct": vp * 100.0,
+        "abupt_axis_mean_rel_l2": abupt,
+        "abupt_axis_mean_rel_l2_pct": abupt * 100.0,
+        "cases": float(len(surf_ids)),
+    }
 
 
 def compute_calibrated_metrics(
@@ -748,6 +1017,8 @@ def evaluate_split_stacked(
     distributed_state,
     antithetic: bool = False,
     collect_calibration: bool = False,
+    zone_thresholds: dict[str, float] | None = None,
+    zone_counts: list[int] | None = None,
 ) -> tuple[dict[str, float], CalibrationStats | None]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -766,7 +1037,7 @@ def evaluate_split_stacked(
     total_forwards = 0
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_stacked(
+        surf_avg, vol_avg, surf_y, vol_y, surf_xyz, n_passes, timing = process_case_stacked(
             case_id=case_id,
             model=model,
             transform=transform,
@@ -791,6 +1062,12 @@ def evaluate_split_stacked(
             transform=transform,
         )
         if cal is not None:
+            surface_zones_by_n: dict[int, torch.Tensor] | None = None
+            if zone_thresholds is not None and zone_counts:
+                surface_zones_by_n = {
+                    nz: assign_zones(surf_xyz, zone_thresholds, nz)
+                    for nz in zone_counts
+                }
             add_case_to_calibration(
                 cal,
                 case_id=case_id,
@@ -798,6 +1075,7 @@ def evaluate_split_stacked(
                 volume_pred_real=vol_avg,
                 surface_y=surf_y,
                 volume_y=vol_y,
+                surface_zones_by_n=surface_zones_by_n,
             )
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
@@ -879,6 +1157,7 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
+    zone_counts = parse_zone_counts(cfg.regional_num_zones)
     # PR-convention alias used by H275 instructions; semantically identical.
     mode_aliases = {"mirror_res_weight_noise_avg": "weight_noise_mirror_res_avg"}
     modes = [mode_aliases.get(m, m) for m in modes]
@@ -898,6 +1177,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
             f"seed_base={cfg.weight_noise_seed_base}"
+        )
+        print(
+            f"Calibration: H300 global={cfg.test_time_calibration} "
+            f"| H313 regional zone_counts={zone_counts}"
         )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
@@ -947,6 +1230,34 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             print(f"DEBUG: {len(val_case_ids)} val + {len(test_case_ids)} test cases only")
 
+    # H313: Pre-compute zone thresholds from val surface xyz (rank 0), then
+    # broadcast to every rank so each case's zone assignment is identical.
+    # Thresholds are computed once and reused for every n_zones in zone_counts
+    # (the partition rules pick the same percentile breakpoints).
+    zone_thresholds: dict[str, float] | None = None
+    if zone_counts and cfg.test_time_calibration:
+        if state.is_main:
+            t_z = time.time()
+            zone_thresholds = compute_zone_thresholds(store, val_case_ids)
+            print(
+                f"\n=== H313 zone thresholds (zone_counts={zone_counts}, "
+                f"pool=val_surface_xyz) ===",
+                flush=True,
+            )
+            for k, v in zone_thresholds.items():
+                print(f"  {k:>10s} = {v:+.6f}", flush=True)
+            print(f"  threshold compute: {time.time() - t_z:.1f}s", flush=True)
+        if state.enabled:
+            obj: list[dict[str, float] | None] = [zone_thresholds]
+            dist.broadcast_object_list(obj, src=0)
+            zone_thresholds = obj[0]
+    elif zone_counts and not cfg.test_time_calibration and state.is_main:
+        print(
+            "[H313 WARN] regional_num_zones set but --test-time-calibration "
+            "not enabled; ignoring zone settings",
+            flush=True,
+        )
+
     run = None
     if state.is_main:
         run_name = (
@@ -977,6 +1288,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "mirror",
                 "eval-only",
                 cfg.agent,
+                *(
+                    ["h313", *(f"regional-{n}-zone" for n in zone_counts)]
+                    if zone_counts
+                    else []
+                ),
             ],
             reinit="finish_previous",
         )
@@ -1035,6 +1351,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
                 collect_calibration=cfg.test_time_calibration,
+                zone_thresholds=zone_thresholds,
+                zone_counts=zone_counts if zone_thresholds is not None else None,
             )
             dt = time.time() - t0
             if state.is_main:
@@ -1137,6 +1455,178 @@ def main(argv: Iterable[str] | None = None) -> None:
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
 
+    # H313: regional/zonal surface calibration on top of H300. Surface channels
+    # (cp, tau_x, tau_y, tau_z) get one (alpha, beta) per (zone, channel); the
+    # volume pressure channel keeps the H300 global affine (no volume zoning,
+    # per researcher recommendation given tight test_VP headroom). The shape
+    # is [split][mode][n_zones] so multiple arms (e.g., 4 and 6) coexist.
+    regional_metrics_by_split_mode_zones: dict[
+        str, dict[str, dict[int, dict[str, float]]]
+    ] = {}
+    if (
+        cfg.test_time_calibration
+        and zone_counts
+        and zone_thresholds is not None
+        and state.is_main
+    ):
+        zone_name_table = {
+            6: ["nose", "roof", "sides", "underbody", "rear", "body"],
+            4: ["nose", "rear", "underbody", "body"],
+        }
+        for mode in modes:
+            val_cal = cal_summary.get("val_surface", {}).get(mode)
+            test_cal = cal_summary.get("test_surface", {}).get(mode)
+            if val_cal is None or test_cal is None:
+                continue
+            if not val_cal.surf_zonal_global or not val_cal.surf_zonal_per_case:
+                print(
+                    f"[H313] mode={mode}: missing zonal stats; skipping regional",
+                    flush=True,
+                )
+                continue
+
+            alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
+
+            for n_zones in zone_counts:
+                if n_zones not in val_cal.surf_zonal_global:
+                    print(
+                        f"[H313] mode={mode}: no zonal stats for n_zones={n_zones}; "
+                        "skipping this arm",
+                        flush=True,
+                    )
+                    continue
+                zone_names = zone_name_table[n_zones]
+                zonal_global = val_cal.surf_zonal_global[n_zones]
+                alpha_surf_zonal, beta_surf_zonal = fit_affine_per_zone_per_channel(
+                    zonal_global
+                )
+
+                channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
+                print(
+                    f"\n=== H313 regional calibration (n_zones={n_zones}, "
+                    f"fit on val, mode={mode}) ===",
+                    flush=True,
+                )
+                # Show per-zone N and (alpha, beta) per channel.
+                N_per_zone = zonal_global[..., 0, 0]  # (n_zones,) — same N across channels
+                print(
+                    "  zone counts (val surface points pooled):  "
+                    + "  ".join(
+                        f"{zone_names[z]}={int(N_per_zone[z].item()):,}"
+                        for z in range(n_zones)
+                    ),
+                    flush=True,
+                )
+                for z in range(n_zones):
+                    for c, cname in enumerate(channel_names):
+                        a = alpha_surf_zonal[z, c].item()
+                        b = beta_surf_zonal[z, c].item()
+                        print(
+                            f"  zone[{zone_names[z]:9s}][{cname:6s}]  "
+                            f"alpha={a:+.6f}  beta={b:+.6f}",
+                            flush=True,
+                        )
+                print(
+                    f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
+                    f"beta={beta_vol[0].item():+.6f}  (H300 global, no zoning)",
+                    flush=True,
+                )
+
+                val_reg_metrics = compute_calibrated_metrics_regional(
+                    val_cal,
+                    n_zones,
+                    alpha_surf_zonal,
+                    beta_surf_zonal,
+                    alpha_vol,
+                    beta_vol,
+                )
+                test_reg_metrics = compute_calibrated_metrics_regional(
+                    test_cal,
+                    n_zones,
+                    alpha_surf_zonal,
+                    beta_surf_zonal,
+                    alpha_vol,
+                    beta_vol,
+                )
+                regional_metrics_by_split_mode_zones.setdefault(
+                    "val_surface", {}
+                ).setdefault(mode, {})[n_zones] = val_reg_metrics
+                regional_metrics_by_split_mode_zones.setdefault(
+                    "test_surface", {}
+                ).setdefault(mode, {})[n_zones] = test_reg_metrics
+
+                print(
+                    f"  val  (raw -> H300 -> H313_{n_zones}z)  abupt "
+                    f"{summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} -> "
+                    f"{cal_metrics_by_split_mode.get('val_surface', {}).get(mode, {}).get('abupt_axis_mean_rel_l2_pct', float('nan')):.4f} -> "
+                    f"{val_reg_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                    flush=True,
+                )
+                print(
+                    f"  test (raw -> H300 -> H313_{n_zones}z)  abupt "
+                    f"{summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} -> "
+                    f"{cal_metrics_by_split_mode.get('test_surface', {}).get(mode, {}).get('abupt_axis_mean_rel_l2_pct', float('nan')):.4f} -> "
+                    f"{test_reg_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                    flush=True,
+                )
+                # H300 already exceeded the 3.577% test_SP hard constraint —
+                # surface-pressure shift under H313 must not worsen.
+                test_sp_h313 = test_reg_metrics["surface_pressure_rel_l2_pct"]
+                test_sp_h300 = (
+                    cal_metrics_by_split_mode.get("test_surface", {})
+                    .get(mode, {})
+                    .get("surface_pressure_rel_l2_pct")
+                )
+                if test_sp_h300 is not None:
+                    delta_sp = test_sp_h313 - test_sp_h300
+                    marker = "WORSENED" if delta_sp > 0.0 else "improved"
+                    print(
+                        f"  [H313 SP watch n={n_zones}z]  test_SP H300={test_sp_h300:.4f}% -> "
+                        f"H313={test_sp_h313:.4f}%  ({marker} {delta_sp:+.4f}pp; "
+                        f"constraint 3.577%)",
+                        flush=True,
+                    )
+
+                if run is not None:
+                    for z in range(n_zones):
+                        for c, cname in enumerate(channel_names):
+                            run.summary[
+                                f"h313_{n_zones}z/{mode}/zone_{zone_names[z]}/alpha_{cname}"
+                            ] = float(alpha_surf_zonal[z, c].item())
+                            run.summary[
+                                f"h313_{n_zones}z/{mode}/zone_{zone_names[z]}/beta_{cname}"
+                            ] = float(beta_surf_zonal[z, c].item())
+                        run.summary[
+                            f"h313_{n_zones}z/{mode}/zone_{zone_names[z]}/n_val_points"
+                        ] = float(N_per_zone[z].item())
+
+                    val_log = {
+                        f"full_val_primary_regional_{n_zones}z/{mode}/{k}": v
+                        for k, v in val_reg_metrics.items()
+                    }
+                    test_log = {
+                        f"test_primary_regional_{n_zones}z/{mode}/{k}": v
+                        for k, v in test_reg_metrics.items()
+                    }
+                    wandb.log({**val_log, **test_log})
+
+                    run.summary[f"val_abupt_h313_{n_zones}z"] = float(
+                        val_reg_metrics["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    run.summary[f"test_abupt_h313_{n_zones}z"] = float(
+                        test_reg_metrics["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    run.summary[f"test_SP_h313_{n_zones}z"] = float(
+                        test_reg_metrics["surface_pressure_rel_l2_pct"]
+                    )
+                    run.summary[f"test_WSS_h313_{n_zones}z"] = float(
+                        test_reg_metrics["wall_shear_rel_l2_pct"]
+                    )
+
+            if run is not None:
+                for k, v in zone_thresholds.items():
+                    run.summary[f"h313/zone_threshold/{k}"] = float(v)
+
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
         for split, modes_dict in summary.items():
@@ -1160,13 +1650,33 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(row)
             cal_modes = cal_metrics_by_split_mode.get(split, {})
             if cal_modes:
-                print(f"  --- calibrated (alpha,beta fit on val) ---")
+                print(f"  --- H300 global calibrated (alpha,beta fit on val) ---")
                 for k in keys_to_show:
                     row = f"  {k:<36s} " + " ".join(
                         f"{cal_modes[m][k]:>22.4f}" if m in cal_modes else f"{'n/a':>22s}"
                         for m in mode_keys
                     )
                     print(row)
+            reg_modes_zones = regional_metrics_by_split_mode_zones.get(split, {})
+            if reg_modes_zones:
+                for n_zones in zone_counts:
+                    has_any = any(
+                        n_zones in reg_modes_zones.get(m, {}) for m in mode_keys
+                    )
+                    if not has_any:
+                        continue
+                    print(
+                        f"  --- H313 regional ({n_zones}-zone surface, "
+                        f"global VP) ---"
+                    )
+                    for k in keys_to_show:
+                        row = f"  {k:<36s} " + " ".join(
+                            f"{reg_modes_zones[m][n_zones][k]:>22.4f}"
+                            if m in reg_modes_zones and n_zones in reg_modes_zones[m]
+                            else f"{'n/a':>22s}"
+                            for m in mode_keys
+                        )
+                        print(row)
 
         if run is not None:
             for split, modes_dict in summary.items():
@@ -1183,6 +1693,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             run.summary[f"{split}_calibrated/{mode}/{k}"] = float(v)
                         except Exception:
                             pass
+            for split, modes_dict in regional_metrics_by_split_mode_zones.items():
+                for mode, zones_dict in modes_dict.items():
+                    for n_zones, metrics in zones_dict.items():
+                        for k, v in metrics.items():
+                            try:
+                                run.summary[
+                                    f"{split}_regional_{n_zones}z/{mode}/{k}"
+                                ] = float(v)
+                            except Exception:
+                                pass
             run.finish()
 
     cleanup_distributed(state)
