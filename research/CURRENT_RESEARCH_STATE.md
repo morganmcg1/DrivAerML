@@ -1,9 +1,65 @@
 # SENPAI Research State
 
-- **2026-05-31 08:40Z**
+- **2026-05-31 11:10Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 11:10Z snapshot — H182 EP15 PASS gate + VP HOLDING below floor; H183 EP8 tracking ~tied H147 (EP10 gate imminent); H181 descent decelerated but credible H172-beat path; H184 EP5 trailing H147 +0.183pp (WSD design lag)
+
+**Active wave-5 fleet, all 4 students WIP:**
+
+| Student | PR | Hyp | EP @ 11:10Z | Latest val_WSS | Δ vs H147 | Δ vs H172 | Next gate |
+|---|---|---|---|---:|---:|---:|---|
+| frieren | #1503 | H181 EMA-99995 | 18 (step 197,567) | 6.8305 | +0.290 | +0.179 | EP22 ≤6.78 ~13:00Z (decay starts) |
+| nezuko | #1506 | H182 LR 1.3× | **15** (step 164,639) | **6.7833** | **+0.183** | **+0.093** | **EP15 ≤6.85 PASS**; EP22 ≤6.75 next |
+| tanjiro | #1510 | H183 per-channel heads | 8 (step 87,807) | **6.6726** | **~tied** | — | **EP10 ≤6.66 @ step 109,759 ~11:50Z (40 min)** |
+| fern | #1513 | H184 WSD LR (main) | 5 (step 54,879) | 6.9329 | **+0.183** | — | EP10 ≤6.85 ~13:30Z (early lag expected) |
+
+### H183 (tanjiro) — HOTTEST CANDIDATE: per-channel heads holding ~tied with H147
+
+| EP | step | val_WSS | Δ vs H147 |
+|---:|---:|---:|---:|
+| 5 | 54,879 | 6.7497 | **−0.000** (TIED) |
+| 6 | 65,855 | 6.7100 | ~tied |
+| 7 | 76,831 | 6.6890 | ~tied |
+| **8** | 87,807 | **6.6726** | **~tied** |
+
+Descent rate EP7→EP8: −0.0164pp/EP (natural deceleration approaching plateau). **EP10 gate ≤6.66 at ~11:50Z:** linear extrap gives **6.640** (PASSES by 0.020), conservative gives 6.649 (PASSES by 0.011). H147 EP10 = 6.64 → H183 essentially TIES OR BEATS H147 EP10. Per-channel decoder heads structural advantage persisting. **If EP10 lands ≤6.64 → strong SOTA candidate.**
+
+### H182 (nezuko) — EP15 PASS + VP CLEARING FLOOR sustained (LARGEST sustained VP-below-floor reading in 12+ hypotheses)
+
+| EP | step | val_WSS | val_VP | val_ABU | lr | Δ vs H172 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 12 | 131,711 | 6.7901 | 3.5550 | 5.9886 | 9.3e-5 | +0.099 |
+| 13 | 142,687 | 6.7700 | 3.5419 | 5.9711 | 8.9e-5 | +0.080 |
+| 14 | 153,663 | 6.7796 | 3.5331 | 5.9647 | 8.4e-5 | +0.089 |
+| **15** | 164,639 | **6.7833** | **3.5251** | 5.9577 | 7.9e-5 | **+0.093** |
+
+**EP15 critical gate ≤6.85: PASS (6.7833).** **VP @ EP15 = 3.5251 = −0.118pp BELOW 3.643 floor** (sustained EP12→EP15). If holds to test (val→test ~−0.3pp from H147 pattern), test_VP ~3.30 — clearly improving on H147 test_VP=3.4014. **VP-only improvement is itself a merge contribution.** EP12→EP15 WSS slope flat (−0.022pp/EP). EP30 projection: linear 6.73, with decay boost 6.65. **Merge-eligible if VP advantage holds.**
+
+### H181 (frieren) — Descent decelerated but credible H172-beat path (REVISED from 08:40Z NON-MERGE seal)
+
+| EP | step | val_WSS | Δ vs H147 | Δ vs H172 |
+|---:|---:|---:|---:|---:|
+| 15 | 164,639 | 6.8811 | +0.281 | +0.191 |
+| 16 | 175,615 | 6.8551 | +0.255 | +0.165 |
+| 17 | 186,591 | 6.8402 | +0.240 | +0.150 |
+| 18 | 197,567 | 6.8305 | +0.230 | +0.140 |
+
+Descent rate now −0.0169pp/EP (decelerated from −0.06pp/EP at EP12-14). Linear extrap EP30: 6.63 — **beats H172 (6.6517) clearly**; conservative 6.65-6.70 — close-tied with H172. **REVISED from 08:40Z NON-MERGE call:** H181 has credible path to beat H172, possibly approach H147 with cosine decay tail boost (EP22+).
+
+### H184 (fern) — WSD stable phase tracking +0.18pp behind H147 (expected, design payoff EP22+)
+
+| EP | step | val_WSS | lr | Δ vs H147 |
+|---:|---:|---:|---:|---:|
+| 1 | 10,975 | 12.7118 | 1.00e-4 | **−0.108 (LEAD)** |
+| 2 | 21,951 | 7.3219 | 1.00e-4 | +0.062 |
+| 3 | 32,927 | 7.0769 | 1.00e-4 | +0.097 |
+| 4 | 43,903 | 6.9996 | 1.00e-4 | +0.120 |
+| **5** | 54,879 | **6.9329** | **1.00e-4** | **+0.183** |
+
+lr=1e-4 stable phase active (vs H147 cosine EP5 ~8.7e-5). Higher LR = slower early descent but theoretical deeper minimum at decay end. Descent rate −0.072pp/EP (healthy, no plateau). **WSD payoff expected EP22+ when cosine begins.** EP25-EP30 decisive read. Don't kill on early lag.
 
 ## 08:40Z snapshot — H183 EP5 EXACTLY TIED with H147 (HOT candidate); H182 EP10 borderline + VP CLEARING FLOOR; H184 main EP2 close to H147; H181 EP14 closing slowly
 
