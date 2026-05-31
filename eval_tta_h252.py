@@ -95,6 +95,19 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H319: per-resolution × per-channel affine calibration. Fits one
+    # (alpha_{R,c}, beta_{R,c}) per (resolution R, channel c) on val per-res
+    # averaged predictions, then for each test point computes the calibrated
+    # prediction (1/R_count) * sum_R (alpha_R p_R + beta_R) and reports the
+    # resulting rel_l2 metrics under the H319 naming. Auto-enables
+    # test_time_calibration so H312 single-fit metrics are reported for
+    # comparison alongside H319 per-res metrics.
+    per_resolution_calibration: bool = False
+    # H319 Arm B: ridge regularization on per-resolution OLS. Solves
+    # min Σ (αp + β - t)^2 + λ((α - 1)^2 + β^2) per (resolution, channel) to
+    # combat overfitting on 34 val cars × 8 res × 5 ch = 80 params. Set λ > 0
+    # to enable. λ ∈ {1e-4, 1e-3, 1e-2} are reasonable starting points.
+    per_resolution_calibration_ridge: float = 0.0
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -306,7 +319,17 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    collect_per_res: bool = False,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    int,
+    dict,
+    dict[int, torch.Tensor] | None,
+    dict[int, torch.Tensor] | None,
+]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
     weights and reuses the perturbed copy across all (res, mirror) inner passes.
@@ -315,6 +338,13 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    When ``collect_per_res=True`` (H319 per-resolution calibration), per-point
+    sums and counts are also accumulated separately per resolution and the
+    function returns (surf_per_res_avg, vol_per_res_avg) dicts in addition to
+    the existing combined averages. Each resolution contributes K_eff × M
+    passes to its own bucket; the resulting per-res averaged predictions feed
+    the per-resolution calibration fit and per-res cross-product stats.
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -324,6 +354,23 @@ def process_case_stacked(
     surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
     vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
     vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
+
+    if collect_per_res:
+        surf_sum_per_res = {
+            R: torch.zeros(n_surf, 4, dtype=torch.float32) for R in resolutions
+        }
+        surf_cnt_per_res = {
+            R: torch.zeros(n_surf, dtype=torch.int32) for R in resolutions
+        }
+        vol_sum_per_res = {
+            R: torch.zeros(n_vol, 1, dtype=torch.float32) for R in resolutions
+        }
+        vol_cnt_per_res = {
+            R: torch.zeros(n_vol, dtype=torch.int32) for R in resolutions
+        }
+    else:
+        surf_sum_per_res = surf_cnt_per_res = None
+        vol_sum_per_res = vol_cnt_per_res = None
 
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {
@@ -415,10 +462,12 @@ def process_case_stacked(
                                     f"global={s_global.shape[0]} vs chunk={s_chunk.shape[0]}"
                                 )
                             if s_global.numel() > 0:
+                                s_ones = torch.ones_like(s_global, dtype=torch.int32)
                                 surf_sum.index_add_(0, s_global, s_chunk)
-                                surf_cnt.index_add_(
-                                    0, s_global, torch.ones_like(s_global, dtype=torch.int32)
-                                )
+                                surf_cnt.index_add_(0, s_global, s_ones)
+                                if collect_per_res:
+                                    surf_sum_per_res[R].index_add_(0, s_global, s_chunk)
+                                    surf_cnt_per_res[R].index_add_(0, s_global, s_ones)
 
                         if v_view_idx < v_view_count:
                             v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
@@ -431,10 +480,12 @@ def process_case_stacked(
                                     f"global={v_global.shape[0]} vs chunk={v_chunk.shape[0]}"
                                 )
                             if v_global.numel() > 0:
+                                v_ones = torch.ones_like(v_global, dtype=torch.int32)
                                 vol_sum.index_add_(0, v_global, v_chunk)
-                                vol_cnt.index_add_(
-                                    0, v_global, torch.ones_like(v_global, dtype=torch.int32)
-                                )
+                                vol_cnt.index_add_(0, v_global, v_ones)
+                                if collect_per_res:
+                                    vol_sum_per_res[R].index_add_(0, v_global, v_chunk)
+                                    vol_cnt_per_res[R].index_add_(0, v_global, v_ones)
                     timing["io_seconds"] += time.time() - t1
 
     if int(surf_cnt.min()) == 0:
@@ -451,13 +502,49 @@ def process_case_stacked(
     surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
     vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
 
+    surf_avg_per_res: dict[int, torch.Tensor] | None = None
+    vol_avg_per_res: dict[int, torch.Tensor] | None = None
+    if collect_per_res:
+        surf_avg_per_res = {}
+        vol_avg_per_res = {}
+        for R in resolutions:
+            if int(surf_cnt_per_res[R].min()) == 0:
+                raise RuntimeError(
+                    f"per-res surface coverage incomplete for case {case_id} R={R}: "
+                    f"{int((surf_cnt_per_res[R] == 0).sum())} points have zero "
+                    "contributing chunks"
+                )
+            if int(vol_cnt_per_res[R].min()) == 0:
+                raise RuntimeError(
+                    f"per-res volume coverage incomplete for case {case_id} R={R}: "
+                    f"{int((vol_cnt_per_res[R] == 0).sum())} points have zero "
+                    "contributing chunks"
+                )
+            surf_avg_per_res[R] = (
+                surf_sum_per_res[R]
+                / surf_cnt_per_res[R].unsqueeze(-1).to(torch.float32)
+            )
+            vol_avg_per_res[R] = (
+                vol_sum_per_res[R]
+                / vol_cnt_per_res[R].unsqueeze(-1).to(torch.float32)
+            )
+
     case = store.load_case(case_id)
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
     k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
     n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
-    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
+    return (
+        surf_avg,
+        vol_avg,
+        surf_y,
+        vol_y,
+        n_passes,
+        timing,
+        surf_avg_per_res,
+        vol_avg_per_res,
+    )
 
 
 # --- H300 affine calibration helpers ---
@@ -475,7 +562,14 @@ class CalibrationStats:
     """Per-case per-channel sufficient stats for fitting an affine OLS
     calibration y_hat = alpha * y + beta and recomputing per-case rel_l2
     metrics under that affine map. Surface has 4 channels (cp, tau_x, tau_y,
-    tau_z), volume has 1 (volume_pressure)."""
+    tau_z), volume has 1 (volume_pressure).
+
+    H319 extension: optional per-resolution sufficient stats and cross-
+    resolution sum_pp_RS cross-products so a per-(resolution, channel) affine
+    fit can be applied at test time and the combined-over-res rel_l2 metric
+    computed analytically from sufficient stats (no per-point tensors retained
+    across cases).
+    """
 
     surf_global: torch.Tensor = field(
         default_factory=lambda: torch.zeros(N_SURF_CHANNELS, N_STAT_COLS, dtype=torch.float64)
@@ -485,6 +579,19 @@ class CalibrationStats:
     )
     surf_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
     vol_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
+    # H319 per-resolution stats. Populated only when per-resolution
+    # calibration is requested. `resolutions` is the sorted ascending list of
+    # resolution integers that the per-res tensors are indexed by.
+    resolutions: list[int] = field(default_factory=list)
+    surf_per_res_global: dict[int, torch.Tensor] = field(default_factory=dict)
+    vol_per_res_global: dict[int, torch.Tensor] = field(default_factory=dict)
+    surf_per_res_per_case: dict[str, dict[int, torch.Tensor]] = field(default_factory=dict)
+    vol_per_res_per_case: dict[str, dict[int, torch.Tensor]] = field(default_factory=dict)
+    # Cross-resolution sum_pp_RS tensors per case, shape (n_channels, R, R).
+    # cross[c, r, s] = sum_i p_R[i, c] * p_S[i, c] with R, S indexed by the
+    # sorted `resolutions` list.
+    surf_cross_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
+    vol_cross_per_case: dict[str, torch.Tensor] = field(default_factory=dict)
 
 
 def _channel_stats(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -524,6 +631,69 @@ def add_case_to_calibration(
     cal.vol_global += vol_stats
 
 
+def _compute_cross_res_stats(
+    per_res_preds: dict[int, torch.Tensor],
+) -> torch.Tensor:
+    """Compute (n_channels, R_count, R_count) sym tensor with entries
+    cross[c, r, s] = sum_i p_R[i, c] * p_S[i, c] for all resolution pairs.
+
+    Resolutions are ordered ascending by the dict's sorted keys (matches
+    CalibrationStats.resolutions). Computed in float64 to preserve precision
+    when summed across cases.
+    """
+    res_list = sorted(per_res_preds.keys())
+    stacked = torch.stack(
+        [per_res_preds[R].double() for R in res_list], dim=0
+    )  # (R, n_points, n_channels)
+    # cross[c, r, s] = sum_i stacked[r, i, c] * stacked[s, i, c]
+    return torch.einsum("rnc,snc->crs", stacked, stacked)
+
+
+def add_case_to_calibration_per_res(
+    cal: CalibrationStats,
+    *,
+    case_id: str,
+    surf_per_res_avg: dict[int, torch.Tensor],
+    vol_per_res_avg: dict[int, torch.Tensor],
+    surface_y: torch.Tensor,
+    volume_y: torch.Tensor,
+) -> None:
+    """Populate per-resolution sufficient stats and cross-resolution
+    cross-products for H319 per-resolution calibration.
+
+    per_res_avg dicts contain per-point averaged predictions for each
+    resolution R (after K_eff × mirror averaging within that R).
+    """
+    res_list = sorted(surf_per_res_avg.keys())
+    if not cal.resolutions:
+        cal.resolutions = list(res_list)
+    elif cal.resolutions != res_list:
+        raise RuntimeError(
+            "per-res calibration stats resolutions mismatch: "
+            f"cal.resolutions={cal.resolutions} vs case={res_list}"
+        )
+
+    cal.surf_per_res_per_case[case_id] = {}
+    cal.vol_per_res_per_case[case_id] = {}
+    for R in res_list:
+        surf_stats = _channel_stats(surf_per_res_avg[R], surface_y)
+        vol_stats = _channel_stats(vol_per_res_avg[R], volume_y)
+        cal.surf_per_res_per_case[case_id][R] = surf_stats
+        cal.vol_per_res_per_case[case_id][R] = vol_stats
+        if R not in cal.surf_per_res_global:
+            cal.surf_per_res_global[R] = torch.zeros(
+                N_SURF_CHANNELS, N_STAT_COLS, dtype=torch.float64
+            )
+            cal.vol_per_res_global[R] = torch.zeros(
+                N_VOL_CHANNELS, N_STAT_COLS, dtype=torch.float64
+            )
+        cal.surf_per_res_global[R] += surf_stats
+        cal.vol_per_res_global[R] += vol_stats
+
+    cal.surf_cross_per_case[case_id] = _compute_cross_res_stats(surf_per_res_avg)
+    cal.vol_cross_per_case[case_id] = _compute_cross_res_stats(vol_per_res_avg)
+
+
 def merge_calibration_stats(parts: Iterable[CalibrationStats]) -> CalibrationStats:
     merged = CalibrationStats()
     for part in parts:
@@ -531,6 +701,31 @@ def merge_calibration_stats(parts: Iterable[CalibrationStats]) -> CalibrationSta
         merged.vol_global += part.vol_global
         merged.surf_per_case.update(part.surf_per_case)
         merged.vol_per_case.update(part.vol_per_case)
+        # H319 per-resolution merge
+        if part.resolutions:
+            if not merged.resolutions:
+                merged.resolutions = list(part.resolutions)
+            elif merged.resolutions != part.resolutions:
+                raise RuntimeError(
+                    "per-res calibration stats resolutions mismatch across ranks: "
+                    f"{merged.resolutions} vs {part.resolutions}"
+                )
+        for R, stats in part.surf_per_res_global.items():
+            if R not in merged.surf_per_res_global:
+                merged.surf_per_res_global[R] = torch.zeros(
+                    N_SURF_CHANNELS, N_STAT_COLS, dtype=torch.float64
+                )
+            merged.surf_per_res_global[R] += stats
+        for R, stats in part.vol_per_res_global.items():
+            if R not in merged.vol_per_res_global:
+                merged.vol_per_res_global[R] = torch.zeros(
+                    N_VOL_CHANNELS, N_STAT_COLS, dtype=torch.float64
+                )
+            merged.vol_per_res_global[R] += stats
+        merged.surf_per_res_per_case.update(part.surf_per_res_per_case)
+        merged.vol_per_res_per_case.update(part.vol_per_res_per_case)
+        merged.surf_cross_per_case.update(part.surf_cross_per_case)
+        merged.vol_cross_per_case.update(part.vol_cross_per_case)
     return merged
 
 
@@ -560,6 +755,91 @@ def fit_affine_per_channel(
     return alpha, beta
 
 
+def fit_affine_per_channel_ridge(
+    global_stats: torch.Tensor,
+    ridge_lambda: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Ridge-regularized affine fit toward identity (α=1, β=0) per channel.
+
+    Solves the normal equations of
+        min Σ (α p + β - t)^2 + λ ((α - 1)^2 + β^2)
+    per channel. The penalty pulls α toward 1 and β toward 0, which makes
+    sense when raw predictions are already well-scaled and we want
+    calibration to add only a small correction (H319 Arm B fallback).
+
+    The 2×2 linear system per channel:
+        [sum_pp + λ   sum_p     ] [α]   [sum_pt + λ]
+        [sum_p        N + λ     ] [β] = [sum_t     ]
+    """
+    if ridge_lambda <= 0.0:
+        return fit_affine_per_channel(global_stats)
+    N = global_stats[:, 0]
+    sum_p = global_stats[:, 1]
+    sum_t = global_stats[:, 2]
+    sum_pp = global_stats[:, 3]
+    sum_pt = global_stats[:, 5]
+    a = sum_pp + ridge_lambda
+    b = sum_p
+    c = sum_p
+    d = N + ridge_lambda
+    rhs_a = sum_pt + ridge_lambda
+    rhs_b = sum_t
+    det = a * d - b * c
+    det_safe = torch.where(det.abs() < 1e-12, torch.full_like(det, 1e-12), det)
+    alpha = (rhs_a * d - b * rhs_b) / det_safe
+    beta = (a * rhs_b - c * rhs_a) / det_safe
+    # Identity fallback on truly degenerate channels (no variance, no λ saved us)
+    degenerate = det.abs() < 1e-12
+    alpha = torch.where(degenerate, torch.ones_like(alpha), alpha)
+    beta = torch.where(degenerate, torch.zeros_like(beta), beta)
+    return alpha, beta
+
+
+def fit_affine_per_resolution_per_channel(
+    cal: CalibrationStats,
+    ridge_lambda: float = 0.0,
+) -> tuple[
+    dict[int, torch.Tensor],
+    dict[int, torch.Tensor],
+    dict[int, torch.Tensor],
+    dict[int, torch.Tensor],
+]:
+    """Fit (α_{R,c}, β_{R,c}) for each (resolution, channel) using the
+    per-resolution global sufficient stats accumulated on the val split.
+
+    Returns (alpha_surf_per_res, beta_surf_per_res, alpha_vol_per_res,
+    beta_vol_per_res). Each dict maps resolution R -> tensor of shape
+    (n_channels,). Surface has 4 channels, volume has 1.
+
+    With ridge_lambda > 0, uses ridge-regularized OLS pulling toward
+    identity per (R, c) — the H319 Arm B fallback for overfitting on
+    34 val cars × 8 res × 5 ch.
+    """
+    if not cal.resolutions:
+        raise RuntimeError(
+            "fit_affine_per_resolution_per_channel called on CalibrationStats "
+            "with no per-resolution stats — was collect_per_res passed to "
+            "evaluate_split_stacked?"
+        )
+    fit_fn = (
+        (lambda g: fit_affine_per_channel_ridge(g, ridge_lambda))
+        if ridge_lambda > 0.0
+        else fit_affine_per_channel
+    )
+    alpha_surf_per_res: dict[int, torch.Tensor] = {}
+    beta_surf_per_res: dict[int, torch.Tensor] = {}
+    alpha_vol_per_res: dict[int, torch.Tensor] = {}
+    beta_vol_per_res: dict[int, torch.Tensor] = {}
+    for R in cal.resolutions:
+        a_s, b_s = fit_fn(cal.surf_per_res_global[R])
+        alpha_surf_per_res[R] = a_s
+        beta_surf_per_res[R] = b_s
+        a_v, b_v = fit_fn(cal.vol_per_res_global[R])
+        alpha_vol_per_res[R] = a_v
+        beta_vol_per_res[R] = b_v
+    return alpha_surf_per_res, beta_surf_per_res, alpha_vol_per_res, beta_vol_per_res
+
+
 def _affine_error_sq(
     stats: torch.Tensor, alpha: torch.Tensor, beta: torch.Tensor
 ) -> torch.Tensor:
@@ -582,6 +862,163 @@ def _affine_error_sq(
         - 2.0 * beta * sum_t
         + sum_tt
     )
+
+
+def compute_per_res_calibrated_metrics(
+    cal: CalibrationStats,
+    alpha_surf_per_res: dict[int, torch.Tensor],
+    beta_surf_per_res: dict[int, torch.Tensor],
+    alpha_vol_per_res: dict[int, torch.Tensor],
+    beta_vol_per_res: dict[int, torch.Tensor],
+) -> dict[str, float]:
+    """Per-case rel_l2 metrics with per-resolution affine calibration applied.
+
+    For each case, channel c, and point i:
+        pred_combined[i, c] = (1/R_count) * sum_R (α_{R,c} p_R[i, c] + β_{R,c})
+    and rel_l2 = sqrt(Σ_i (pred_combined - t_i)^2 / Σ_i t_i^2).
+
+    Expanding Σ_i (pred_combined - t_i)^2 gives a closed form in terms of the
+    per-(case, resolution) sufficient stats (Σ p_R, Σ p_R t, etc.) plus the
+    cross-resolution cross-products Σ p_R p_S, all stored on `cal` by
+    `add_case_to_calibration_per_res`.
+
+    Mirrors the metric keys produced by `compute_calibrated_metrics` so the
+    rest of the pipeline can swap H312 single-fit for H319 per-res without
+    other changes. MAE is not analytically computable under affine maps and
+    is omitted.
+    """
+    res_list = cal.resolutions
+    if not res_list:
+        raise RuntimeError(
+            "compute_per_res_calibrated_metrics called on CalibrationStats "
+            "without per-resolution stats."
+        )
+    R_count = len(res_list)
+    R_count_sq = float(R_count) ** 2
+
+    # Stack alpha/beta tensors aligned to res_list: (R, n_channels)
+    alpha_surf_t = torch.stack(
+        [alpha_surf_per_res[R].double() for R in res_list], dim=0
+    )
+    beta_surf_t = torch.stack(
+        [beta_surf_per_res[R].double() for R in res_list], dim=0
+    )
+    alpha_vol_t = torch.stack(
+        [alpha_vol_per_res[R].double() for R in res_list], dim=0
+    )
+    beta_vol_t = torch.stack(
+        [beta_vol_per_res[R].double() for R in res_list], dim=0
+    )
+    beta_bar_surf = beta_surf_t.mean(dim=0)  # (n_surf_channels,)
+    beta_bar_vol = beta_vol_t.mean(dim=0)  # (n_vol_channels,)
+
+    def _per_case_e_sq_and_tt(
+        case_id: str,
+        per_res_per_case_dict: dict[str, dict[int, torch.Tensor]],
+        cross_per_case_dict: dict[str, torch.Tensor],
+        alpha_t: torch.Tensor,
+        beta_bar: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        per_res = per_res_per_case_dict[case_id]
+        # (R, n_channels) — second index 1 is sum_p, 5 is sum_pt
+        sum_p_per_res = torch.stack(
+            [per_res[R][:, 1] for R in res_list], dim=0
+        )
+        sum_pt_per_res = torch.stack(
+            [per_res[R][:, 5] for R in res_list], dim=0
+        )
+        # Case-level stats — identical across resolutions for a case
+        ref_R = res_list[0]
+        N = per_res[ref_R][:, 0]
+        sum_t = per_res[ref_R][:, 2]
+        sum_tt = per_res[ref_R][:, 4]
+
+        # sum_A = sum_i mean_alpha_p[i, c] = (1/R) * sum_R α_R * sum_p_R
+        mean_alpha_sum_p = (alpha_t * sum_p_per_res).sum(dim=0) / R_count
+        # sum_AT = sum_i mean_alpha_p[i, c] * t_i = (1/R) * sum_R α_R * sum_pt_R
+        mean_alpha_sum_pt = (alpha_t * sum_pt_per_res).sum(dim=0) / R_count
+        # sum_A_sq = (1/R^2) * sum_R sum_S α_R α_S * sum_pp_RS per channel
+        cross = cross_per_case_dict[case_id].to(dtype=torch.float64)
+        # alpha_outer[c, r, s] = α[r, c] * α[s, c]; alpha_t is (R, n_channels)
+        alpha_ct = alpha_t.T  # (n_channels, R)
+        alpha_outer = alpha_ct.unsqueeze(-1) * alpha_ct.unsqueeze(-2)
+        sum_A_sq = (alpha_outer * cross).sum(dim=(-2, -1)) / R_count_sq
+
+        e_sq = (
+            sum_A_sq
+            + 2.0 * beta_bar * mean_alpha_sum_p
+            + N * beta_bar * beta_bar
+            - 2.0 * mean_alpha_sum_pt
+            - 2.0 * beta_bar * sum_t
+            + sum_tt
+        )
+        return e_sq, sum_tt
+
+    surf_ids = sorted(cal.surf_per_res_per_case.keys())
+    if not surf_ids:
+        raise RuntimeError(
+            "CalibrationStats is empty; cannot compute per-res calibrated metrics"
+        )
+    surf_per_channel_rel_l2: list[torch.Tensor] = []
+    vec_rel_l2_list: list[torch.Tensor] = []
+    for case_id in surf_ids:
+        e_sq, sum_tt = _per_case_e_sq_and_tt(
+            case_id,
+            cal.surf_per_res_per_case,
+            cal.surf_cross_per_case,
+            alpha_surf_t,
+            beta_bar_surf,
+        )
+        rel = torch.sqrt(e_sq.clamp(min=0.0) / sum_tt.clamp(min=1e-12))
+        surf_per_channel_rel_l2.append(rel)
+        # Vector wall shear: aggregate tau channels 1..3
+        e_sq_vec = e_sq[1:4].sum()
+        t_sq_vec = sum_tt[1:4].sum()
+        rel_vec = torch.sqrt(
+            e_sq_vec.clamp(min=0.0) / t_sq_vec.clamp(min=1e-12)
+        )
+        vec_rel_l2_list.append(rel_vec)
+    surf_rel_l2 = torch.stack(surf_per_channel_rel_l2, dim=0)  # (n_cases, 4)
+    vec_rel_l2 = torch.stack(vec_rel_l2_list, dim=0)  # (n_cases,)
+
+    vol_ids = sorted(cal.vol_per_res_per_case.keys())
+    vol_per_channel_rel_l2: list[torch.Tensor] = []
+    for case_id in vol_ids:
+        e_sq, sum_tt = _per_case_e_sq_and_tt(
+            case_id,
+            cal.vol_per_res_per_case,
+            cal.vol_cross_per_case,
+            alpha_vol_t,
+            beta_bar_vol,
+        )
+        rel = torch.sqrt(e_sq.clamp(min=0.0) / sum_tt.clamp(min=1e-12))
+        vol_per_channel_rel_l2.append(rel)
+    vol_rel_l2 = torch.stack(vol_per_channel_rel_l2, dim=0)  # (n_cases, 1)
+
+    sp = float(surf_rel_l2[:, 0].mean().item())
+    tx = float(surf_rel_l2[:, 1].mean().item())
+    ty = float(surf_rel_l2[:, 2].mean().item())
+    tz = float(surf_rel_l2[:, 3].mean().item())
+    ws_vec = float(vec_rel_l2.mean().item())
+    vp = float(vol_rel_l2[:, 0].mean().item())
+    abupt = (sp + tx + ty + tz + vp) / 5.0
+    return {
+        "surface_pressure_rel_l2": sp,
+        "surface_pressure_rel_l2_pct": sp * 100.0,
+        "wall_shear_rel_l2": ws_vec,
+        "wall_shear_rel_l2_pct": ws_vec * 100.0,
+        "wall_shear_x_rel_l2": tx,
+        "wall_shear_x_rel_l2_pct": tx * 100.0,
+        "wall_shear_y_rel_l2": ty,
+        "wall_shear_y_rel_l2_pct": ty * 100.0,
+        "wall_shear_z_rel_l2": tz,
+        "wall_shear_z_rel_l2_pct": tz * 100.0,
+        "volume_pressure_rel_l2": vp,
+        "volume_pressure_rel_l2_pct": vp * 100.0,
+        "abupt_axis_mean_rel_l2": abupt,
+        "abupt_axis_mean_rel_l2_pct": abupt * 100.0,
+        "cases": float(len(surf_ids)),
+    }
 
 
 def compute_calibrated_metrics(
@@ -748,6 +1185,7 @@ def evaluate_split_stacked(
     distributed_state,
     antithetic: bool = False,
     collect_calibration: bool = False,
+    collect_per_res: bool = False,
 ) -> tuple[dict[str, float], CalibrationStats | None]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -766,7 +1204,16 @@ def evaluate_split_stacked(
     total_forwards = 0
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_stacked(
+        (
+            surf_avg,
+            vol_avg,
+            surf_y,
+            vol_y,
+            n_passes,
+            timing,
+            surf_avg_per_res,
+            vol_avg_per_res,
+        ) = process_case_stacked(
             case_id=case_id,
             model=model,
             transform=transform,
@@ -780,6 +1227,7 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            collect_per_res=collect_per_res,
         )
         add_case_to_accumulator(
             acc,
@@ -799,6 +1247,15 @@ def evaluate_split_stacked(
                 surface_y=surf_y,
                 volume_y=vol_y,
             )
+            if collect_per_res:
+                add_case_to_calibration_per_res(
+                    cal,
+                    case_id=case_id,
+                    surf_per_res_avg=surf_avg_per_res,
+                    vol_per_res_avg=vol_avg_per_res,
+                    surface_y=surf_y,
+                    volume_y=vol_y,
+                )
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
         total_perturb += timing["perturb_seconds"]
@@ -887,6 +1344,21 @@ def main(argv: Iterable[str] | None = None) -> None:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
+    # H319: per-resolution calibration depends on the H300/H312 single-fit
+    # collection path to also stash per-resolution sufficient stats on the
+    # CalibrationStats object. Auto-enable test_time_calibration so the H312
+    # single-fit metrics (used as the H319 comparison baseline) are also
+    # logged.
+    if cfg.per_resolution_calibration and not cfg.test_time_calibration:
+        cfg.test_time_calibration = True
+        if state.is_main:
+            print(
+                "[H319] per_resolution_calibration=True implies "
+                "test_time_calibration; auto-enabling H300 single-fit "
+                "metrics for comparison.",
+                flush=True,
+            )
+
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
@@ -899,6 +1371,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
             f"seed_base={cfg.weight_noise_seed_base}"
         )
+        if cfg.per_resolution_calibration:
+            print(
+                f"H319 per-resolution calibration: ENABLED "
+                f"(ridge={cfg.per_resolution_calibration_ridge})"
+            )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
     if state.is_main:
@@ -1018,6 +1495,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     flush=True,
                 )
             t0 = time.time()
+            # H319 per-resolution calibration only meaningful for the full
+            # multi-res TTA mode (not single-resolution weight_noise_only).
+            collect_per_res = (
+                cfg.per_resolution_calibration
+                and mode == "weight_noise_mirror_res_avg"
+            )
             metrics, cal_stats = evaluate_split_stacked(
                 split_name=f"{split_name}/{mode}",
                 case_ids=case_ids,
@@ -1035,6 +1518,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
                 collect_calibration=cfg.test_time_calibration,
+                collect_per_res=collect_per_res,
             )
             dt = time.time() - t0
             if state.is_main:
@@ -1137,6 +1621,190 @@ def main(argv: Iterable[str] | None = None) -> None:
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
 
+    # H319: per-resolution × per-channel affine calibration.
+    per_res_cal_metrics_by_split_mode: dict[str, dict[str, dict[str, float]]] = {}
+    if cfg.per_resolution_calibration and state.is_main:
+        ridge_lambda = float(cfg.per_resolution_calibration_ridge)
+        for mode in modes:
+            if mode != "weight_noise_mirror_res_avg":
+                continue
+            val_cal = cal_summary.get("val_surface", {}).get(mode)
+            test_cal = cal_summary.get("test_surface", {}).get(mode)
+            if (
+                val_cal is None
+                or test_cal is None
+                or not val_cal.resolutions
+                or not test_cal.resolutions
+            ):
+                print(
+                    f"[H319] mode={mode}: per-res cal stats missing on val or "
+                    f"test — skipping.",
+                    flush=True,
+                )
+                continue
+            if val_cal.resolutions != test_cal.resolutions:
+                raise RuntimeError(
+                    f"H319 per-res cal resolutions mismatch val vs test: "
+                    f"{val_cal.resolutions} vs {test_cal.resolutions}"
+                )
+            res_list = val_cal.resolutions
+
+            (
+                alpha_surf_per_res,
+                beta_surf_per_res,
+                alpha_vol_per_res,
+                beta_vol_per_res,
+            ) = fit_affine_per_resolution_per_channel(val_cal, ridge_lambda)
+
+            channel_names_surf = ["cp", "tau_x", "tau_y", "tau_z"]
+            print(
+                f"\n=== H319 per-resolution calibration (fit on val, mode={mode}, "
+                f"ridge={ridge_lambda}) ===",
+                flush=True,
+            )
+            print(
+                "  resolution | "
+                + " ".join(f"{n:>14s}" for n in channel_names_surf + ["volume_p"]),
+                flush=True,
+            )
+            for R in res_list:
+                a = alpha_surf_per_res[R]
+                b = beta_surf_per_res[R]
+                av = alpha_vol_per_res[R]
+                bv = beta_vol_per_res[R]
+                alphas_str = " ".join(
+                    f"α={a[c].item():+0.6f}" for c in range(len(channel_names_surf))
+                )
+                print(f"  R={R:>6d} α: {alphas_str} αVP={av[0].item():+0.6f}", flush=True)
+                betas_str = " ".join(
+                    f"β={b[c].item():+0.6f}" for c in range(len(channel_names_surf))
+                )
+                print(f"  R={R:>6d} β: {betas_str} βVP={bv[0].item():+0.6f}", flush=True)
+
+            # Coefficient ranges per channel (max - min over resolutions)
+            alpha_surf_stack = torch.stack(
+                [alpha_surf_per_res[R] for R in res_list], dim=0
+            )  # (R, 4)
+            beta_surf_stack = torch.stack(
+                [beta_surf_per_res[R] for R in res_list], dim=0
+            )  # (R, 4)
+            alpha_vol_stack = torch.stack(
+                [alpha_vol_per_res[R] for R in res_list], dim=0
+            )  # (R, 1)
+            beta_vol_stack = torch.stack(
+                [beta_vol_per_res[R] for R in res_list], dim=0
+            )  # (R, 1)
+            alpha_surf_range = (
+                alpha_surf_stack.max(dim=0).values - alpha_surf_stack.min(dim=0).values
+            )
+            beta_surf_range = (
+                beta_surf_stack.max(dim=0).values - beta_surf_stack.min(dim=0).values
+            )
+            alpha_vol_range = (
+                alpha_vol_stack.max(dim=0).values - alpha_vol_stack.min(dim=0).values
+            )
+            beta_vol_range = (
+                beta_vol_stack.max(dim=0).values - beta_vol_stack.min(dim=0).values
+            )
+            print("  ranges (max - min across resolutions):", flush=True)
+            for c, name in enumerate(channel_names_surf):
+                print(
+                    f"    surface[{name:6s}]  α_range={alpha_surf_range[c].item():.6f} "
+                    f"β_range={beta_surf_range[c].item():.6f}",
+                    flush=True,
+                )
+            print(
+                f"    volume[VP    ]  α_range={alpha_vol_range[0].item():.6f} "
+                f"β_range={beta_vol_range[0].item():.6f}",
+                flush=True,
+            )
+
+            val_per_res_metrics = compute_per_res_calibrated_metrics(
+                val_cal,
+                alpha_surf_per_res,
+                beta_surf_per_res,
+                alpha_vol_per_res,
+                beta_vol_per_res,
+            )
+            test_per_res_metrics = compute_per_res_calibrated_metrics(
+                test_cal,
+                alpha_surf_per_res,
+                beta_surf_per_res,
+                alpha_vol_per_res,
+                beta_vol_per_res,
+            )
+            per_res_cal_metrics_by_split_mode.setdefault("val_surface", {})[mode] = (
+                val_per_res_metrics
+            )
+            per_res_cal_metrics_by_split_mode.setdefault("test_surface", {})[mode] = (
+                test_per_res_metrics
+            )
+
+            print(
+                f"  val  (raw -> H300 -> H319)  abupt "
+                f"{summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                f"-> {cal_metrics_by_split_mode.get('val_surface', {}).get(mode, {}).get('abupt_axis_mean_rel_l2_pct', float('nan')):.4f} "
+                f"-> {val_per_res_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                flush=True,
+            )
+            print(
+                f"  test (raw -> H300 -> H319)  abupt "
+                f"{summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                f"-> {cal_metrics_by_split_mode.get('test_surface', {}).get(mode, {}).get('abupt_axis_mean_rel_l2_pct', float('nan')):.4f} "
+                f"-> {test_per_res_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                flush=True,
+            )
+
+            if run is not None:
+                # Per-(R, channel) alpha/beta to W&B summary
+                for R in res_list:
+                    for c, name in enumerate(channel_names_surf):
+                        run.summary[
+                            f"calibration_per_res/{mode}/R{R}/alpha_{name}"
+                        ] = float(alpha_surf_per_res[R][c].item())
+                        run.summary[
+                            f"calibration_per_res/{mode}/R{R}/beta_{name}"
+                        ] = float(beta_surf_per_res[R][c].item())
+                    run.summary[
+                        f"calibration_per_res/{mode}/R{R}/alpha_volume_pressure"
+                    ] = float(alpha_vol_per_res[R][0].item())
+                    run.summary[
+                        f"calibration_per_res/{mode}/R{R}/beta_volume_pressure"
+                    ] = float(beta_vol_per_res[R][0].item())
+                # Coefficient ranges
+                for c, name in enumerate(channel_names_surf):
+                    run.summary[
+                        f"calibration_per_res/{mode}/alpha_range_{name}"
+                    ] = float(alpha_surf_range[c].item())
+                    run.summary[
+                        f"calibration_per_res/{mode}/beta_range_{name}"
+                    ] = float(beta_surf_range[c].item())
+                run.summary[
+                    f"calibration_per_res/{mode}/alpha_range_volume_pressure"
+                ] = float(alpha_vol_range[0].item())
+                run.summary[
+                    f"calibration_per_res/{mode}/beta_range_volume_pressure"
+                ] = float(beta_vol_range[0].item())
+
+                val_log = {
+                    f"full_val_primary_per_res_calibrated/{mode}/{k}": v
+                    for k, v in val_per_res_metrics.items()
+                }
+                test_log = {
+                    f"test_primary_per_res_calibrated/{mode}/{k}": v
+                    for k, v in test_per_res_metrics.items()
+                }
+                wandb.log({**val_log, **test_log})
+
+                # Paper-facing single-line primary metrics for H319.
+                run.summary["val_abupt_h319_calibrated"] = float(
+                    val_per_res_metrics["abupt_axis_mean_rel_l2_pct"]
+                )
+                run.summary["test_abupt_h319_calibrated"] = float(
+                    test_per_res_metrics["abupt_axis_mean_rel_l2_pct"]
+                )
+                run.summary["per_resolution_calibration_ridge"] = ridge_lambda
+
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
         for split, modes_dict in summary.items():
@@ -1160,10 +1828,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(row)
             cal_modes = cal_metrics_by_split_mode.get(split, {})
             if cal_modes:
-                print(f"  --- calibrated (alpha,beta fit on val) ---")
+                print(f"  --- H300/H312 calibrated (single fit on val) ---")
                 for k in keys_to_show:
                     row = f"  {k:<36s} " + " ".join(
                         f"{cal_modes[m][k]:>22.4f}" if m in cal_modes else f"{'n/a':>22s}"
+                        for m in mode_keys
+                    )
+                    print(row)
+            per_res_modes = per_res_cal_metrics_by_split_mode.get(split, {})
+            if per_res_modes:
+                print(f"  --- H319 per-resolution calibrated ---")
+                for k in keys_to_show:
+                    row = f"  {k:<36s} " + " ".join(
+                        f"{per_res_modes[m][k]:>22.4f}"
+                        if m in per_res_modes
+                        else f"{'n/a':>22s}"
                         for m in mode_keys
                     )
                     print(row)
@@ -1181,6 +1860,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     for k, v in metrics.items():
                         try:
                             run.summary[f"{split}_calibrated/{mode}/{k}"] = float(v)
+                        except Exception:
+                            pass
+            for split, modes_dict in per_res_cal_metrics_by_split_mode.items():
+                for mode, metrics in modes_dict.items():
+                    for k, v in metrics.items():
+                        try:
+                            run.summary[
+                                f"{split}_per_res_calibrated/{mode}/{k}"
+                            ] = float(v)
                         except Exception:
                             pass
             run.finish()
