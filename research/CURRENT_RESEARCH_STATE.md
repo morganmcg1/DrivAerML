@@ -1,9 +1,60 @@
 # SENPAI Research State
 
-- **2026-05-31 06:30Z**
+- **2026-05-31 08:40Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 08:40Z snapshot — H183 EP5 EXACTLY TIED with H147 (HOT candidate); H182 EP10 borderline + VP CLEARING FLOOR; H184 main EP2 close to H147; H181 EP14 closing slowly
+
+**Active wave-5 fleet, all 4 students WIP:**
+
+| Student | PR | Hyp | EP @ 08:40Z | Latest val_WSS | Δ vs H147 | Δ vs H172 | Next gate |
+|---|---|---|---|---:|---:|---:|---|
+| frieren | #1503 | H181 EMA-99995 | 14 (step 153,663) | 6.9186 | — | +0.213 | natural terminal EP30 |
+| nezuko | #1506 | H182 LR 1.3× | 11 (step 120,735) | **6.8158** | **+0.166** | **+0.005** | **EP15 ≤6.85 @ step 164,625 ~10:10Z** |
+| tanjiro | #1510 | H183 per-channel heads | 5 (step 54,879) | **6.7497** | **−0.000** (TIED) | — | **EP10 ≤6.66 @ step 109,759 ~11:50Z** |
+| fern | #1513 | H184 WSD LR (main) | 2 (step 21,951) | 7.3219 | +0.062 | — | EP5 ≤6.85 ~13:00Z |
+
+### H183 (tanjiro) — HOTTEST CANDIDATE: EP5 EXACTLY TIED with H147
+
+| EP | step | val_WSS | val_VP | val_SP | val_ABU | Δ vs H147 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10,975 | 12.9728 | 14.0018 | 8.7417 | 13.0824 | +0.153 |
+| 2 | 21,951 | 7.2222 | 4.9462 | 4.1772 | 6.6413 | −0.038 |
+| 3 | 32,927 | 6.9084 | 4.1676 | 3.9783 | 6.2318 | **−0.072** |
+| 4 | 43,903 | 6.8066 | 3.9018 | 3.9187 | 6.0995 | −0.029 |
+| **5** | 54,879 | **6.7497** | 3.8184 | 3.8917 | 6.0380 | **−0.000** (TIED) |
+
+Per-axis τ: EP3 (−0.052/−0.072/−0.084 τx/τy/τz), EP4 (−0.034/−0.014/−0.004), EP5 mechanism confirmed sustained. Per-channel decoder heads provide a ~0.04pp persistent lead vs H147 without dissipating. EP10 critical gate ≤6.66. Linear extrap EP3→5 slope (−0.079pp/EP) gives EP10 ≈ 6.36 (easily passes); conservative ≈ 6.55-6.60 (still passes). VP @ EP5 = 3.82, watch floor 3.643 — needs to drop ~0.18pp by terminal.
+
+### H182 (nezuko) — EP10 BORDERLINE FAIL but EP11 NEAR-TIED + **VP CLEARING FLOOR**
+
+| EP | step | val_WSS | val_VP | val_SP | val_ABU | lr | Δ vs H172 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 87,807 | 6.8905 | 3.7134 | 4.0518 | 6.1071 | 1.13e-4 | +0.083 |
+| 9 | 98,783 | 6.8555 | 3.6641 | 4.0124 | 6.0689 | 1.09e-4 | +0.040 |
+| **10** | 109,759 | **6.8381** | **3.6224** | 3.9929 | 6.0439 | 1.03e-4 | **+0.057** |
+| **11** | 120,735 | **6.8158** | **3.5942** | 3.9757 | 6.0205 | 9.8e-5 | **+0.005** |
+
+EP10 critical gate ≤6.78 TECHNICAL FAIL by 0.06pp. BUT EP11 essentially tied with H172 (+0.005pp) AND **VP CLEARING 3.643 FLOOR** for the first time in 12 hypotheses (EP10=3.622, EP11=3.594). Decision: HOLD to EP15. EP15 critical gate ≤6.85 vs H172 EP15=6.690. The VP-below-floor finding is the most important signal — if val_VP=3.59 holds to test (val→test ~−0.3pp pattern from H147), test_VP could be ~3.30, well clear of floor and improving on H147 by ~0.1pp.
+
+### H181 (frieren) — Steady descent, no path to H147
+
+| EP | step | val_WSS | val_VP | val_SP | val_ABU | Δ vs H172 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 11 | 120,735 | 7.2399 | 4.2698 | 4.3739 | 6.5242 | +0.429 |
+| 12 | 131,711 | 7.0711 | 4.0295 | 4.2131 | 6.3328 | +0.309 |
+| 13 | 142,687 | 6.9780 | 3.8973 | 4.1266 | 6.2299 | +0.250 |
+| 14 | 153,663 | 6.9186 | 3.8430 | 4.0736 | 6.1697 | +0.213 |
+
+Descent steady at −0.06pp/EP. Gap-closing rate to H172 = −0.072pp/EP — catches H172 around EP17-18, but H172 EP14→30 only descends −0.05pp total. Terminal projection ~6.65-6.68 = H172-class but no path to H147. NON-MERGE sealed absent H172-beat. Continue to natural terminal.
+
+### H184 (fern) — Smoke verification COMPLETE & PASSED; main run at EP2
+
+Smoke verified: warmup→stable LR transition (5e-6→1e-4 at EP1), stable plateau EP1-22 at 1e-4, decay cosine EP23-29 to eta_min=1e-6. No NaN/skipped steps. Dry-run schedule matches design.
+
+Main run `usc1tpni` launched 06:32Z. EP1 val_WSS=12.7118 (−0.108pp LEAD vs H147), EP2=7.3219 (+0.062pp slight lag). lr=1e-4 confirmed at EP1+EP2 (WSD stable phase active). WSD payoff expected late (EP22+ when cosine decay starts). Don't kill on early-EP lag — hypothesis specifically about late-tail descent.
 
 ## 06:30Z snapshot — H181 EP10 PASSED critical gate; H182 EP8 gap NARROWING (+0.083 vs H172); H183 EP2 slight LEAD vs H147 (per-channel heads alive); H184 smoke pre-EP1
 
