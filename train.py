@@ -106,6 +106,7 @@ class Config:
     drop_path_max: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    wss_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -145,6 +146,7 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    seed: int = 0
     debug: bool = False
 
 
@@ -271,6 +273,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "wss_z_loss_weight": (
+            "H341: scalar multiplier applied ONLY to the wz / tau_z channel "
+            "in the surface channel-weighted MSE (channel index 3). "
+            "Composes multiplicatively with --tau-z-loss-weight: effective "
+            "tau_z channel weight = tau_z_loss_weight * wss_z_loss_weight. "
+            "Default 1.0 = no change vs current behaviour. Use this to "
+            "attack the wz bottleneck channel without disturbing wx/wy."
+        ),
+        "seed": (
+            "H310/H337/H341: integer seed for torch / numpy / random. 0 "
+            "(default) leaves all RNGs at system entropy. Nonzero sets "
+            "torch.manual_seed, torch.cuda.manual_seed_all, "
+            "numpy.random.seed, and random.seed BEFORE model/dataloader/"
+            "DDP construction so two runs with the same seed produce "
+            "matching val curves (modulo CUDA float non-determinism)."
         ),
     }
     for field in fields(Config):
@@ -831,6 +849,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        if config.seed != 0:
+            import random as _py_random
+
+            import numpy as _np
+
+            torch.manual_seed(config.seed)
+            torch.cuda.manual_seed_all(config.seed)
+            _np.random.seed(config.seed)
+            _py_random.seed(config.seed)
+            if state.is_main:
+                print(f"Seed: {config.seed} (torch / cuda / numpy / random)")
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
         requested_epochs = config.epochs
@@ -919,13 +948,22 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.
+        # H341: wss_z_loss_weight multiplies only the tau_z channel, composing
+        # with tau_z_loss_weight, so wz can be reweighted in isolation.
         surface_channel_weights = torch.tensor(
-            [1.0, 1.0, config.tau_y_loss_weight, config.tau_z_loss_weight],
+            [
+                1.0,
+                1.0,
+                config.tau_y_loss_weight,
+                config.tau_z_loss_weight * config.wss_z_loss_weight,
+            ],
             device=device,
             dtype=torch.float32,
         )
         use_channel_weights = bool(
-            (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
+            (config.tau_y_loss_weight != 1.0)
+            or (config.tau_z_loss_weight != 1.0)
+            or (config.wss_z_loss_weight != 1.0)
         )
         if config.compile_model:
             model = torch.compile(model)
@@ -1029,9 +1067,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"(log_freq[d, f] = log(sigmas[f % len(sigmas)]))"
                 )
             if use_channel_weights:
+                effective = surface_channel_weights.tolist()
                 print(
-                    f"Surface channel weights: cp=1.0 tau_x=1.0 "
-                    f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                    f"Surface channel weights: cp={effective[0]} "
+                    f"tau_x={effective[1]} tau_y={effective[2]} "
+                    f"tau_z={effective[3]} "
+                    f"(wss_z_loss_weight={config.wss_z_loss_weight})"
                 )
 
         run = init_wandb_run(
@@ -1064,6 +1105,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/wss_z_loss_weight"] = config.wss_z_loss_weight
+            wandb.summary["seed"] = config.seed
             backbone = getattr(base_model, "backbone", None)
             if backbone is not None and hasattr(backbone, "blocks"):
                 drop_path_schedule = [
@@ -1268,6 +1311,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/wss_z_loss_weight": config.wss_z_loss_weight,
                         }
                     )
                 if gradnorm_metrics:
