@@ -1,9 +1,84 @@
 # SENPAI Research State
 
-- **2026-05-31 13:20Z**
+- **2026-05-31 15:34Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 15:34Z snapshot — **H182 VP=3.487 DEEPENING (−0.156pp below floor, partial-SOTA strengthening, test_VP proj 3.20 = beats H147 by 0.20pp);** H183 EP13.6 = 6.6306 descent severely slowed (EP15 borderline FAIL, EP30 proj 6.51-6.57 still beats H147); **H184 EP11.9 = 6.8454 descent ACCELERATING to −0.016/EP (re-projected EP30 6.44-6.54 with decay boost = STRONG SOTA candidate);** H181 EP24 = 6.8285 slight uptick (NON-MERGE confirmed)
+
+**Active wave-5 fleet, all 4 students WIP. 15:34Z fleet:**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | EP30 projection | Decision |
+|---|---|---|---:|---:|---:|---:|---|
+| frieren | #1503 | H181 EMA-99995 | 24.0 | 6.8285 | 3.778 | 6.75-6.83 | NON-MERGE (terminal hold) |
+| nezuko | #1506 | H182 LR 1.3× | 21.1 | 6.7716 | **3.487** | WSS 6.70-6.73 / **test_VP 3.20** | **STRONG PARTIAL SOTA (VP)** |
+| tanjiro | #1510 | H183 per-channel heads | 13.6 | 6.6306 | 3.639 | **6.51-6.57** | **SOTA candidate, EP22 decay critical** |
+| fern | #1513 | H184 WSD LR (main) | 11.9 | 6.8454 | 3.760 | **6.44-6.54 (decay boost)** | **NEW SOTA candidate** |
+
+### H182 (nezuko) — VP DEEPENING TO 3.487 (partial-SOTA strengthening over 13:20Z reading)
+
+| EP | val_WSS | val_VP | floor delta |
+|---:|---:|---:|---:|
+| 12 | 6.7901 | 3.5550 | −0.088 |
+| 15 | 6.7833 | 3.5251 | −0.118 |
+| 18 | 6.7744 | 3.5172 | −0.126 |
+| **21** | **6.7716** | **3.4872** | **−0.156** |
+
+**VP descent re-accelerating EP18→EP21: −0.030pp/3EPs = −0.010pp/EP** (up from −0.0027/EP at EP15-18). Likely the cosine decay phase starting — LR has dropped below stable regime, tighter convergence pulls VP deeper.
+
+**Test_VP projection updated:** EP30 val_VP ~3.40 → test_VP ~3.20 = **beats H147 test_VP=3.4014 by ~0.20pp** (strengthened from 13:20Z 0.10pp projection).
+
+**Channel-specific partial-SOTA candidate confirmed.** Continue to natural terminal EP30 ~16:00Z for test harvest.
+
+### H183 (tanjiro) — descent severely slowed but STILL ON SOTA PATH (EP15 borderline)
+
+| EP | val_WSS | descent rate |
+|---:|---:|---:|
+| 5 | 6.7497 | — |
+| 8 | 6.6726 | −0.026/EP |
+| 11 | 6.6407 | −0.011/EP |
+| **13.6** | **6.6306** | **−0.0039/EP (CONCERN)** |
+
+**Descent dropped 5× from EP8-11 to EP11-13.6.** EP15 gate ≤6.60 likely FAILS by 0.025pp (projected 6.625). However:
+- EP30 projection at current rate: **6.567** = SLIGHTLY BEATS H147 by 0.03pp
+- WITH decay-phase tail (H172-class ~−0.05pp): 6.51-6.52 = CLEARLY BEATS H147
+- Worst-case continued deceleration: 6.59-6.61 = ties/slightly behind
+
+**Critical concerns:**
+- val_VP=3.639 just −0.004pp below floor 3.643 (slight regress from EP11=3.618). Watch VP closely — if crosses 3.65 sustained 2+EPs = kill.
+- val_SP=3.854 = +0.276pp above floor 3.577. NO improvement EP11→13.6. **SP needs to crash by terminal or test_SP regresses.**
+
+**Continue running, EP18-20 reads critical.**
+
+### H184 (fern) — descent ACCELERATING to −0.016/EP in stable phase (NEW STRONG candidate)
+
+| EP | val_WSS | descent rate | lr |
+|---:|---:|---:|---:|
+| 5 | 6.9329 | — | 1e-4 |
+| 9 | 6.8922 | −0.010/EP | 1e-4 |
+| **11.9** | **6.8454** | **−0.016/EP (UP)** | 1e-4 |
+
+**Stable-phase descent ACCELERATING from −0.010 to −0.016pp/EP.** WSD design paying off — finding deeper minima as stable phase extends.
+
+**Re-projected EP22 (last stable EP):** 6.8454 - 0.016×10.1 = **6.69** (vs my 13:20Z projection 6.76)
+
+**Decay phase EP22→EP29 (lr 1e-4 → 1e-6) at 2-5× boost:**
+- Conservative (2×): EP30 = 6.54 (TIES H147)
+- Realistic (3-4×): EP30 = **6.44-6.49 = BEATS H147 by 0.05-0.10pp**
+- Optimistic (5×): EP30 = 6.24 (overshoot likely smoothed by EMA)
+
+**H184 is now a STRONG SOTA candidate.** Decay-phase boost is the decisive read. **EP22 ~17:00Z** is critical.
+
+### H181 (frieren) — slight uptick at EP24, NON-MERGE confirmed terminal-hold
+
+| EP | val_WSS |
+|---:|---:|
+| 18 | 6.8305 |
+| 21 | 6.8175 |
+| **24** | **6.8285 (+0.011 uptick)** |
+
+EMA-9999.5 averaging window causing instability at local minimum. EP30 projection 6.75-6.83 = consistently behind H147 6.5409 and H172 6.6517. **NON-MERGE — continue to terminal EP30 for clean test harvest.**
 
 ## 13:20Z snapshot — **H183 EP11 = 6.6407 ON SOTA TRAJECTORY** (EP10 gate PASSED, projecting EP30 ~6.44-6.55, VP at 3.62 borderline); H182 EP18 VP CONTINUES TO BREAK FLOOR (3.517, −0.126pp below); H184 EP9 stable phase +0.24pp behind H147 (WSD design lag, decay EP22+); H181 EP21 severely decelerated, NON-MERGE re-sealed
 
