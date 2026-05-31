@@ -1,3 +1,35 @@
+## 2026-05-31 04:35Z — PR #1502 alphonse H316 CLOSED: calibration component ablation — SCALE DOMINATES BIAS
+
+### Finding 'cal-scale-dominates-bias-null-on-test'
+
+- **Branch**: alphonse/h316-calibration-component-ablation
+- **W&B run**: yg4sbrtw (3 arms: bias-only, scale-only, full — paired comparison, identical TTA passes)
+- **Hypothesis**: Decompose H300/H312's calibration gain into per-channel α (scale) vs β (bias) contributions to inform future calibration design.
+- **Result** (test_abupt rel_l2_pct vs raw 5.7695):
+
+  | Arm | params | val_cal | test_cal | Δtest vs raw | % of full gain |
+  |---|---:|---:|---:|---:|---:|
+  | Bias-only (β only, α=1) | 5 | 5.9260 | 5.7696 | +0.1bp | **~0%** |
+  | Scale-only (α only, β=0) | 5 | 5.9129 | 5.7472 | -22.3bp | **~81%** |
+  | Full (α + β) | 10 | 5.9069 | 5.7420 | -27.5bp | 100% |
+
+- **Per-channel test gains** (full arm vs raw):
+  | Channel | Δ vs raw |
+  |---|---:|
+  | tau_z (WSS_z) | **-42.6bp** dominant |
+  | tau_y (WSS_y) | -37.2bp |
+  | tau_x (WSS_x) | -27.6bp |
+  | cp (SP) | -28.4bp |
+  | volume_pressure (VP) | -2.1bp |
+
+- **Vs SOTA**: full arm val 5.9069 / test 5.7420 fails H312 gate by +5.8/+2.1bp — K=4+8-res reroll variance (raw val 5.9290 vs H296's 5.9221).
+- **Why bias-only does nothing**: The huge β_VP ≈ -0.89 (in normalized space) **is the OLS intercept absorbing α≠1 shifts**, not an independent bias correction. rel_L2's per-case normalization absorbs any global mean offset, so β alone provides 0 information. In full mode, β depends on α — it's the y-intercept of the linear fit.
+- **Why scale dominates**: Predictions are systematically too-large by ~0.5-0.8% on WSS channels (α_τz ≈ 0.992 means model over-predicts τ_z magnitudes by 0.8%). The wall-shear scale deficit is the real source of H300/H312's calibration gain. VP shows α ≈ 1.002 — no scale bias at all.
+- **Updated mental model**: H300/H312 = scale correction on WSS, dressed up as a bias correction on VP. Future calibration experiments should default to **α-only with regularization**, treating β as a derived OLS intercept.
+- **Successor**: H329 assigned to alphonse (PR #1512) — abupt-weighted OLS objective. The H316 finding showed α does the work; H329 asks whether we can estimate α better by aligning the fit objective (currently uniform L2) with the eval metric (per-car relative L2 averaged across cars).
+
+---
+
 ## 2026-05-31 04:15Z — PR #1499 askeladd H313 CLOSED: regional 4z/6z affine calibration OVERFITS
 
 ### Finding 'regional-cal-overfits-val'
