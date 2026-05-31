@@ -1,3 +1,23 @@
+## 2026-05-31 03:00Z — PR #1497 fern H306 CLOSED: per-point confidence-weighted TTA aggregation NULL
+
+### Finding 'conf-weighted-T1-equals-uniform-avg'
+
+- **Branch**: fern/h306-per-point-conf-avg
+- **W&B run**: dsgl7bn8
+- **Hypothesis**: Replace uniform mean over 64 TTA passes (K=4 × R=8 × M=2) with softmax(-loss/T) confidence-weighted average. At T=1.0 the predictions should re-weight away from outlier-noisy passes, yielding lower variance and a tighter calibrated fit. Arm B at T=5.0 would soften further.
+- **Result**:
+  | Metric | T=1.0 conf_avg | uniform avg | Δ |
+  |---|---:|---:|---:|
+  | val_abupt | 5.9222% | 5.9221% | +0.0001bp (NULL) |
+  | test_abupt | 5.7678% | 5.7678% | 0.0bp (matches H296 raw exactly) |
+
+  Arm B (T=5.0) NOT launched — gate logic (val ≥ 5.92) correctly held.
+- **Why null**: At T=1.0, softmax(-loss/T) over 64 passes with similar per-point loss magnitudes degenerates to near-uniform weights. The per-pass loss diversity in K=4-noise + 8-res + 2-mirror is small enough (all passes have similar per-point error norms) that the softmax weights collapse to ~1/64 each → mean.
+- **Closure**: Closed (val_cal not even computed; doesn't beat H312 gate 5.7388). Per-point inverse-variance TTA aggregation axis at T=1 closed. Different weighting (per-case rather than per-point, OR much larger T) would need separate re-derivation.
+- **Successor**: fern reassigned H319 per-resolution H312 calibration (PR #1509) — pivots fern from TTA aggregation operator design to calibration axis (where SOTA gains live).
+
+---
+
 ## 2026-05-31 02:30Z — PR #1498 edward H312 MERGED: NEW SOTA — H296+8-res+Per-Channel Calibration
 
 ### PR #1498 edward H312 — MERGED: K=4 anti-thetic + 8-res + mirror + H300 calibration

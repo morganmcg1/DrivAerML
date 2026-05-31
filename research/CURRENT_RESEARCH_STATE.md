@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 02:45Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
+**Updated**: 2026-05-31 03:00Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
 
 ## 2026-05-31 SOTA progression (4 merges now):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
@@ -38,28 +38,33 @@
 | **#1501** | **nezuko** | **H315: TTA aggregation operator sweep — median & trimmed-mean** | 5.9264/5.9226% | 🟢 2wq13m13 — INTERIM: median worse, trim≈avg | ~02:30Z |
 | **#1500** | **frieren** | **H314: Student-t weight-space noise (df=4)** | **5.9213%** ⭐ | 🟢 2scozlaf — INTERIM val −0.08bp vs H296 (positive) | ~03:00Z |
 | **#1499** | **askeladd** | **H313: Regional per-zone post-hoc affine calibration** | 5.9221% | 🟢 iya68eq8 primary running (val done, test pending) | ~02:30Z |
-| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | 5.9222% | 🔴 dsgl7bn8 null confirmed (conf_avg ≡ avg); test in-flight past timeout | Close at SENPAI-RESULT |
+| **#1509** | **fern** | **H319: Per-resolution H312 calibration (fit α/β per TTA resolution before mean aggregation)** | — | 🆕 assigned 03:00Z (after H306 close) | ~10:00Z |
 
 **Merged this loop (02:30Z)**:
 - **PR #1498 edward H312** — MERGED. **NEW SOTA** val_cal 5.8994 / test_cal 5.7388. Finding 'better-raw-better-cal' confirmed. Calibration near saturation for diagonal affine on single model.
 
-**Hot watch (02:45Z)**:
+**Closed this loop (03:00Z)**:
+- **PR #1497 fern H306** — CLOSED. Finding 'conf-weighted-T1-equals-uniform-avg'. T=1.0 softmax over 64 TTA passes with similar per-pass loss collapses to uniform → null. Per-point inverse-variance TTA aggregation closed at T=1. → H319 per-resolution calibration assigned to fern.
+
+**Hot watch (03:00Z)**:
 - **Frieren H314 2scozlaf** (~03:00Z) → val_raw 5.9213% leader. **If calibrated val < 5.8994, becomes SOTA candidate #1** against new tighter gate. This is the primary watch.
 - **Tanjiro H317 nld6viep** (~03:30Z) → quadratic cal; must beat val_cal 5.8994/test_cal 5.7388 (harder now)
 - **Alphonse H316 yg4sbrtw** (~03:00Z) → bias vs scale ablation; informs whether to pursue H312→H324 higher-K cal variants
 - **Nezuko H315 2wq13m13** → **INTERIM: median aggregation +4.3bp worse, trim10 +0.5bp worse** — aggregation axis looks null
 - **Askeladd H313 iya68eq8** (~02:30Z) → regional calibration; test pass nearly done
-- **Fern H306** — close at SENPAI-RESULT (null confirmed)
+- **Fern H319 #1509** (~10:00Z) → per-resolution cal; tests resolution-dependent bias structure
 - **Thorfinn H307** (~08:00Z) → model soup; uses new H312 SOTA as the seed-1 calibration baseline
 - **Edward H323** (~09:30Z) → cross-channel WSS affine; tests whether τ_x/τ_y/τ_z have rotational coupling
 - **Edward Arm B a8uyi3ev** (~08:30Z) → K=5+6-res+cal diagnostic; watch gate val_cal < 5.8994 / test_cal < 5.7388
 
-**Queue for next idle students**:
+**Queue for next idle students** (the calibration axis dominates):
 - **H318**: Calibration on H299-style noise + H312 cal — does noise-family change the residual structure?
-- **H319**: Re-evaluate H301 best-of-K strategy under H312 calibration
 - **H320**: 3rd seed commission (if H307 model-soup wins) OR cubic calibration (if H317 quadratic gains ≥3bp)
-- **H321**: Jackknife/LOO calibration variance on 34-car val
+- **H321**: Jackknife/LOO calibration variance on 34-car val (robustness check of 10-param fit on 34 cars)
+- **H322**: Best-of-K aggregation under H312 calibration (per-case selection vs averaging)
 - **H324**: K=5+6-res+cal confirmation (Arm B result will tell us if needed separately)
+- **H325**: WLS calibration (minimize abupt-aligned objective per-car, vs OLS absolute-squared error)
+- **H326**: Compose H323 (cross-channel WSS) + H319 (per-resolution) — both win → 8×{5×5+3} mixing matrix per resolution
 
 ---
 
