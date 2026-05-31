@@ -95,6 +95,15 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H329: per-car abupt-weighted OLS. Weights each car's contribution by
+    # w_c = 1/||t_c||^2 (per channel), so the fit objective aligns with the
+    # eval metric (mean over cars of per-car relative L2) rather than uniform
+    # pointwise L2. With uniform weights this reduces to the H300/H312 fit.
+    # Only meaningful when test_time_calibration is also set. When this flag
+    # is set, both unweighted (H300/H312) and weighted (H329) (alpha,beta)
+    # are logged for comparison; the weighted coefficients are applied to
+    # test predictions before computing the final calibrated metrics.
+    abupt_weighted_calibration: bool = False
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -557,6 +566,63 @@ def fit_affine_per_channel(
     alpha_raw = cov_pt / var_p.clamp(min=1e-12)
     alpha = torch.where(degenerate, torch.ones_like(alpha_raw), alpha_raw)
     beta = torch.where(degenerate, torch.zeros_like(alpha_raw), mu_t - alpha * mu_p)
+    return alpha, beta
+
+
+def fit_affine_per_channel_weighted(
+    per_case_stats: dict[str, torch.Tensor],
+    weight_mode: str = "abupt",
+    eps: float = 1e-12,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """H329 weighted-OLS alpha, beta per channel from per-case sufficient stats.
+
+    Each car c contributes weight w_c per channel; current weight modes:
+
+    - ``abupt``: w_c = 1.0 / max(sum_tt_c, eps). Minimizing the weighted-OLS
+      objective Σ_cars w_c · Σ_pts (α·p + β − t)^2 then approximates the
+      abupt-axis-mean-rel-L2 objective Σ_cars ||α·p + β − t||² / ||t||².
+    - ``uniform``: w_c = 1.0 (exact reproduction of unweighted OLS — used as
+      an invariant check in the smoke test).
+
+    Weighted normal equations per channel (2x2):
+        [A11 A12] [α]   [b1]
+        [A12 A22] [β] = [b2]
+    with A11 = Σ w_c·sum_pp_c, A12 = Σ w_c·sum_p_c, A22 = Σ w_c·N_c,
+    b1 = Σ w_c·sum_pt_c, b2 = Σ w_c·sum_t_c.
+
+    Falls back to identity (α=1, β=0) on degenerate channels (det ≤ eps).
+    """
+    if not per_case_stats:
+        raise RuntimeError("per_case_stats is empty; cannot fit weighted affine")
+    cases = sorted(per_case_stats.keys())
+    stack = torch.stack([per_case_stats[c] for c in cases], dim=0)  # (n_cases, n_ch, 6)
+    n_per_case = stack[..., 0]      # (n_cases, n_ch)
+    sum_p = stack[..., 1]
+    sum_t = stack[..., 2]
+    sum_pp = stack[..., 3]
+    sum_tt = stack[..., 4]
+    sum_pt = stack[..., 5]
+
+    if weight_mode == "abupt":
+        w = 1.0 / sum_tt.clamp(min=eps)  # (n_cases, n_ch)
+    elif weight_mode == "uniform":
+        w = torch.ones_like(sum_tt)
+    else:
+        raise ValueError(f"Unknown weight_mode {weight_mode!r}")
+
+    A11 = (w * sum_pp).sum(dim=0)
+    A12 = (w * sum_p).sum(dim=0)
+    A22 = (w * n_per_case).sum(dim=0)
+    b1 = (w * sum_pt).sum(dim=0)
+    b2 = (w * sum_t).sum(dim=0)
+
+    det = A11 * A22 - A12 * A12
+    degenerate = det.abs() <= eps
+    det_safe = torch.where(degenerate, torch.ones_like(det), det)
+    alpha_raw = (A22 * b1 - A12 * b2) / det_safe
+    beta_raw = (A11 * b2 - A12 * b1) / det_safe
+    alpha = torch.where(degenerate, torch.ones_like(alpha_raw), alpha_raw)
+    beta = torch.where(degenerate, torch.zeros_like(beta_raw), beta_raw)
     return alpha, beta
 
 
@@ -1066,22 +1132,95 @@ def main(argv: Iterable[str] | None = None) -> None:
                     flush=True,
                 )
                 continue
-            alpha_surf, beta_surf = fit_affine_per_channel(val_cal.surf_global)
-            alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
+            alpha_surf_u, beta_surf_u = fit_affine_per_channel(val_cal.surf_global)
+            alpha_vol_u, beta_vol_u = fit_affine_per_channel(val_cal.vol_global)
 
             channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
             print(f"\n=== H300 calibration (fit on val, mode={mode}) ===", flush=True)
             for c, name in enumerate(channel_names):
                 print(
-                    f"  surface[{name:6s}]  alpha={alpha_surf[c].item():+.6f} "
-                    f"beta={beta_surf[c].item():+.6f}",
+                    f"  surface[{name:6s}]  alpha={alpha_surf_u[c].item():+.6f} "
+                    f"beta={beta_surf_u[c].item():+.6f}",
                     flush=True,
                 )
             print(
-                f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
-                f"beta={beta_vol[0].item():+.6f}",
+                f"  volume[volume_pressure]  alpha={alpha_vol_u[0].item():+.6f} "
+                f"beta={beta_vol_u[0].item():+.6f}",
                 flush=True,
             )
+
+            # H329 abupt-weighted fit and uniform-weight invariant check.
+            alpha_surf_w = beta_surf_w = alpha_vol_w = beta_vol_w = None
+            if cfg.abupt_weighted_calibration:
+                # Invariant: with uniform weights, weighted fit == unweighted.
+                a_chk_s, b_chk_s = fit_affine_per_channel_weighted(
+                    val_cal.surf_per_case, weight_mode="uniform"
+                )
+                a_chk_v, b_chk_v = fit_affine_per_channel_weighted(
+                    val_cal.vol_per_case, weight_mode="uniform"
+                )
+                surf_atol = float((a_chk_s - alpha_surf_u).abs().max().item())
+                surf_btol = float((b_chk_s - beta_surf_u).abs().max().item())
+                vol_atol = float((a_chk_v - alpha_vol_u).abs().max().item())
+                vol_btol = float((b_chk_v - beta_vol_u).abs().max().item())
+                tol = 1e-6
+                assert surf_atol < tol and surf_btol < tol, (
+                    f"H329 invariant failed (surface): "
+                    f"alpha_max_abs_diff={surf_atol:.3e}, beta_max_abs_diff={surf_btol:.3e}"
+                )
+                assert vol_atol < tol and vol_btol < tol, (
+                    f"H329 invariant failed (volume): "
+                    f"alpha_max_abs_diff={vol_atol:.3e}, beta_max_abs_diff={vol_btol:.3e}"
+                )
+                print(
+                    f"  [H329 invariant] uniform-weight fit matches unweighted "
+                    f"(surf max_abs Δα={surf_atol:.2e}, Δβ={surf_btol:.2e}; "
+                    f"vol max_abs Δα={vol_atol:.2e}, Δβ={vol_btol:.2e})",
+                    flush=True,
+                )
+
+                alpha_surf_w, beta_surf_w = fit_affine_per_channel_weighted(
+                    val_cal.surf_per_case, weight_mode="abupt"
+                )
+                alpha_vol_w, beta_vol_w = fit_affine_per_channel_weighted(
+                    val_cal.vol_per_case, weight_mode="abupt"
+                )
+                print(
+                    f"\n=== H329 abupt-weighted calibration (fit on val, mode={mode}) ===",
+                    flush=True,
+                )
+                for c, name in enumerate(channel_names):
+                    d_alpha = alpha_surf_w[c].item() - alpha_surf_u[c].item()
+                    d_beta = beta_surf_w[c].item() - beta_surf_u[c].item()
+                    print(
+                        f"  surface[{name:6s}]  alpha={alpha_surf_w[c].item():+.6f} "
+                        f"beta={beta_surf_w[c].item():+.6f}  "
+                        f"(Δalpha={d_alpha:+.6f} Δbeta={d_beta:+.6f})",
+                        flush=True,
+                    )
+                d_alpha_v = alpha_vol_w[0].item() - alpha_vol_u[0].item()
+                d_beta_v = beta_vol_w[0].item() - beta_vol_u[0].item()
+                print(
+                    f"  volume[volume_pressure]  alpha={alpha_vol_w[0].item():+.6f} "
+                    f"beta={beta_vol_w[0].item():+.6f}  "
+                    f"(Δalpha={d_alpha_v:+.6f} Δbeta={d_beta_v:+.6f})",
+                    flush=True,
+                )
+
+            # Choose which (alpha,beta) drives the calibrated metrics that get
+            # logged as the experiment's primary outcome.
+            if cfg.abupt_weighted_calibration:
+                alpha_surf = alpha_surf_w
+                beta_surf = beta_surf_w
+                alpha_vol = alpha_vol_w
+                beta_vol = beta_vol_w
+                fit_label = "h329_abupt_weighted"
+            else:
+                alpha_surf = alpha_surf_u
+                beta_surf = beta_surf_u
+                alpha_vol = alpha_vol_u
+                beta_vol = beta_vol_u
+                fit_label = "h300_unweighted"
 
             val_cal_metrics = compute_calibrated_metrics(
                 val_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
@@ -1092,24 +1231,61 @@ def main(argv: Iterable[str] | None = None) -> None:
             cal_metrics_by_split_mode.setdefault("val_surface", {})[mode] = val_cal_metrics
             cal_metrics_by_split_mode.setdefault("test_surface", {})[mode] = test_cal_metrics
 
+            # Also compute unweighted metrics for side-by-side logging when in
+            # H329 mode, so the comparison vs H312 baseline is auditable.
+            val_cal_metrics_u = None
+            test_cal_metrics_u = None
+            if cfg.abupt_weighted_calibration:
+                val_cal_metrics_u = compute_calibrated_metrics(
+                    val_cal, alpha_surf_u, beta_surf_u, alpha_vol_u, beta_vol_u
+                )
+                test_cal_metrics_u = compute_calibrated_metrics(
+                    test_cal, alpha_surf_u, beta_surf_u, alpha_vol_u, beta_vol_u
+                )
+
             print(
-                f"  val  (raw -> cal)  abupt {summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                f"  val  (raw -> cal[{fit_label}])  abupt "
+                f"{summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
                 f"-> {val_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
                 flush=True,
             )
             print(
-                f"  test (raw -> cal)  abupt {summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                f"  test (raw -> cal[{fit_label}])  abupt "
+                f"{summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
                 f"-> {test_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
                 flush=True,
             )
+            if cfg.abupt_weighted_calibration:
+                val_u = val_cal_metrics_u["abupt_axis_mean_rel_l2_pct"]
+                val_w = val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                test_u = test_cal_metrics_u["abupt_axis_mean_rel_l2_pct"]
+                test_w = test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                print(
+                    f"  val  cal[h300_unweighted]  abupt {val_u:.4f}  "
+                    f"(weighted Δ {val_w - val_u:+.4f})",
+                    flush=True,
+                )
+                print(
+                    f"  test cal[h300_unweighted]  abupt {test_u:.4f}  "
+                    f"(weighted Δ {test_w - test_u:+.4f})",
+                    flush=True,
+                )
 
             if run is not None:
                 # Log alpha/beta to W&B summary so they appear on the run page.
+                # The unweighted coefficients keep their historical key names
+                # (calibration/...) for backward compatibility with H300/H312.
                 for c, name in enumerate(channel_names):
-                    run.summary[f"calibration/{mode}/alpha_{name}"] = float(alpha_surf[c].item())
-                    run.summary[f"calibration/{mode}/beta_{name}"] = float(beta_surf[c].item())
-                run.summary[f"calibration/{mode}/alpha_volume_pressure"] = float(alpha_vol[0].item())
-                run.summary[f"calibration/{mode}/beta_volume_pressure"] = float(beta_vol[0].item())
+                    run.summary[f"calibration/{mode}/alpha_{name}"] = float(alpha_surf_u[c].item())
+                    run.summary[f"calibration/{mode}/beta_{name}"] = float(beta_surf_u[c].item())
+                run.summary[f"calibration/{mode}/alpha_volume_pressure"] = float(alpha_vol_u[0].item())
+                run.summary[f"calibration/{mode}/beta_volume_pressure"] = float(beta_vol_u[0].item())
+                if cfg.abupt_weighted_calibration:
+                    for c, name in enumerate(channel_names):
+                        run.summary[f"calibration_h329/{mode}/alpha_{name}"] = float(alpha_surf_w[c].item())
+                        run.summary[f"calibration_h329/{mode}/beta_{name}"] = float(beta_surf_w[c].item())
+                    run.summary[f"calibration_h329/{mode}/alpha_volume_pressure"] = float(alpha_vol_w[0].item())
+                    run.summary[f"calibration_h329/{mode}/beta_volume_pressure"] = float(beta_vol_w[0].item())
 
                 # Log calibrated primary metrics to W&B history (and as
                 # split-level summary keys for downstream parsing).
@@ -1124,6 +1300,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wandb.log({**val_log, **test_log})
 
                 # Single-line paper-facing primary metrics (no mode suffix).
+                # H300/H312 keys reflect the selected fit's metrics (so existing
+                # downstream queries pick up the H329 numbers when active).
                 run.summary["val_abupt_h300_calibrated"] = float(
                     val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
                 )
@@ -1136,6 +1314,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                 run.summary["test_abupt_h300_raw"] = float(
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
+                if cfg.abupt_weighted_calibration:
+                    # H329-specific summary keys (primary outcome for this PR).
+                    run.summary["val_abupt_h329_calibrated"] = float(
+                        val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    run.summary["test_abupt_h329_calibrated"] = float(
+                        test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    # Also log the unweighted baseline computed on the same
+                    # run's per-case stats for an apples-to-apples comparison.
+                    run.summary["val_abupt_h329_unweighted_for_compare"] = float(
+                        val_cal_metrics_u["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    run.summary["test_abupt_h329_unweighted_for_compare"] = float(
+                        test_cal_metrics_u["abupt_axis_mean_rel_l2_pct"]
+                    )
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
