@@ -104,6 +104,14 @@ class EvalConfig:
     # Supported partitions: 4 (nose/rear/underbody/body) and 6
     # (nose/roof/sides/underbody/rear/body).
     regional_num_zones: str = ""
+    # H328: ridge-regularized regional calibration. CSV of ridge_lambda values
+    # to sweep on the SAME per-zone val sufficient stats. Each (zone, channel)
+    # (alpha, beta) is shrunk toward the H300 global per-channel fit:
+    #   min_{α,β} Σ (α p + β - t)^2 + λ [(α-α_global_c)^2 + (β-β_global_c)^2]
+    # Solving the normal equations gives a closed-form shrinkage per zone.
+    # λ=0 reproduces H313 unregularised; λ→∞ collapses to H300 global per
+    # channel. The token "inf" is accepted to request the global-collapse arm.
+    regional_ridge_lambda_sweep: str = "0.0"
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -190,6 +198,41 @@ def parse_zone_counts(spec: str) -> list[int]:
             )
         out.append(n)
     return out
+
+
+def parse_ridge_lambdas(spec: str) -> list[float]:
+    """Parse a CSV like "0.0,0.01,1.0,inf" into [0.0, 0.01, 1.0, float('inf')].
+
+    Empty string -> [0.0] (default to OLS / H313 reproduction).
+    Negative values are rejected. The literal token "inf" (case-insensitive)
+    expands to `float('inf')` and means "shrink fully to the global per-channel
+    fit", which reproduces H300.
+    """
+    out: list[float] = []
+    for piece in spec.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if piece.lower() in ("inf", "+inf", "infinity"):
+            out.append(float("inf"))
+            continue
+        v = float(piece)
+        if v < 0.0:
+            raise ValueError(f"regional_ridge_lambda must be >= 0 (got {v!r})")
+        out.append(v)
+    if not out:
+        out.append(0.0)
+    return out
+
+
+def _fmt_lambda(lam: float) -> str:
+    """Human-friendly tag for a ridge lambda value (used in W&B keys/logs)."""
+    if lam == float("inf"):
+        return "inf"
+    if lam == 0.0:
+        return "0p0"
+    s = f"{lam:g}"
+    return s.replace(".", "p").replace("+", "").replace("-", "neg")
 
 
 def build_model(cfg: EvalConfig) -> SurfaceTransolver:
@@ -774,6 +817,74 @@ def fit_affine_per_zone_per_channel(
     return alpha, beta
 
 
+def fit_affine_per_zone_per_channel_ridge(
+    zonal_global_stats: torch.Tensor,
+    alpha_global_c: torch.Tensor,
+    beta_global_c: torch.Tensor,
+    ridge_lambda: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Vectorised RIDGE fit per (zone, channel) shrunk toward the H300 global
+    per-channel (alpha_global_c, beta_global_c).
+
+    For each (zone z, channel c), solves the closed-form normal equations:
+
+        [[sum_pp + λ, sum_p],      [α_zc]     [sum_pt + λ·α_global_c]
+         [sum_p,      n + λ ]]  @  [β_zc]  =  [sum_t  + λ·β_global_c ]
+
+    At λ=0 this reduces to OLS exactly (matches H313). At λ→∞ the 2x2 system
+    collapses to (α_zc, β_zc) = (α_global_c, β_global_c) — i.e. every zone
+    folds back to the H300 global per-channel fit, recovering H300 metrics.
+
+    Args:
+        zonal_global_stats: (n_zones, n_channels, 6) sufficient stats with
+            columns [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt].
+        alpha_global_c: (n_channels,) — H300 per-channel global α fit.
+        beta_global_c:  (n_channels,) — H300 per-channel global β fit.
+        ridge_lambda: shrinkage strength (>= 0; float('inf') triggers the
+            analytic collapse to the global fit).
+
+    Returns:
+        (alpha, beta), each of shape (n_zones, n_channels).
+    """
+    if ridge_lambda < 0.0:
+        raise ValueError(f"ridge_lambda must be >= 0, got {ridge_lambda!r}")
+
+    n_zones, n_ch = zonal_global_stats.shape[0], zonal_global_stats.shape[1]
+    a_global = alpha_global_c.to(zonal_global_stats.dtype).reshape(1, n_ch).expand(n_zones, n_ch)
+    b_global = beta_global_c.to(zonal_global_stats.dtype).reshape(1, n_ch).expand(n_zones, n_ch)
+
+    if ridge_lambda == float("inf"):
+        # At λ=∞ every (zone, channel) collapses to the global per-channel fit.
+        return a_global.clone(), b_global.clone()
+
+    N = zonal_global_stats[..., 0]
+    sum_p = zonal_global_stats[..., 1]
+    sum_t = zonal_global_stats[..., 2]
+    sum_pp = zonal_global_stats[..., 3]
+    sum_pt = zonal_global_stats[..., 5]
+
+    # A = [[A11, A12],[A21, A22]], b = [b1, b2] per (zone, channel)
+    A11 = sum_pp + ridge_lambda
+    A12 = sum_p
+    A21 = sum_p
+    A22 = N + ridge_lambda
+    b1 = sum_pt + ridge_lambda * a_global
+    b2 = sum_t + ridge_lambda * b_global
+
+    det = A11 * A22 - A12 * A21
+    # det = (sum_pp + λ)(N + λ) - sum_p^2. For λ>0 and any non-empty zone this
+    # is strictly positive (Cauchy–Schwarz: sum_pp · N >= sum_p^2). For λ=0
+    # with an empty/constant zone det can be ~0; fall back to the global fit
+    # in that case (consistent with the H313 degenerate-zone fallback).
+    degenerate = det.abs() <= 1e-18
+    det_safe = torch.where(degenerate, torch.ones_like(det), det)
+    alpha_raw = (A22 * b1 - A12 * b2) / det_safe
+    beta_raw = (A11 * b2 - A21 * b1) / det_safe
+    alpha = torch.where(degenerate, a_global, alpha_raw)
+    beta = torch.where(degenerate, b_global, beta_raw)
+    return alpha, beta
+
+
 def compute_calibrated_metrics_regional(
     cal: CalibrationStats,
     n_zones: int,
@@ -1158,6 +1269,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
     zone_counts = parse_zone_counts(cfg.regional_num_zones)
+    ridge_lambdas = parse_ridge_lambdas(cfg.regional_ridge_lambda_sweep)
     # PR-convention alias used by H275 instructions; semantically identical.
     mode_aliases = {"mirror_res_weight_noise_avg": "weight_noise_mirror_res_avg"}
     modes = [mode_aliases.get(m, m) for m in modes]
@@ -1180,7 +1292,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
         print(
             f"Calibration: H300 global={cfg.test_time_calibration} "
-            f"| H313 regional zone_counts={zone_counts}"
+            f"| H313 regional zone_counts={zone_counts} "
+            f"| H328 ridge_lambdas={ridge_lambdas}"
         )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
@@ -1455,14 +1568,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
 
-    # H313: regional/zonal surface calibration on top of H300. Surface channels
-    # (cp, tau_x, tau_y, tau_z) get one (alpha, beta) per (zone, channel); the
-    # volume pressure channel keeps the H300 global affine (no volume zoning,
-    # per researcher recommendation given tight test_VP headroom). The shape
-    # is [split][mode][n_zones] so multiple arms (e.g., 4 and 6) coexist.
-    regional_metrics_by_split_mode_zones: dict[
-        str, dict[str, dict[int, dict[str, float]]]
+    # H313/H328: regional/zonal surface calibration on top of H300, optionally
+    # ridge-regularised toward the H300 per-channel global fit. Surface channels
+    # (cp, tau_x, tau_y, tau_z) get one (alpha, beta) per (zone, channel) at
+    # each ridge lambda; the volume pressure channel keeps the H300 global
+    # affine (no volume zoning, per researcher recommendation given tight
+    # test_VP headroom). The shape is [split][mode][n_zones][lam] so multiple
+    # arms (e.g., 4 and 6 zones × 7 lambdas) coexist.
+    regional_metrics_by_split_mode_zones_lambda: dict[
+        str, dict[str, dict[int, dict[float, dict[str, float]]]]
     ] = {}
+    # (mode, n_zones) -> best lambda by val_abupt (used for paper-facing summary)
+    best_lambda_by_mode_zones: dict[tuple[str, int], float] = {}
     if (
         cfg.test_time_calibration
         and zone_counts
@@ -1486,6 +1603,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 continue
 
             alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
+            # H300 per-channel global (alpha_global_c, beta_global_c) is the
+            # ridge shrinkage target. Fit ONCE on the val surface global stats.
+            alpha_global_surf, beta_global_surf = fit_affine_per_channel(
+                val_cal.surf_global
+            )
 
             for n_zones in zone_counts:
                 if n_zones not in val_cal.surf_zonal_global:
@@ -1497,18 +1619,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     continue
                 zone_names = zone_name_table[n_zones]
                 zonal_global = val_cal.surf_zonal_global[n_zones]
-                alpha_surf_zonal, beta_surf_zonal = fit_affine_per_zone_per_channel(
-                    zonal_global
-                )
-
                 channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
+                N_per_zone = zonal_global[..., 0, 0]  # (n_zones,) same N across channels
+
                 print(
-                    f"\n=== H313 regional calibration (n_zones={n_zones}, "
+                    f"\n=== H328 ridge-regional calibration (n_zones={n_zones}, "
                     f"fit on val, mode={mode}) ===",
                     flush=True,
                 )
-                # Show per-zone N and (alpha, beta) per channel.
-                N_per_zone = zonal_global[..., 0, 0]  # (n_zones,) — same N across channels
                 print(
                     "  zone counts (val surface points pooled):  "
                     + "  ".join(
@@ -1517,115 +1635,277 @@ def main(argv: Iterable[str] | None = None) -> None:
                     ),
                     flush=True,
                 )
-                for z in range(n_zones):
-                    for c, cname in enumerate(channel_names):
-                        a = alpha_surf_zonal[z, c].item()
-                        b = beta_surf_zonal[z, c].item()
-                        print(
-                            f"  zone[{zone_names[z]:9s}][{cname:6s}]  "
-                            f"alpha={a:+.6f}  beta={b:+.6f}",
-                            flush=True,
-                        )
+                print(
+                    "  H300 per-channel global shrinkage target (from val_cal.surf_global):",
+                    flush=True,
+                )
+                for c, cname in enumerate(channel_names):
+                    print(
+                        f"    [{cname:6s}]  α_global={alpha_global_surf[c].item():+.6f}  "
+                        f"β_global={beta_global_surf[c].item():+.6f}",
+                        flush=True,
+                    )
                 print(
                     f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
                     f"beta={beta_vol[0].item():+.6f}  (H300 global, no zoning)",
                     flush=True,
                 )
 
-                val_reg_metrics = compute_calibrated_metrics_regional(
-                    val_cal,
-                    n_zones,
-                    alpha_surf_zonal,
-                    beta_surf_zonal,
-                    alpha_vol,
-                    beta_vol,
-                )
-                test_reg_metrics = compute_calibrated_metrics_regional(
-                    test_cal,
-                    n_zones,
-                    alpha_surf_zonal,
-                    beta_surf_zonal,
-                    alpha_vol,
-                    beta_vol,
-                )
-                regional_metrics_by_split_mode_zones.setdefault(
-                    "val_surface", {}
-                ).setdefault(mode, {})[n_zones] = val_reg_metrics
-                regional_metrics_by_split_mode_zones.setdefault(
-                    "test_surface", {}
-                ).setdefault(mode, {})[n_zones] = test_reg_metrics
+                # Sweep over ridge lambdas. Each fit is closed-form (seconds
+                # total across the whole sweep) so we report all of them and
+                # pick the best by val_abupt.
+                lam_metrics: dict[float, tuple[
+                    dict[str, float], dict[str, float], torch.Tensor, torch.Tensor
+                ]] = {}
+                for lam in ridge_lambdas:
+                    alpha_surf_zonal, beta_surf_zonal = (
+                        fit_affine_per_zone_per_channel_ridge(
+                            zonal_global,
+                            alpha_global_surf,
+                            beta_global_surf,
+                            lam,
+                        )
+                    )
+                    val_reg_metrics = compute_calibrated_metrics_regional(
+                        val_cal,
+                        n_zones,
+                        alpha_surf_zonal,
+                        beta_surf_zonal,
+                        alpha_vol,
+                        beta_vol,
+                    )
+                    test_reg_metrics = compute_calibrated_metrics_regional(
+                        test_cal,
+                        n_zones,
+                        alpha_surf_zonal,
+                        beta_surf_zonal,
+                        alpha_vol,
+                        beta_vol,
+                    )
+                    lam_metrics[lam] = (
+                        val_reg_metrics,
+                        test_reg_metrics,
+                        alpha_surf_zonal,
+                        beta_surf_zonal,
+                    )
+                    regional_metrics_by_split_mode_zones_lambda.setdefault(
+                        "val_surface", {}
+                    ).setdefault(mode, {}).setdefault(n_zones, {})[lam] = val_reg_metrics
+                    regional_metrics_by_split_mode_zones_lambda.setdefault(
+                        "test_surface", {}
+                    ).setdefault(mode, {}).setdefault(n_zones, {})[lam] = test_reg_metrics
 
-                print(
-                    f"  val  (raw -> H300 -> H313_{n_zones}z)  abupt "
-                    f"{summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} -> "
-                    f"{cal_metrics_by_split_mode.get('val_surface', {}).get(mode, {}).get('abupt_axis_mean_rel_l2_pct', float('nan')):.4f} -> "
-                    f"{val_reg_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
-                    flush=True,
-                )
-                print(
-                    f"  test (raw -> H300 -> H313_{n_zones}z)  abupt "
-                    f"{summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} -> "
-                    f"{cal_metrics_by_split_mode.get('test_surface', {}).get(mode, {}).get('abupt_axis_mean_rel_l2_pct', float('nan')):.4f} -> "
-                    f"{test_reg_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
-                    flush=True,
-                )
-                # H300 already exceeded the 3.577% test_SP hard constraint —
-                # surface-pressure shift under H313 must not worsen.
-                test_sp_h313 = test_reg_metrics["surface_pressure_rel_l2_pct"]
+                # λ-sweep summary table.
                 test_sp_h300 = (
                     cal_metrics_by_split_mode.get("test_surface", {})
                     .get(mode, {})
                     .get("surface_pressure_rel_l2_pct")
                 )
+                h300_val_abupt = (
+                    cal_metrics_by_split_mode.get("val_surface", {})
+                    .get(mode, {})
+                    .get("abupt_axis_mean_rel_l2_pct")
+                )
+                h300_test_abupt = (
+                    cal_metrics_by_split_mode.get("test_surface", {})
+                    .get(mode, {})
+                    .get("abupt_axis_mean_rel_l2_pct")
+                )
+                print(
+                    f"\n  --- λ-sweep (n_zones={n_zones}, mode={mode}) ---",
+                    flush=True,
+                )
+                print(
+                    f"  {'lambda':>10s}  {'val_abupt':>10s}  {'test_abupt':>11s}  "
+                    f"{'val-test':>10s}  {'val_SP':>8s}  {'test_SP':>8s}  "
+                    f"{'val_WSS':>8s}  {'test_WSS':>8s}  {'val_VP':>8s}  {'test_VP':>8s}",
+                    flush=True,
+                )
+                for lam in ridge_lambdas:
+                    v_m, t_m, _a, _b = lam_metrics[lam]
+                    gap = v_m["abupt_axis_mean_rel_l2_pct"] - t_m["abupt_axis_mean_rel_l2_pct"]
+                    print(
+                        f"  {('inf' if lam == float('inf') else f'{lam:.4g}'):>10s}  "
+                        f"{v_m['abupt_axis_mean_rel_l2_pct']:>10.4f}  "
+                        f"{t_m['abupt_axis_mean_rel_l2_pct']:>11.4f}  "
+                        f"{gap:>+10.4f}  "
+                        f"{v_m['surface_pressure_rel_l2_pct']:>8.4f}  "
+                        f"{t_m['surface_pressure_rel_l2_pct']:>8.4f}  "
+                        f"{v_m['wall_shear_rel_l2_pct']:>8.4f}  "
+                        f"{t_m['wall_shear_rel_l2_pct']:>8.4f}  "
+                        f"{v_m['volume_pressure_rel_l2_pct']:>8.4f}  "
+                        f"{t_m['volume_pressure_rel_l2_pct']:>8.4f}",
+                        flush=True,
+                    )
+
+                # Pick best lambda by val_abupt (lower is better). Ties broken
+                # toward larger lambda (more regularisation, simpler model).
+                best_lam = min(
+                    ridge_lambdas,
+                    key=lambda L: (lam_metrics[L][0]["abupt_axis_mean_rel_l2_pct"], -L),
+                )
+                best_lambda_by_mode_zones[(mode, n_zones)] = best_lam
+                best_v, best_t, best_a, best_b = lam_metrics[best_lam]
+                print(
+                    f"\n  Best λ by val_abupt: {('inf' if best_lam == float('inf') else f'{best_lam:.4g}')}  "
+                    f"val_abupt={best_v['abupt_axis_mean_rel_l2_pct']:.4f}%  "
+                    f"test_abupt={best_t['abupt_axis_mean_rel_l2_pct']:.4f}%",
+                    flush=True,
+                )
+                # Per-zone α / β matrix at best λ.
+                print(
+                    f"  --- Per-zone (alpha, beta) at best λ = "
+                    f"{('inf' if best_lam == float('inf') else f'{best_lam:.4g}')} ---",
+                    flush=True,
+                )
+                for z in range(n_zones):
+                    for c, cname in enumerate(channel_names):
+                        a = best_a[z, c].item()
+                        b = best_b[z, c].item()
+                        print(
+                            f"    zone[{zone_names[z]:9s}][{cname:6s}]  "
+                            f"alpha={a:+.6f}  beta={b:+.6f}",
+                            flush=True,
+                        )
+
+                # Validation invariants from the PR: λ=0 ≈ H313, λ=∞ ≈ H300.
+                if 0.0 in lam_metrics:
+                    v_m0, t_m0, _, _ = lam_metrics[0.0]
+                    print(
+                        f"  [invariant λ=0]   val_abupt={v_m0['abupt_axis_mean_rel_l2_pct']:.4f}  "
+                        f"test_abupt={t_m0['abupt_axis_mean_rel_l2_pct']:.4f}  "
+                        f"(should match H313 unregularised; H313 baseline was 5.8938/5.7410 at n_zones=6)",
+                        flush=True,
+                    )
+                if float("inf") in lam_metrics:
+                    v_mi, t_mi, _, _ = lam_metrics[float("inf")]
+                    h300_v_str = (
+                        f"{h300_val_abupt:.4f}" if h300_val_abupt is not None else "n/a"
+                    )
+                    h300_t_str = (
+                        f"{h300_test_abupt:.4f}" if h300_test_abupt is not None else "n/a"
+                    )
+                    print(
+                        f"  [invariant λ=∞]   val_abupt={v_mi['abupt_axis_mean_rel_l2_pct']:.4f}  "
+                        f"test_abupt={t_mi['abupt_axis_mean_rel_l2_pct']:.4f}  "
+                        f"(should match H300 global: val={h300_v_str}, test={h300_t_str})",
+                        flush=True,
+                    )
+
+                # SP watch at best λ — H300 already exceeded the 3.577% hard floor.
+                best_test_sp = best_t["surface_pressure_rel_l2_pct"]
                 if test_sp_h300 is not None:
-                    delta_sp = test_sp_h313 - test_sp_h300
+                    delta_sp = best_test_sp - test_sp_h300
                     marker = "WORSENED" if delta_sp > 0.0 else "improved"
                     print(
-                        f"  [H313 SP watch n={n_zones}z]  test_SP H300={test_sp_h300:.4f}% -> "
-                        f"H313={test_sp_h313:.4f}%  ({marker} {delta_sp:+.4f}pp; "
+                        f"  [H328 SP watch n={n_zones}z best λ]  test_SP H300={test_sp_h300:.4f}% -> "
+                        f"H328={best_test_sp:.4f}%  ({marker} {delta_sp:+.4f}pp; "
                         f"constraint 3.577%)",
                         flush=True,
                     )
 
+                # W&B logging per-lambda + best-lambda summary.
                 if run is not None:
-                    for z in range(n_zones):
-                        for c, cname in enumerate(channel_names):
+                    for lam in ridge_lambdas:
+                        v_m, t_m, a_zc, b_zc = lam_metrics[lam]
+                        lam_tag = _fmt_lambda(lam)
+                        for z in range(n_zones):
+                            for c, cname in enumerate(channel_names):
+                                run.summary[
+                                    f"h328_{n_zones}z_lam{lam_tag}/{mode}/"
+                                    f"zone_{zone_names[z]}/alpha_{cname}"
+                                ] = float(a_zc[z, c].item())
+                                run.summary[
+                                    f"h328_{n_zones}z_lam{lam_tag}/{mode}/"
+                                    f"zone_{zone_names[z]}/beta_{cname}"
+                                ] = float(b_zc[z, c].item())
                             run.summary[
-                                f"h313_{n_zones}z/{mode}/zone_{zone_names[z]}/alpha_{cname}"
-                            ] = float(alpha_surf_zonal[z, c].item())
-                            run.summary[
-                                f"h313_{n_zones}z/{mode}/zone_{zone_names[z]}/beta_{cname}"
-                            ] = float(beta_surf_zonal[z, c].item())
+                                f"h328_{n_zones}z_lam{lam_tag}/{mode}/"
+                                f"zone_{zone_names[z]}/n_val_points"
+                            ] = float(N_per_zone[z].item())
+
+                        val_log = {
+                            f"full_val_primary_regional_{n_zones}z_lam{lam_tag}/{mode}/{k}": v
+                            for k, v in v_m.items()
+                        }
+                        test_log = {
+                            f"test_primary_regional_{n_zones}z_lam{lam_tag}/{mode}/{k}": v
+                            for k, v in t_m.items()
+                        }
+                        wandb.log({**val_log, **test_log})
+
                         run.summary[
-                            f"h313_{n_zones}z/{mode}/zone_{zone_names[z]}/n_val_points"
-                        ] = float(N_per_zone[z].item())
+                            f"val_abupt_h328_{n_zones}z_lam{lam_tag}"
+                        ] = float(v_m["abupt_axis_mean_rel_l2_pct"])
+                        run.summary[
+                            f"test_abupt_h328_{n_zones}z_lam{lam_tag}"
+                        ] = float(t_m["abupt_axis_mean_rel_l2_pct"])
+                        run.summary[
+                            f"test_SP_h328_{n_zones}z_lam{lam_tag}"
+                        ] = float(t_m["surface_pressure_rel_l2_pct"])
+                        run.summary[
+                            f"test_WSS_h328_{n_zones}z_lam{lam_tag}"
+                        ] = float(t_m["wall_shear_rel_l2_pct"])
 
-                    val_log = {
-                        f"full_val_primary_regional_{n_zones}z/{mode}/{k}": v
-                        for k, v in val_reg_metrics.items()
-                    }
-                    test_log = {
-                        f"test_primary_regional_{n_zones}z/{mode}/{k}": v
-                        for k, v in test_reg_metrics.items()
-                    }
-                    wandb.log({**val_log, **test_log})
-
-                    run.summary[f"val_abupt_h313_{n_zones}z"] = float(
-                        val_reg_metrics["abupt_axis_mean_rel_l2_pct"]
+                    # Best-λ paper-facing summary keys.
+                    best_lam_tag = _fmt_lambda(best_lam)
+                    run.summary[f"best_lambda_h328_{n_zones}z/{mode}/value"] = (
+                        float("inf") if best_lam == float("inf") else float(best_lam)
                     )
-                    run.summary[f"test_abupt_h313_{n_zones}z"] = float(
-                        test_reg_metrics["abupt_axis_mean_rel_l2_pct"]
+                    run.summary[f"best_lambda_h328_{n_zones}z/{mode}/tag"] = best_lam_tag
+                    run.summary[f"val_abupt_h328_best_{n_zones}z"] = float(
+                        best_v["abupt_axis_mean_rel_l2_pct"]
                     )
-                    run.summary[f"test_SP_h313_{n_zones}z"] = float(
-                        test_reg_metrics["surface_pressure_rel_l2_pct"]
+                    run.summary[f"test_abupt_h328_best_{n_zones}z"] = float(
+                        best_t["abupt_axis_mean_rel_l2_pct"]
                     )
-                    run.summary[f"test_WSS_h313_{n_zones}z"] = float(
-                        test_reg_metrics["wall_shear_rel_l2_pct"]
+                    run.summary[f"test_SP_h328_best_{n_zones}z"] = float(
+                        best_t["surface_pressure_rel_l2_pct"]
+                    )
+                    run.summary[f"test_WSS_h328_best_{n_zones}z"] = float(
+                        best_t["wall_shear_rel_l2_pct"]
                     )
 
             if run is not None:
                 for k, v in zone_thresholds.items():
                     run.summary[f"h313/zone_threshold/{k}"] = float(v)
+
+        # Single-line paper-facing summary across all arms — choose the (mode,
+        # n_zones, λ) triple with the best val_abupt. SENPAI-RESULT references
+        # these keys.
+        if run is not None and regional_metrics_by_split_mode_zones_lambda:
+            best_overall: tuple[str, int, float, float] | None = None  # (mode, n_zones, lam, val_abupt)
+            for (mode, n_zones), lam in best_lambda_by_mode_zones.items():
+                v_abupt = regional_metrics_by_split_mode_zones_lambda[
+                    "val_surface"
+                ][mode][n_zones][lam]["abupt_axis_mean_rel_l2_pct"]
+                if best_overall is None or v_abupt < best_overall[3]:
+                    best_overall = (mode, n_zones, lam, v_abupt)
+            if best_overall is not None:
+                bmode, bz, blam, _ = best_overall
+                bv = regional_metrics_by_split_mode_zones_lambda["val_surface"][bmode][bz][blam]
+                bt = regional_metrics_by_split_mode_zones_lambda["test_surface"][bmode][bz][blam]
+                run.summary["best_arm_h328/mode"] = bmode
+                run.summary["best_arm_h328/n_zones"] = float(bz)
+                run.summary["best_arm_h328/lambda"] = (
+                    float("inf") if blam == float("inf") else float(blam)
+                )
+                run.summary["best_arm_h328/lambda_tag"] = _fmt_lambda(blam)
+                run.summary["val_abupt_h328_best_lambda"] = float(
+                    bv["abupt_axis_mean_rel_l2_pct"]
+                )
+                run.summary["test_abupt_h328_best_lambda"] = float(
+                    bt["abupt_axis_mean_rel_l2_pct"]
+                )
+                run.summary["test_SP_h328_best_lambda"] = float(
+                    bt["surface_pressure_rel_l2_pct"]
+                )
+                run.summary["test_WSS_h328_best_lambda"] = float(
+                    bt["wall_shear_rel_l2_pct"]
+                )
+                run.summary["test_VP_h328_best_lambda"] = float(
+                    bt["volume_pressure_rel_l2_pct"]
+                )
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
@@ -1657,26 +1937,41 @@ def main(argv: Iterable[str] | None = None) -> None:
                         for m in mode_keys
                     )
                     print(row)
-            reg_modes_zones = regional_metrics_by_split_mode_zones.get(split, {})
-            if reg_modes_zones:
+            reg_modes_zones_lambda = (
+                regional_metrics_by_split_mode_zones_lambda.get(split, {})
+            )
+            if reg_modes_zones_lambda:
                 for n_zones in zone_counts:
                     has_any = any(
-                        n_zones in reg_modes_zones.get(m, {}) for m in mode_keys
+                        n_zones in reg_modes_zones_lambda.get(m, {})
+                        for m in mode_keys
                     )
                     if not has_any:
                         continue
-                    print(
-                        f"  --- H313 regional ({n_zones}-zone surface, "
-                        f"global VP) ---"
-                    )
-                    for k in keys_to_show:
-                        row = f"  {k:<36s} " + " ".join(
-                            f"{reg_modes_zones[m][n_zones][k]:>22.4f}"
-                            if m in reg_modes_zones and n_zones in reg_modes_zones[m]
-                            else f"{'n/a':>22s}"
+                    for lam in ridge_lambdas:
+                        has_lam = any(
+                            lam in reg_modes_zones_lambda.get(m, {}).get(n_zones, {})
                             for m in mode_keys
                         )
-                        print(row)
+                        if not has_lam:
+                            continue
+                        lam_str = (
+                            "inf" if lam == float("inf") else f"{lam:g}"
+                        )
+                        print(
+                            f"  --- H328 ridge-regional ({n_zones}-zone, "
+                            f"λ={lam_str}, global VP) ---"
+                        )
+                        for k in keys_to_show:
+                            row = f"  {k:<36s} " + " ".join(
+                                f"{reg_modes_zones_lambda[m][n_zones][lam][k]:>22.4f}"
+                                if m in reg_modes_zones_lambda
+                                and n_zones in reg_modes_zones_lambda[m]
+                                and lam in reg_modes_zones_lambda[m][n_zones]
+                                else f"{'n/a':>22s}"
+                                for m in mode_keys
+                            )
+                            print(row)
 
         if run is not None:
             for split, modes_dict in summary.items():
@@ -1693,16 +1988,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                             run.summary[f"{split}_calibrated/{mode}/{k}"] = float(v)
                         except Exception:
                             pass
-            for split, modes_dict in regional_metrics_by_split_mode_zones.items():
+            for split, modes_dict in regional_metrics_by_split_mode_zones_lambda.items():
                 for mode, zones_dict in modes_dict.items():
-                    for n_zones, metrics in zones_dict.items():
-                        for k, v in metrics.items():
-                            try:
-                                run.summary[
-                                    f"{split}_regional_{n_zones}z/{mode}/{k}"
-                                ] = float(v)
-                            except Exception:
-                                pass
+                    for n_zones, lam_dict in zones_dict.items():
+                        for lam, metrics in lam_dict.items():
+                            lam_tag = _fmt_lambda(lam)
+                            for k, v in metrics.items():
+                                try:
+                                    run.summary[
+                                        f"{split}_regional_{n_zones}z_lam{lam_tag}/{mode}/{k}"
+                                    ] = float(v)
+                                except Exception:
+                                    pass
             run.finish()
 
     cleanup_distributed(state)
