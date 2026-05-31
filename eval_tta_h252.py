@@ -95,6 +95,10 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H332: save the per-case sufficient stats (CalibrationStats) for post-hoc
+    # re-calibration with externally supplied (alpha, beta) coefficients (e.g.
+    # to apply seed-1's H312 cal to a seed-2 run for transfer-arm analysis).
+    save_calibration_stats: bool = False
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -1136,6 +1140,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                 run.summary["test_abupt_h300_raw"] = float(
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
+
+    if cfg.save_calibration_stats and state.is_main:
+        cal_out_dir = Path(cfg.output_dir) / "calibration_stats"
+        cal_out_dir.mkdir(parents=True, exist_ok=True)
+        for split, modes_dict in cal_summary.items():
+            for mode, cal in modes_dict.items():
+                if cal is None:
+                    continue
+                out_path = cal_out_dir / f"{split}__{mode}.pt"
+                torch.save(
+                    {
+                        "surf_global": cal.surf_global,
+                        "vol_global": cal.vol_global,
+                        "surf_per_case": cal.surf_per_case,
+                        "vol_per_case": cal.vol_per_case,
+                    },
+                    out_path,
+                )
+                print(f"[save_calibration_stats] wrote {out_path}", flush=True)
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
