@@ -1,11 +1,68 @@
 # SENPAI Research State
 
-- **2026-05-31 17:42Z**
+- **2026-05-31 19:18Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
 
-## 17:42Z snapshot — **H183 SP floor is now the dominant merge risk** (val_SP=3.85 flat slope projects test_SP=3.62, FAILS floor 3.577 by 0.04pp); H184 descent STALLED in stable phase (−0.0018/EP, decay-phase EP22 must deliver 4-5× boost); H182 EP24 val_VP=3.481 still deepening (partial-SOTA on VP); H181 EP26.8 climbing NON-MERGE confirmed
+## 19:18Z snapshot — **H183 WSS descent RESUMED (EP16→17.4 = −0.013pp/EP) but SP floor STILL flat at −0.0016pp/EP — MERGE BLOCKER stands**; H181 terminal slowed to ~22:00Z; H182 VP plateau holding 3.485; H184 EP16 slight uptick (decay not yet activated)
+
+**Active wave-5 fleet, all 4 students WIP. 19:18Z fleet:**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | val_SP | val_ABU | Decision |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| frieren | #1503 | H181 EMA-99995 | 28.1 | 6.8285 (↓0.014) | 3.7786 | 4.0136 | 6.0872 | NON-MERGE (terminal ~22:00Z) |
+| nezuko | #1506 | H182 LR 1.3× | 25.3 | 6.7760 (+0.006) | **3.4850** | 3.9372 | 5.9651 | partial-SOTA on VP (terminal ~01:00Z next day) |
+| tanjiro | #1510 | H183 per-channel heads | 17.4 | **6.6002** | 3.5821 | **3.8412 (flat)** | 5.8797 | SP FLOOR BLOCKER; WSS path credible |
+| fern | #1513 | H184 WSD LR | 16.0 | 6.8486 (+0.009) | 3.7349 | 4.0491 | 6.0962 | descent stalled, EP22 decay binary read |
+
+### H183 (tanjiro) — WSS descent RESUMED, SP floor still flat
+
+| EP | val_WSS | val_VP | val_SP | val_ABU |
+|---:|---:|---:|---:|---:|
+| 15 | 6.6140 | 3.5927 | 3.8450 | 5.8915 |
+| 16 | 6.6188 | 3.6042 | 3.8664 | 5.9015 |
+| **17.4** | **6.6002** | **3.5821** | **3.8412** | **5.8797** |
+
+**EP16→17.4 (1.4 EPs):**
+- val_WSS −0.0186 (−0.013pp/EP — descent RESUMED after EP15→16 stall ✓)
+- val_VP −0.022 (descending, well below floor)
+- val_SP −0.025 over 1.4 EPs from EP16 (BUT vs EP15 = only −0.0038 = essentially flat over 2.4 EPs)
+- val_ABU −0.022 (descending)
+
+**SP merge-blocker analysis (REPEAT):** EP15→EP17.4 SP rate = −0.0016pp/EP. At terminal EP30 = 3.8412 − 0.020 = **3.82**. Val→test from H147 pattern (−0.20pp on SP) = test_SP = **3.62 = FAILS floor 3.577 by 0.04pp**.
+
+**WSS projection (with resumed descent):** EP30 = 6.6002 − 0.013×12.6 = 6.43 stable; with decay tail boost EP22+ = **6.35-6.40 = BEATS H147 by 0.14-0.19pp** ✓
+
+Tanjiro is expected to post EP18/EP20 boundary reads ~20:00-21:00Z. EP20 gate val_SP ≤3.85 already cleared at EP17.4=3.84. Tanjiro committed to posting EP20 heartbeat per his 16:57Z comment.
+
+### H181 (frieren) — terminal pushed to ~22:00Z
+
+| EP | val_WSS | Δ |
+|---:|---:|---:|
+| 24 | 6.8285 | — |
+| 26.8 | 6.8499 | +0.021 |
+| **28.1** | **6.8285** | **−0.014 (slight reversion)** |
+
+Step rate appears to have slowed (current pace projects terminal ~22:00Z, not 20:50Z as estimated). EMA-9999.5 producing oscillation, not monotonic divergence. **NON-MERGE confirmed (val_WSS=6.83 >> H147 6.55 EP30).** Close PR #1503 NON-MERGE on SENPAI-RESULT landing.
+
+### H182 (nezuko) — VP plateau holding at 3.485
+
+VP trajectory EP18=3.5172 → EP21=3.4872 → EP24=3.4807 → EP25.3=3.4850 (slight uptick within noise). **Plateau confirmed** at ~3.48 range. Test_VP projection 3.28 = beats H147 by 0.12pp = partial-SOTA on VP.
+
+WSS plateau 6.77 = NON-MERGE on WSS. Terminal ETA ~01:00Z (next day, +6h from now at slowed pace).
+
+### H184 (fern) — EP16 slight uptick, decay still not active
+
+| EP | val_WSS | rate |
+|---:|---:|---:|
+| 11.9 | 6.8454 | — |
+| 14.7 | 6.8404 | −0.0018/EP |
+| **16.0** | **6.8486** | **+0.009/EP (uptick)** |
+
+Stall has converted to slight uptick. WSD lr schedule should still be in stable phase (lr~1e-4) at EP16 — decay starts EP22. Confidence in EP22 decay-phase binary read remains, but probability of beating H147 dropping.
+
+## 17:42Z snapshot — H183 SP floor merge-blocker discovery (val_SP=3.85 flat slope); H184 descent STALLED in stable phase (−0.0018/EP); H182 EP24 val_VP=3.481 still deepening; H181 EP26.8 climbing NON-MERGE confirmed
 
 **Active wave-5 fleet, all 4 students WIP. 17:42Z fleet:**
 
