@@ -1,3 +1,26 @@
+## 2026-05-31 18:55Z — PR #1521 tanjiro H337 CLOSED: 3rd EP15 seed commission — artifact production success
+
+### CLOSED (artifact-only commissioning, not a SOTA candidate by design)
+
+- **Branch**: tanjiro/h337-ep15-seed3-commissioning
+- **W&B runs**: `yteak7pd` (training, seed=2027), `z1x4aqfk` (mirror val)
+- **Hypothesis**: Run H310-style cosine-extension training at `--seed=2027` to produce a 3rd EP15 EMA artifact, unblocking 3-way model-soup α-search on the (s1, s2, s3) simplex.
+- **Result**: All 3 decision criteria met
+  - val_abupt mirror = **6.0097%** ≤ 6.10% commissioning gate (well within ~0.1pp of seed-1 reference)
+  - W&B artifact `epoch-15` alias present: `model-tanjiro-h337-ep15-seed3-cosine-ext-yteak7pd:v1`
+  - No divergence; clean training curve; EP16 ema also saved
+- **Numbers**:
+  - best_epoch=16, best_val_primary/abupt_axis_mean_rel_l2_pct (EP16 ema) = **6.0065%**
+  - test_primary/abupt_axis_mean_rel_l2_pct (EP16 train-loop) = **5.8549%** (raw single-seed without TTA, expected ~28bp worse than H314 calibrated SOTA)
+  - total_train_minutes = 152 (2.5h wall on 8 GPUs)
+  - seed=2027 (vs seed-1=2024, seed-2=2025)
+- **Why CLOSED not MERGED**: H337 was structured as artifact-production for downstream soup experiments, not as a SOTA candidate. The 6.0097% mirror val is raw single-eval (no TTA recipe, no calibration) so the 5.8987 H314 gate does not apply.
+- **Banked Finding 'seed3-commission-clean'**: 3 independent seeds now available with comparable training quality. Pending H307 Arm D α=0.85 terminal (~22:00Z) — if 2-way soup α-axis nulls (showing α-monotone-no-cross per partial results), 3-way (s1, s2, s3) simplex search remains worth doing since it may have non-trivial geometry beyond the 2-way α-line.
+- **Implication for fleet**: tanjiro freed; H340 σ-sweep at Student-t ν=4 assigned to close the last inference-axis question.
+- **PR**: https://github.com/morganmcg1/DrivAerML/pull/1521
+
+---
+
 ## 2026-05-31 17:45Z — PR #1500 frieren H314 MERGED: Student-t ν=4 weight-noise TTA — NEW SOTA
 
 ### MERGED — val_cal 5.8987% / test_cal 5.7387% (beats H312 gates by 0.7bp / 0.1bp)
