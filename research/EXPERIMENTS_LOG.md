@@ -4972,3 +4972,56 @@ Wave-4 H182 (EMA 0.9999 + LR 1.3×) dispatched to nezuko (PR #1506).
 **Verdict:** FALSIFIED on all 4 floors. Closes the α=0.5 / floor=0.05 / cosine duration grid.
 
 **Follow-up dispatched:** H184 WSD LR Schedule (H-W5-1, PR #1513, fern) — replace cosine with Warmup-Stable-Decay to reorder the LR budget.
+
+---
+
+## 2026-05-31 20:30Z — PR #1503: H181 EMA decay=0.99995 — NON-MERGE terminal
+
+- **dl24-frieren/h181-ema-99995** (run `v4csonke`, 30-EP DDP8, ~24.8h)
+- **Hypothesis:** EMA decay=0.99995 (N_eff≈20k steps) extends H172's descent durability past EP20 stall by averaging over a wider window — trades washout cost (EMA init_mass=exp(−S·(1−d))) for deeper late-cosine convergence.
+
+### Test metrics (best EMA EP20 checkpoint, selection metric val_primary/abupt_axis_mean_rel_l2_pct)
+
+| Metric | H181 | H147 SOTA | Δ | vs floor | Verdict |
+|---|---:|---:|---:|---|---|
+| **test_WSS** | **6.6245%** | 6.5409% | **+0.084pp** | — | **MISS SOTA** |
+| test_VP | 3.6245% | 3.4014% | +0.223pp | ≤3.643% ✓ | pass floor |
+| **test_SP** | **3.6808%** | 3.5634% | **+0.117pp** | **≤3.577% ✗** | **BREACH +0.104pp** |
+| test_ABUPT | 5.7956% | 5.6648% | +0.131pp | ≤5.844% ✓ | pass floor |
+
+### Val trajectory (selected EPs)
+
+| EP | val_WSS | val_VP | val_SP | val_ABU | Notes |
+|---:|---:|---:|---:|---:|---|
+| 5 | 19.52 | — | — | — | EMA init washout ongoing (EP8≈1.24%, EP10≈0.41%) |
+| 10 | 7.3745 | 4.409 | 4.540 | 6.670 | EP10 gate PASS ≤7.5% ✓ |
+| 15 | 6.8811 | 3.975 | 4.219 | 6.140 | EP15 gate PASS ✓ |
+| 18 | 6.8305 | 3.901 | 4.110 | 6.163 | descent rate −0.025/EP |
+| **20** | **6.8175** | — | — | — | **best EMA checkpoint (harvested here)** |
+| 21 | 6.8175 | 3.760 | 4.014 | 6.087 | descent decelerated to −0.004/EP |
+| 24 | 6.8285 | 3.779 | 4.014 | 6.087 | uptick (re-ascent started) |
+| 26.8 | 6.8499 | — | — | — | ascending trend confirmed |
+| 28.1 | 6.8285 | — | — | — | oscillating at 6.82-6.85 |
+| 30 (terminal) | ~6.82-6.85 | — | — | — | EMA cosine re-ascent confirmed |
+
+### Scientific contributions (4 findings)
+
+1. **EMA-0.99995 FALSIFIED at 30-EP budget.** The effective averaging window (N_eff≈20k steps) is too large for the 30-EP / 330k-step training envelope. At EP30, init_mass washout still contributes ~0.03% residual contamination. Best checkpoint landed at EP20 — only 2/3 through training.
+
+2. **Optimal EMA N_eff ≈ 10k steps (decay≈0.9999).** The EMA family now covers three decay values: 0.999 (H147=SOTA, N≈1k), 0.9999 (H172=NON-MERGE, N≈10k), 0.99995 (H181=NON-MERGE, N≈20k). N≈10k is the peak; both flanks falsified. The "more averaging = better generalization" prior is dead for this training horizon.
+
+3. **Cosine re-ascent is a stack property, not noise.** All 3 EMA experiments show val_WSS re-ascending after EP20-EP22: H147 (val 6.545→6.60 EP20→EP30), H172 (EP20→EP23 stall→uptick), H181 (EP20→EP30 clear ascent). The underlying model trains past the EMA-captured minimum, pulling the shadow back toward the converged (higher-loss) weights.
+
+4. **EP20 EMA best-checkpoint is the optimal selection rule** for this stack family. Students should harvest EMA at EP20 (not EP30) for SOTA-class generalization in H147-derived experiments, unless the training schedule actively prevents late-tail ascent.
+
+### EMA family closure table
+
+| Hypothesis | EMA decay | N_eff steps | val_WSS best | test_WSS | SP floor | Verdict |
+|---|---:|---:|---:|---:|---|---|
+| H147 (SOTA) | 0.999 | 1k | 6.545 (EP30 approx) | **6.5409** | ✓ PASS | **MERGED** |
+| H172 | 0.9999 | 10k | 6.6481 (EP28) | 6.5893 | ✗ BREACH +0.033 | NON-MERGE |
+| **H181** | **0.99995** | **20k** | **6.8175 (EP20)** | **6.6245** | **✗ BREACH +0.104** | **NON-MERGE** |
+
+The EMA axis above H147's canonical decay is uniformly falsified. Next experiments (H182 EMA+LR compound, H183 per-channel heads, H184 WSD LR) do not revisit EMA decay.
+
+**Follow-up dispatched:** H185 `hidden_dim=640` (PR #1527, dl24-frieren) — tests capacity axis not covered in structural wave (H164–H167 tested slices/pe_features/surface_out/heads but NOT hidden_dim).

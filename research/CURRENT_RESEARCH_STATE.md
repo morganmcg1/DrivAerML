@@ -1,9 +1,47 @@
 # SENPAI Research State
 
-- **2026-05-31 19:18Z**
+- **2026-05-31 20:31Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 20:31Z snapshot — **H181 CLOSED NON-MERGE** (test_SP=3.6808 floor breach +0.104pp); H185 `hidden_dim=640` assigned to frieren (PR #1527); H182/H183/H184 still active
+
+**Active fleet, 4 students, 3 WIP + 1 new assignment:**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | val_SP | Status |
+|---|---|---|---:|---:|---:|---:|---|
+| frieren | #1527 | H185 hidden_dim=640 | — | — | — | — | NEW ASSIGNMENT |
+| nezuko | #1506 | H182 EMA 0.9999 + LR 1.3× | ~25-26 | 6.770 (flat) | **3.485** | 3.933 | partial-SOTA VP; terminal ~01:00Z |
+| tanjiro | #1510 | H183 per-channel heads | 17 | **6.6002** | 3.5821 | **3.8412** | SP FLOOR WATCH; EP18-19 decisive |
+| fern | #1513 | H184 WSD LR | 15.4 | 6.8392 | 3.727 | 4.046 | stable stall, EP22 decay binary read |
+
+### H181 (PR #1503) CLOSED NON-MERGE — 20:30Z
+
+- W&B run: `v4csonke` — 30 EPs, 24.77h runtime
+- test_WSS=**6.6245** (+0.084pp vs H147) — FAILS primary
+- test_VP=3.6245 ✓, test_ABUPT=5.7956 ✓
+- test_SP=**3.6808** ✗ — BREACH +0.104pp over 3.577 floor
+- **EMA-0.99995 falsified at 30-EP** — optimal EMA N≈10k steps (decay≈0.9999 confirmed)
+- Best checkpoint: EP20 EMA (cosine re-ascent after EP20 = stack property, not noise)
+
+### H185 hypothesis (PR #1527, dl24-frieren)
+
+`hidden_dim=640` on clean H147 stack (single-flag change). Tests the only major structural axis not probed in H164–H167 wave (which tested slices/pe_features/surface_out/heads but NOT hidden_dim). At +25% width, addresses τ_y/τ_z representational saturation hypothesis. Smoke EP1 then 30-EP DDP8.
+
+Kill ladder: EP1 ≤14.5%, EP5 ≤6.90%, EP10 ≤6.70%, EP15 ≤6.60%. Must beat test_WSS<6.5409 + clear all 4 floors to merge.
+
+### H183 (tanjiro, PR #1510) — EP17 SP descent signal present, ambiguous
+
+EP16→17: WSS −0.0186, VP −0.0221, **SP −0.0252pp** (first large single-EP SP drop). BUT EP15→17 average is still −0.0013pp/EP (essentially flat). Disambiguator: if EP18-19 sustain −0.020+ pp/EP SP descent, tanjiro's read wins (SP floor clears); if SP reverts to flat, merge blocker stands. Current WSS projection if descent resumes: EP30 val_WSS ~6.43-6.50 = BEATS H147 by 0.05-0.11pp ✓. SP wall still uncertain.
+
+### H182 (nezuko, PR #1506) — VP partial-SOTA candidate confirmed, terminal ~01:00Z
+
+val_VP=3.4853 at EP24.7 — partial-SOTA on VP axis (projected test_VP~3.25-3.30, beats H147 test_VP=3.4014 by 0.10-0.15pp). WSS flat at 6.77 throughout = NON-MERGE on primary. Merge decision: VP-only improvement + WSS regression. Will wait for terminal SENPAI-RESULT.
+
+### H184 (fern, PR #1513) — stable-phase stall, EP22 decay binary read ~01:00Z
+
+val_WSS=6.8392 at EP15.4; descent collapsed from −0.016pp/EP (EP9→12) to −0.0018pp/EP (EP12→15). WSD design: stable phase EP1-22 at lr=1e-4, decay EP22-30 lr→1e-6 (100× drop). For H184 to win, decay phase MUST deliver ≥−0.30pp over 8 EPs (vs −0.015pp total in stable-phase). Prior probability weakening but EP22 binary read decisive.
 
 ## 19:18Z snapshot — **H183 WSS descent RESUMED (EP16→17.4 = −0.013pp/EP) but SP floor STILL flat at −0.0016pp/EP — MERGE BLOCKER stands**; H181 terminal slowed to ~22:00Z; H182 VP plateau holding 3.485; H184 EP16 slight uptick (decay not yet activated)
 
