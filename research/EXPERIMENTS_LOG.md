@@ -1,3 +1,33 @@
+## 2026-05-31 19:25Z — PR #1517 fern H333 CLOSED: 5-arm cal stability + robust regression — clean 3-fold finding bank, NULL on gate
+
+### CLOSED — NULL on H314 strict gate (val_cal < 5.8987 AND test_cal < 5.7387)
+
+- **Branch**: fern/h333-cal-stability-robust
+- **W&B run**: `vtbry44k` (single eval run, 5 cal arms post-hoc on identical per-car sufficient stats, runtime 6.85h)
+- **Hypothesis**: Cal coefficients may be statistically fragile at val_N=34 (LOO sensitivity) and/or residual structure may be non-homoscedastic (favoring L1/Huber/IRWLS over OLS). 5-arm comparison: OLS / LOO-CV / Bootstrap(B=1000) / L1 / Huber-ψ=1.345.
+- **Results — all 5 arms collapse to identical val_cal**:
+
+  | Arm | val_cal | test_cal | Δ vs H314 gate (5.8987 / 5.7387) |
+  |---|---:|---:|---|
+  | raw | 5.9221 | 5.7678 | — |
+  | OLS | 5.8994 | 5.7388 | val +0.7bp / test +0.1bp |
+  | LOO | 5.8994 | 5.7388 | val +0.7bp / test +0.1bp |
+  | **Bootstrap** | **5.8994** | **5.7386** | val +0.7bp / **test −0.1bp BEAT** |
+  | L1 | 5.8994 | 5.7389 | val +0.7bp / test +0.2bp |
+  | Huber | 5.8994 | 5.7389 | val +0.7bp / test +0.2bp |
+
+- **Dispositive diagnostic — LOO α range / α (per channel)**: max = **0.0944%** (τ_y); all 5 channels < 0.1% — cal coefficients are statistically deterministic at val_N=34 (single-car perturbations move each α by < 1 part in 1000).
+- **L1/Huber β_VP shifts**: OLS −0.832811 → L1/Huber −0.779470 = ~6.4% relative shift (largest single coef change). But this does NOT translate to a test_cal gain — residual is approximately homoscedastic.
+- **Findings banked (3)**:
+  - ✅ **'cal-coefficients-loo-stable'**: LOO range/α < 0.1% for all 5 channels — cal is NOT fragile at val_N=34. Extends H332 α-seed-invariant to LOO subsampling.
+  - ✅ **'cal-robust-equivalent-to-OLS'**: L1/Huber β_VP shifts 6.4% but no test_cal gain — residual structure IS approximately homoscedastic. Confirms H329 WLS-OLS finding, extends to L1/Huber/IRWLS family.
+  - ✅ **'cal-bootstrap-marginal-test-gain'**: Bootstrap test_cal 5.7386 vs OLS 5.7388 = 0.2bp test gain, val_cal unchanged. Difference is below run-to-run noise floor; cannot be banked as a real improvement. Cal-bootstrap is reassurance NOT gain.
+- **Structural verdict — post-hoc calibration axis is CLOSED for diagonal-affine on H185 EP15**: 5-fold collapse confirms the OLS-fit on H312 is at the diagonal-affine MLE. Further val_cal headroom requires either: (a) improving raw val (training-time interventions H338/H339/H341 in flight) or (b) non-diagonal calibration (cross-channel coupling — H328 ridge regional already nulled this) or (c) different model architecture (out of scope).
+- **PR**: https://github.com/morganmcg1/DrivAerML/pull/1517
+- **Follow-up**: H341 (fern, PR #1525) wz-only WSS reweight — per-axis decomposition of H339 targeting bottleneck channel wz=8.62%.
+
+---
+
 ## 2026-05-31 18:55Z — PR #1521 tanjiro H337 CLOSED: 3rd EP15 seed commission — artifact production success
 
 ### CLOSED (artifact-only commissioning, not a SOTA candidate by design)

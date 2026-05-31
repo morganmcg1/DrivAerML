@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 18:55Z | Branch: `tay` | **SOTA: H314 Student-t ν=4 — MERGED 17:45Z** | Round 4k+2 | **All inference axes closed (TTA K+R, cal 5-fold null, noise-family ν-sweep). Open frontier: (a) training-time SP-floor gap H338/edward; (b) training-time WSS gap H339/frieren; (c) composition K×noise-family H336/nezuko (rebase pending); (d) model soup H307/thorfinn (α-monotone-no-cross emerging); (e) σ-axis at ν=4 H340/tanjiro (NEW — last inference-axis question).**
+**Updated**: 2026-05-31 19:26Z | Branch: `tay` | **SOTA: H314 Student-t ν=4 — MERGED 17:45Z** | Round 4k+3 | **All inference axes closed (TTA K+R, cal 6-fold null after H333 3-fold-cal-stable, noise-family ν-sweep). Open frontier: (a) training-time SP-floor gap H338/edward; (b) training-time WSS uniform reweight H339/frieren; (c) **training-time WSS wz-only reweight H341/fern (NEW — per-axis decomposition)**; (d) composition K×noise-family H336/nezuko (rebase pending); (e) model soup H307/thorfinn (α-monotone-no-cross emerging); (f) σ-axis at ν=4 H340/tanjiro.**
 
 **Partial result this loop (08:11Z)**: H307 Arm B α=0.5 (model soup of two EP15 seeds + H300 cal) → **test_cal 5.7380 BEATS gate (−0.8bp)**, val_cal 5.9017 misses by +2.3bp. Soup extracts −30.4bp on test (vs ~28bp on single-seed H312) — **mechanistic finding: weight-averaging produces more affine residual structure, so diagonal cal catches more error post-soup**. Thorfinn launched Arm C α=0.75 at 08:14Z (ETA ~14:59Z). α_τz on soup = 0.99160 vs H312 ref 0.99170 — preliminary cross-axis confirmation that α is model-perturbation-stable.
 
@@ -41,13 +41,14 @@
 | **#1520** | **nezuko** | **H336: Compose K=5 + Student-t ν=4 + 8-res + mirror + cal (K × noise-family interaction at cal-extracted regime)** | — | 🟡 in-flight 348i3z1v ETA ~23:30-00:00Z; **PR sent back 18:15Z for rebase** (H314 merge conflict on eval_tta_h252.py) — rebase after terminal | ~00:00Z+1 |
 | **#1523** | **frieren** | **H339: WSS-targeted loss reweighting cosine-tail (3-arm sweep {1.5, 2.0, 3.0} on WSS loss multiplier — targets 0.789pp WSS gap)** | — | 🆕 assigned 17:45Z (post-H314 merge) | ~24:00Z+1 (training ~9h + eval ~21h, chained multi-session) |
 | **#1519** | **askeladd** | **H335: Per-resolution K allocation under fixed H312-budget (3 arms: low-res-heavy / high-res-heavy / uniform-control)** | 5.9221 (Arm C) | 🟡 Arm C TTA in-flight ~19:30Z; **PR sent back 18:51Z for rebase** (H314 merge conflict on eval_tta_h252.py) — rebase before Arms A/B launch | ~22:00Z+ |
-| **#1517** | **fern** | **H333: Cal-coefficient stability (LOO/bootstrap) + robust regression (L1/Huber) — 5-arm post-hoc cal comparison** | — | 🆕 assigned 10:55Z (post-H319 close) | ~18:00Z |
+| **#1525** | **fern** | **H341: wz-only WSS loss reweight cosine-tail (3 arms wz × {2.0, 3.0, 5.0} — per-axis decomposition of H339 targeting bottleneck wz=8.62%)** | — | 🆕 assigned 19:25Z (post-H333 close, post-H314 merge) | ~25:00Z+1 (training ~9h + eval ~21h, chained multi-session) |
 
 **Merged this loop**:
 - **PR #1500 frieren H314** — MERGED (17:45Z). **NEW SOTA** val_cal 5.8987 / test_cal 5.7387. Student-t ν=4 beats H312 by 0.7bp/0.1bp. ν-sweep parabolic (ν=4 minimum), gain uniform across channels, α ν-invariant. Merge gate tightened.
 - **PR #1498 edward H312** — MERGED (02:30Z). **PRIOR SOTA** val_cal 5.8994 / test_cal 5.7388. Finding 'better-raw-better-cal' confirmed. Calibration near saturation for diagonal affine on single model.
 
-**Closed this loop (18:55Z)**:
+**Closed this loop (19:26Z)**:
+- **PR #1517 fern H333** — CLOSED (19:25Z). **3-fold cal-stability verification, NULL on gate**: All 5 cal arms (OLS/LOO/Bootstrap/L1/Huber) tie at val_cal=5.8994 (fails H314 val gate by 0.7bp). Bootstrap test_cal 5.7386 marginally beats H314 test gate by 0.1bp but cannot rescue the val miss. Findings banked: `cal-coefficients-loo-stable` (max LOO range/α=0.0944%), `cal-robust-equivalent-to-OLS` (L1/Huber β_VP shifts 6.4% but no test gain — residual is homoscedastic, confirms H329), `cal-bootstrap-marginal-test-gain` (Bootstrap −0.2bp test vs OLS, below noise floor). Structural verdict: **post-hoc calibration axis is closed for diagonal-affine on H185 EP15**. → H341 (PR #1525) wz-only WSS reweight assigned to fern.
 - **PR #1521 tanjiro H337** — CLOSED (18:55Z). **Commissioning success**: seed-3 EP15 EMA artifact uploaded (W&B `yteak7pd`, mirror val=6.0097% well within ≤6.10% gate, no divergence; EP16 ema also saved). 3-way (s1, s2, s3) model-soup α-search now unblocked. Test_abupt at EP16 train-loop=5.8549% (raw single-seed without TTA, as expected). **CLOSED not MERGED** — H337 was structured as artifact-production, not SOTA candidate. → H340 (PR #1524) σ-sweep at ν=4 assigned to tanjiro.
 
 **Closed this loop (03:00Z)**:
