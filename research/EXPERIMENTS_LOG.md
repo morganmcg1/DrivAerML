@@ -4914,3 +4914,61 @@ Wave-4 H182 (EMA 0.9999 + LR 1.3×) dispatched to nezuko (PR #1506).
 
 **Follow-up dispatched:** H183 Per-Channel Decoder Heads (PR #1510, tanjiro) — addresses the SP-WSS capacity competition at the decoder level, which H172's SP regression pointed toward.
 
+
+---
+
+## 2026-05-31 04:15Z — PR #1493: H178 vol_p floor 0.05 + 16-EP slow cosine — NON-MERGE terminal
+
+- **dl24-fern/h178-vol-p-floor-005-slow-cosine-16ep** (run `csk7pkf1`, 16-EP DDP8, 11.7h)
+- **Hypothesis:** GradNorm α=0.5 + vol_p floor 0.05 over 16-EP slow cosine (vs H173's 8-EP) recovers VP head from floor-clamped starvation. The "EP9-EP14 recovery window" should materialize as w_vol_p ascends from the floor mid-cosine.
+
+### Test metrics (best EMA EP13 checkpoint)
+
+| Metric | H178 | H147 SOTA | Δ | vs floor | Verdict |
+|---|---:|---:|---:|---|---|
+| test_WSS | 6.6237 | 6.5409 | **+0.083pp** | — | MISS SOTA |
+| test_VP | 3.9237 | 3.4014 | +0.522pp | **+0.281pp BREACH** | **BREACH** |
+| test_SP | 3.6968 | 3.5634 | +0.133pp | **+0.120pp BREACH** | **BREACH** |
+| test_ABUPT | 5.8672 | 5.6648 | +0.202pp | **+0.023pp BREACH** | **BREACH** |
+
+### Val trajectory per EP (selected highlights)
+
+| EP | val_WSS | val_VP | val_SP | val_ABU | Δ vs H147 (WSS) |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 7.3013 | 5.8444 | 4.3263 | 6.9077 | +0.042 |
+| 5 | 6.9099 | 4.27 (interp) | 4.15 | 6.27 | +0.16 |
+| 8 | 6.8473 | 4.1338 | 4.0771 | 6.2036 | +0.20 |
+| 10 | 6.8281 | 4.0783 | 4.0673 | 6.1767 | +0.19 |
+| 13 (best) | **6.8296** | **4.0357** | **4.0672** | **6.1684** | — |
+| 16 (term) | 6.8366 | 4.0357 | 4.0803 | 6.1752 | — |
+
+### GradNorm weight trajectory (mechanism finding)
+
+| step | w_vol_p | clamp | w_cp | w_τ_x | w_τ_y | w_τ_z |
+|---:|---:|---:|---:|---:|---:|---:|
+| EP1 | 0.0908 | 0 | 1.0128 | 1.306 | 1.271 | 1.320 |
+| EP8 | 0.0502 | 0 | 0.8926 | 1.477 | 1.144 | 1.436 |
+| EP16 | 0.0509 | 0 | 0.9055 | 1.579 | 1.173 | **1.291** |
+
+### Analysis
+
+**Timing-recovery hypothesis FALSIFIED.** w_vol_p plateaued at the floor (0.050–0.051) from EP8 through EP16 with ZERO clamp events — the weight settled just above the floor but never recovered. Val_VP dropped only −0.06pp across EP8→EP16 (4.1338 → 4.0357), a flat-line not a recovery curve.
+
+**Wave-3 α/floor closure with H173/H176/H180:**
+
+| arm | α | floor | EPs | test_WSS | test_VP | verdict |
+|---|---:|---:|---:|---:|---:|---|
+| H173 | 0.5 | 0.05 | 8 | 6.6081 | 3.7793 | NON-MERGE (VP breach +0.137) |
+| H176 | 0.5 | 0.10 | 8 | ~6.65 | ~3.75 | TBD |
+| **H178** | **0.5** | **0.05** | **16** | **6.6237** | **3.9237** | **NON-MERGE (4-floor)** |
+| H180 | 1.0 | 0.05 | 8 | (in flight) | (in flight) | α=1.0 candidate |
+
+**At fixed (α=0.5, floor=0.05), doubling cosine length 8→16 EPs WORSENED test_VP (3.78 → 3.92) and barely moved test_WSS (6.61 → 6.62).** The 16-EP slow cosine compounds VP starvation rather than relieving it. Cosine duration is downstream of (α, floor) for GradNorm equilibria — it cannot rescue a floor-clamped weight equilibrium.
+
+**Mechanism finding REVISED vs H173:** The freed weight budget did NOT go to w_cp (the H173 PR claim) — w_cp DESCENDED from EP1 to EP6 then stayed below 0.92. It went almost entirely to **w_τ_x** (1.306 → 1.579, +0.27 over the run). The SP-protection narrative for floor=0.05 is rewritten: the mechanism is τ_x re-weighting, not cp boost. SP protection via floor=0.05 is incidental.
+
+**τ_z under-weighting confirmed:** w_τ_z dropped from 1.320 (EP1) → 1.291 (EP16), the only axis that lost weight. test_WSS_z=8.67% confirms τ_z is the worst per-axis WSS — the next mechanism lever (`--gradnorm-min-w-tau-z` floor) is identified for future work, but H183 (per-channel heads) and H184 (WSD LR) target the same surface-decoder bottleneck via different routes.
+
+**Verdict:** FALSIFIED on all 4 floors. Closes the α=0.5 / floor=0.05 / cosine duration grid.
+
+**Follow-up dispatched:** H184 WSD LR Schedule (H-W5-1, PR #1513, fern) — replace cosine with Warmup-Stable-Decay to reorder the LR budget.

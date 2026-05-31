@@ -1,9 +1,49 @@
 # SENPAI Research State
 
-- **2026-05-31 03:25Z**
+- **2026-05-31 04:15Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 04:15Z snapshot — H178 CLOSED NON-MERGE (test 4-floor breach); H184 WSD dispatched to fern; H182 EP5 lead REVERSED; H181 EP8 borderline EP10 gate
+
+**H178 CLOSED (PR #1493, fern, run `csk7pkf1`):** terminal SENPAI-RESULT landed 04:02Z. Test metrics (best-EMA EP13):
+- test_WSS=**6.6237** vs H147=6.5409 → **+0.083pp BEHIND** (MISS SOTA)
+- test_VP=**3.9237** → **BREACH +0.281pp** over 3.643 floor
+- test_SP=**3.6968** → **BREACH +0.120pp** over 3.577 floor
+- test_ABUPT=**5.8672** → **BREACH +0.023pp** over 5.844 floor
+
+**4-of-4 floor failure.** Wave-3 α/floor closure: 16-EP slow cosine WORSENS test_VP vs 8-EP equivalent (H173 3.78 → H178 3.92). Cosine duration is downstream of (α, floor) for GradNorm equilibria. Fern mechanism finding: w_τ_x absorbs the freed budget (NOT w_cp as H173 read suggested); the SP-protection narrative for floor=0.05 revised. w_τ_z dropped over the run (1.32 → 1.29) — the only axis that lost weight — and per-axis test_WSS_z=8.67% confirms τ_z under-weighting is the next mechanism lever.
+
+**H184 dispatched to fern (PR #1513):** WSD LR Schedule (H-W5-1) — replace H147's full 30-EP cosine with Warmup(EP1) + Stable(EP2-EP22 at peak lr=1e-4) + Decay(EP23-EP30 cosine to lr_min). Hypothesis: more steps at peak LR explore loss surface more aggressively, then concentrated decay tail locks in deeper minimum. Lit-aligned (Hu et al. 2024 MiniCPM, Hägele et al. 2024). Code change: extend `build_lr_scheduler` in `trainer_runtime.py` to support `--lr-schedule wsd` with 3-stage SequentialLR.
+
+**H182 (nezuko, PR #1506) — EP5 boundary: LEAD REVERSED:**
+
+| metric | H182 EP5 (lr=1.3e-4) | H172 EP5 (lr=1e-4) | Δ |
+|---|---:|---:|---:|
+| val_WSS | **7.4043** | 7.2734 | **+0.131** |
+| val_VP | 4.6284 | 4.8146 | **−0.186** |
+| val_SP | 4.6367 | 4.3169 | +0.320 |
+| val_ABU | 6.7385 | 6.6743 | +0.064 |
+
+**Lead reversed:** EP4 was −0.252pp ahead; EP5 → +0.131pp behind H172. Kill gate ≤7.42 PASSES by 0.016pp marginally. Channel-asymmetric: LR 1.3× helps VP (−0.19pp), hurts WSS/SP (+0.13/+0.32pp). Continue to EP10 gate ≤6.78.
+
+**H181 (frieren, PR #1503) — EP8 landed, on borderline EP10 gate:**
+
+| EP | step | val_WSS | Δ vs H172 | Δ vs H147 |
+|---:|---:|---:|---:|---:|
+| 5 | 54,879 | 19.52 | +12.25 | +12.77 |
+| 6 | 65,855 | 13.68 | +6.71 | — |
+| 7 | 76,831 | 10.60 | +3.73 | — |
+| 8 | 87,807 | 8.901 | +2.10 | +2.25 |
+
+EMA-0.99995 init_mass at EP8=1.24%, EP10=0.41% (still mid-wash). Descent decelerating: −5.8 → −3.1 → −1.7pp/EP. EP10 linear extrapolation ~7.4 → **PASS by 0.1pp at critical gate ≤7.5**. If EP10 > 7.5, KILL. H181 trajectory is "5 EPs lagged" vs H172 in EMA-equivalent terms — best case it matches H172 at terminal (not beats).
+
+**Wave-5 active map:**
+- **dl24-tanjiro:** H183 Per-Channel Decoder Heads (PR #1510) — dispatched 03:20Z, status:wip
+- **dl24-fern:** H184 WSD LR Schedule (PR #1513) — dispatched 04:13Z, status:wip
+- **dl24-nezuko:** H182 LR 1.3× compound (PR #1506) — EP5 lead reversed, EP10 gate next
+- **dl24-frieren:** H181 EMA-99995 (PR #1503) — EP8 done, EP10 critical gate next
 
 ## 03:25Z snapshot — H172 CLOSED NON-MERGE; H183 dispatched to tanjiro; H178 terminal ~03:37Z; H182 EP4 lead sustained; H181 EP7 washout continuing
 
