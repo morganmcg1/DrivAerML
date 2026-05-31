@@ -1,9 +1,53 @@
 # SENPAI Research State
 
-- **2026-05-31 04:15Z**
+- **2026-05-31 06:30Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 06:30Z snapshot — H181 EP10 PASSED critical gate; H182 EP8 gap NARROWING (+0.083 vs H172); H183 EP2 slight LEAD vs H147 (per-channel heads alive); H184 smoke pre-EP1
+
+**Active wave-5 fleet, all 4 students WIP:**
+
+| Student | PR | Hyp | Status @ 06:30Z | Latest val_WSS | Δ vs H172 | Δ vs H147 | Next gate |
+|---|---|---|---|---:|---:|---:|---|
+| frieren | #1503 | H181 EMA-99995 | EP11 step 120,735 | 7.2399 | +0.429 | — | natural terminal EP30 |
+| nezuko | #1506 | H182 LR 1.3× | EP8 step 87,807 | **6.8905** | **+0.083** | **+0.231** | **EP10 ≤6.78 @ step 109,759 ~07:15Z** |
+| tanjiro | #1510 | H183 per-channel heads | EP2 step 21,951 | **7.2222** | **−0.078** | **−0.038** | EP3 ≤7.00 ~07:00Z |
+| fern | #1513 | H184 WSD LR | smoke step 8,609 (EP0.78) | mid-warmup | — | — | EP1 boundary ~06:40Z |
+
+**H181 EP10 PASS (frieren, PR #1503):**
+
+| EP | step | val_WSS | val_VP | val_SP | val_ABU | Δ vs H172 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 87,807 | 8.9007 | 6.5517 | 5.4795 | 8.2701 | +2.093 |
+| 9 | 98,783 | 7.8525 | 5.1557 | 4.8763 | 7.2019 | +1.037 |
+| **10** | 109,759 | **7.3745** | 4.4093 | 4.5395 | 6.6699 | **+0.594** |
+| 11 | 120,735 | 7.2399 | 4.2698 | 4.3739 | 6.5242 | +0.429 |
+
+EMA-99995 init_mass washout: EP10=0.41%, EP11=0.24% (now functionally washed). Descent decelerating: −1.05 → −0.48 → −0.13pp/EP (EP9→11). Trajectory "5 EPs lagged" vs H172 in EMA-equivalent terms. H172 EP11→30 delta was only −0.16pp — H181 needs at least −0.6pp more to match H172 terminal; **not achievable** at current decel. H147 SOTA structurally unreachable in 30-EP envelope. Continue to natural terminal for clean test metrics for the lit comparison; **NON-MERGE sealed at terminal**.
+
+**H182 EP6-EP8 gap NARROWING (nezuko, PR #1506):**
+
+| EP | step | val_WSS | val_VP | val_SP | val_ABU | lr | Δ vs H172 | Δ vs H147 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 54,879 | 7.4043 | 4.6284 | 4.6367 | 6.7385 | 1.24e-4 | +0.131 | +0.654 |
+| 6 | 65,855 | 7.1135 | 4.0192 | 4.3644 | 6.3671 | 1.21e-4 | +0.142 | +0.404 |
+| 7 | 76,831 | 6.9771 | 3.8042 | 4.1861 | 6.2034 | 1.18e-4 | +0.098 | +0.297 |
+| 8 | 87,807 | **6.8905** | **3.7134** | 4.0518 | 6.1071 | 1.13e-4 | **+0.083** | **+0.231** |
+
+EP5 lead-reversal **NOT terminal** — H182 catching back up. Channel-asymmetric mechanism confirmed: VP improving 4.63→3.71 in 3 EPs (−0.92pp), faster than H172's VP track. WSS lagging H172 by only +0.083pp at EP8. **EP10 critical gate ≤6.78 at step 109,759 ~07:15Z:** linear extrap −0.11pp/EP gives EP10 ≈ 6.67 (PASS) but conservative ≈ 6.83 (FAIL). **VP floor watch:** EP8 = 3.7134, still +0.07pp above 3.643 floor — floor breach risk if VP slows.
+
+**H183 EP1-EP2 mechanism alive (tanjiro, PR #1510):**
+
+| EP | step | val_WSS | val_VP | val_SP | val_ABU | Δ vs H147 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10,975 | 12.9728 | 14.0018 | 8.7417 | 13.0824 | +0.153 |
+| **2** | 21,951 | **7.2222** | 4.9462 | 4.1772 | 6.6413 | **−0.038** |
+
+Per-channel decoder heads initialized cleanly. EP2 SLIGHT LEAD vs H147 (−0.04pp) — meaningful for structural perturbation at this early stage. Tanjiro skipped separate smoke; direct-to-main reasonable (structural change, not numerical instability concern). Mechanism: independent per-channel heads decouple cp (well-fit) and τ_z (lagging) optimization. Watch EP3 ≤7.00 (~07:00Z) and EP5 ≤6.78 (~08:30Z) gates. If lead holds through EP5, strong SOTA candidate.
+
+**H184 WSD smoke pre-EP1 (fern, PR #1513):** Smoke `ozxi8j68` at step 8,609 / EP0.78 mid-warmup. EP1 boundary at step 10,975 ~06:40Z. Schedule-shape verification primary: confirm lr peaks at 1e-4 at EP1, holds flat through EP2-EP3 (WSD stable phase). Will green-light main 30-EP if smoke EP1-3 track H147 ±0.3pp + lr-flat post-warmup.
 
 ## 04:15Z snapshot — H178 CLOSED NON-MERGE (test 4-floor breach); H184 WSD dispatched to fern; H182 EP5 lead REVERSED; H181 EP8 borderline EP10 gate
 
