@@ -1,3 +1,25 @@
+## 2026-05-31 04:15Z — PR #1499 askeladd H313 CLOSED: regional 4z/6z affine calibration OVERFITS
+
+### Finding 'regional-cal-overfits-val'
+
+- **Branch**: askeladd/h313-regional-4z-6z
+- **W&B run**: iya68eq8 (val + 4z + 6z test arms)
+- **Hypothesis**: Per-zone (α_z, β_z) regional calibration captures spatial heterogeneity in surface bias (especially WSS_z which has largest H300 α<1), beating the global affine.
+- **Result**:
+  | Metric | Raw | H300 global | H313 4z | H313 6z | Δ vs H300 |
+  |---|---:|---:|---:|---:|---|
+  | val_abupt_cal | 5.9221 | 5.8994 | **5.8947 ✓** | **5.8938 ✓** | passes gate |
+  | test_abupt_cal | 5.7678 | 5.7388 | 5.7409 ✗ | 5.7410 ✗ | **+2.0 / +2.2bp** fails |
+  | test_VP | 3.3763 | 3.3743 | 3.3743 | 3.3743 | 0 |
+  | test_WSS | 6.6728 | 6.6391 | 6.6410 | 6.6412 | +1.9/+2.1bp |
+
+  **Textbook overfitting**: 4z = 40 params, 6z = 60 params, both improve val OLS objective (strictly ≤ global fit MSE) but regress test by 2bp.
+- **Per-zone α range**: 0.985–1.005 — small but **directionally non-trivial** (rear zone α>1; everywhere else α<1). The split is real signal but too noisy to generalize through val→test transfer.
+- **Why it fails**: At H300/H312 operating point, per-point N is effectively infinite (~50M pts per zone), but generalization is bottlenecked by **the 34 independent val cars**. Param scaling above ~10-15 effective DoF saturates and overfits.
+- **Successor**: H328 assigned to askeladd (PR #1511) — ridge-regularized regional cal with λ-sweep ∈ {0, 0.01, 0.1, 1.0, 10.0, 100.0, ∞}. At λ=0 reproduces H313 (overfits); at λ=∞ reproduces H300 (loses spatial info). Optimum λ likely lies in middle — a small shrinkage that preserves the rear/elsewhere asymmetry while suppressing val noise.
+
+---
+
 ## 2026-05-31 03:00Z — PR #1497 fern H306 CLOSED: per-point confidence-weighted TTA aggregation NULL
 
 ### Finding 'conf-weighted-T1-equals-uniform-avg'

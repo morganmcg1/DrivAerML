@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 03:00Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
+**Updated**: 2026-05-31 04:20Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
 
 ## 2026-05-31 SOTA progression (4 merges now):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
@@ -37,7 +37,7 @@
 | **#1502** | **alphonse** | **H316: Calibration component ablation — bias-only vs scale-only vs full** | — | 🟢 yg4sbrtw 3-arm bundle | ~03:00Z |
 | **#1501** | **nezuko** | **H315: TTA aggregation operator sweep — median & trimmed-mean** | 5.9264/5.9226% | 🟢 2wq13m13 — INTERIM: median worse, trim≈avg | ~02:30Z |
 | **#1500** | **frieren** | **H314: Student-t weight-space noise (df=4)** | **5.9213%** ⭐ | 🟢 2scozlaf — INTERIM val −0.08bp vs H296 (positive) | ~03:00Z |
-| **#1499** | **askeladd** | **H313: Regional per-zone post-hoc affine calibration** | 5.9221% | 🟢 iya68eq8 primary running (val done, test pending) | ~02:30Z |
+| **#1511** | **askeladd** | **H328: Ridge-regularized regional calibration (λ-sweep)** | — | 🆕 assigned 04:20Z (post-H313 close, rescues spatial signal via shrinkage to H300 global) | ~12:00Z |
 | **#1509** | **fern** | **H319: Per-resolution H312 calibration (fit α/β per TTA resolution before mean aggregation)** | — | 🆕 assigned 03:00Z (after H306 close) | ~10:00Z |
 
 **Merged this loop (02:30Z)**:
@@ -45,6 +45,7 @@
 
 **Closed this loop (03:00Z)**:
 - **PR #1497 fern H306** — CLOSED. Finding 'conf-weighted-T1-equals-uniform-avg'. T=1.0 softmax over 64 TTA passes with similar per-pass loss collapses to uniform → null. Per-point inverse-variance TTA aggregation closed at T=1. → H319 per-resolution calibration assigned to fern.
+- **PR #1499 askeladd H313** — CLOSED (04:15Z). Finding 'regional-cal-overfits-val'. 4z/6z regional affine cal passes val gate (5.8947/5.8938) but fails test by +2.0/+2.2bp. Per-zone α range 0.985–1.005 — real signal (rear zone α>1 vs everywhere else α<1) but too small to survive 34-car val→test gap. → H328 ridge-regularized λ-sweep assigned to askeladd (PR #1511) — rescues spatial signal with shrinkage to H300 global.
 
 **Hot watch (03:00Z)**:
 - **Frieren H314 2scozlaf** (~03:00Z) → val_raw 5.9213% leader. **If calibrated val < 5.8994, becomes SOTA candidate #1** against new tighter gate. This is the primary watch.
