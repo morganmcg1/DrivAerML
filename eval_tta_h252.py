@@ -95,6 +95,14 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H316: ablate which calibration DOF is doing the work.
+    #   "full"        — fit (alpha, beta) jointly via OLS (H300 default).
+    #   "bias_only"   — force alpha=1, fit beta = mu_t - mu_p (intercept shift).
+    #   "scale_only"  — force beta=0, fit alpha = sum(p*t)/sum(p^2) (OLS through origin).
+    # Comma-separated list lets one TTA pass produce all three arms; all arms
+    # share the same raw predictions and only differ in the (alpha, beta) fit
+    # over the sufficient stats already accumulated in CalibrationStats.
+    test_time_calibration_mode: str = "full"
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -536,12 +544,15 @@ def merge_calibration_stats(parts: Iterable[CalibrationStats]) -> CalibrationSta
 
 def fit_affine_per_channel(
     global_stats: torch.Tensor,
+    mode: str = "full",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """OLS alpha, beta per channel from the global sufficient stats.
 
-    alpha = cov(p, t) / var(p);  beta = mu_t - alpha * mu_p, all per channel.
-    Falls back to identity (alpha=1, beta=0) on any degenerate channel where
-    var(p) is non-positive (constant predictions).
+    mode="full" (H300): alpha = cov(p, t) / var(p); beta = mu_t - alpha * mu_p.
+    mode="bias_only" (H316 A): alpha forced to 1; beta = mu_t - mu_p (intercept shift).
+    mode="scale_only" (H316 B): beta forced to 0; alpha = sum(p*t) / sum(p^2)
+        (OLS through origin).
+    Falls back to identity (alpha=1, beta=0) on any degenerate channel.
     """
     N = global_stats[:, 0]
     sum_p = global_stats[:, 1]
@@ -551,6 +562,25 @@ def fit_affine_per_channel(
     N_safe = N.clamp(min=1.0)
     mu_p = sum_p / N_safe
     mu_t = sum_t / N_safe
+
+    if mode == "bias_only":
+        alpha = torch.ones_like(mu_p)
+        beta = mu_t - mu_p
+        return alpha, beta
+
+    if mode == "scale_only":
+        degenerate = sum_pp <= 1e-12
+        alpha_raw = sum_pt / sum_pp.clamp(min=1e-12)
+        alpha = torch.where(degenerate, torch.ones_like(alpha_raw), alpha_raw)
+        beta = torch.zeros_like(alpha)
+        return alpha, beta
+
+    if mode != "full":
+        raise ValueError(
+            f"Unknown test_time_calibration_mode={mode!r}; "
+            "expected 'full', 'bias_only', or 'scale_only'"
+        )
+
     cov_pt = sum_pt - N * mu_p * mu_t
     var_p = sum_pp - N * mu_p * mu_p
     degenerate = var_p <= 1e-12
@@ -1054,8 +1084,21 @@ def main(argv: Iterable[str] | None = None) -> None:
     restore_clean_params(eval_module, clean)
 
     # H300: per-channel affine calibration applied on val, transferred to test.
-    cal_metrics_by_split_mode: dict[str, dict[str, dict[str, float]]] = {}
+    # H316: support multiple calibration modes from one TTA cache. The sufficient
+    # stats in CalibrationStats already cover all three fit modes (full, bias_only,
+    # scale_only); each mode is a closed-form fit + apply that costs ~ms per arm.
+    cal_metrics_by_split_mode: dict[str, dict[str, dict[str, dict[str, float]]]] = {}
     if cfg.test_time_calibration and state.is_main:
+        cal_modes_list = [m.strip() for m in cfg.test_time_calibration_mode.split(",") if m.strip()]
+        if not cal_modes_list:
+            cal_modes_list = ["full"]
+        # Track the "best" (lowest) calibrated val/test abupt across modes for the
+        # paper-facing SENPAI summary keys. "full" wins ties (matches H300 SOTA).
+        best_val_cal = float("inf")
+        best_test_cal = float("inf")
+        best_mode_val: str | None = None
+        best_mode_test: str | None = None
+
         for mode in modes:
             val_cal = cal_summary.get("val_surface", {}).get(mode)
             test_cal = cal_summary.get("test_surface", {}).get(mode)
@@ -1066,76 +1109,121 @@ def main(argv: Iterable[str] | None = None) -> None:
                     flush=True,
                 )
                 continue
-            alpha_surf, beta_surf = fit_affine_per_channel(val_cal.surf_global)
-            alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
 
             channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
-            print(f"\n=== H300 calibration (fit on val, mode={mode}) ===", flush=True)
-            for c, name in enumerate(channel_names):
+            for cal_mode in cal_modes_list:
+                alpha_surf, beta_surf = fit_affine_per_channel(
+                    val_cal.surf_global, mode=cal_mode
+                )
+                alpha_vol, beta_vol = fit_affine_per_channel(
+                    val_cal.vol_global, mode=cal_mode
+                )
+
                 print(
-                    f"  surface[{name:6s}]  alpha={alpha_surf[c].item():+.6f} "
-                    f"beta={beta_surf[c].item():+.6f}",
+                    f"\n=== H316 calibration (fit on val, eval_mode={mode}, "
+                    f"cal_mode={cal_mode}) ===",
                     flush=True,
                 )
-            print(
-                f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
-                f"beta={beta_vol[0].item():+.6f}",
-                flush=True,
-            )
+                for c, name in enumerate(channel_names):
+                    print(
+                        f"  surface[{name:6s}]  alpha={alpha_surf[c].item():+.6f} "
+                        f"beta={beta_surf[c].item():+.6f}",
+                        flush=True,
+                    )
+                print(
+                    f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
+                    f"beta={beta_vol[0].item():+.6f}",
+                    flush=True,
+                )
 
-            val_cal_metrics = compute_calibrated_metrics(
-                val_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
-            )
-            test_cal_metrics = compute_calibrated_metrics(
-                test_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
-            )
-            cal_metrics_by_split_mode.setdefault("val_surface", {})[mode] = val_cal_metrics
-            cal_metrics_by_split_mode.setdefault("test_surface", {})[mode] = test_cal_metrics
+                val_cal_metrics = compute_calibrated_metrics(
+                    val_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
+                )
+                test_cal_metrics = compute_calibrated_metrics(
+                    test_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
+                )
+                cal_metrics_by_split_mode.setdefault("val_surface", {}).setdefault(
+                    mode, {}
+                )[cal_mode] = val_cal_metrics
+                cal_metrics_by_split_mode.setdefault("test_surface", {}).setdefault(
+                    mode, {}
+                )[cal_mode] = test_cal_metrics
 
-            print(
-                f"  val  (raw -> cal)  abupt {summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
-                f"-> {val_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
-                flush=True,
-            )
-            print(
-                f"  test (raw -> cal)  abupt {summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
-                f"-> {test_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
-                flush=True,
-            )
+                print(
+                    f"  val  (raw -> cal)  abupt {summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                    f"-> {val_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                    flush=True,
+                )
+                print(
+                    f"  test (raw -> cal)  abupt {summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                    f"-> {test_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                    flush=True,
+                )
+
+                val_cal_abupt = float(val_cal_metrics["abupt_axis_mean_rel_l2_pct"])
+                test_cal_abupt = float(test_cal_metrics["abupt_axis_mean_rel_l2_pct"])
+                if val_cal_abupt < best_val_cal:
+                    best_val_cal = val_cal_abupt
+                    best_mode_val = cal_mode
+                if test_cal_abupt < best_test_cal:
+                    best_test_cal = test_cal_abupt
+                    best_mode_test = cal_mode
+
+                if run is not None:
+                    # Log alpha/beta to W&B summary so they appear on the run page.
+                    for c, name in enumerate(channel_names):
+                        run.summary[f"calibration/{mode}/{cal_mode}/alpha_{name}"] = float(
+                            alpha_surf[c].item()
+                        )
+                        run.summary[f"calibration/{mode}/{cal_mode}/beta_{name}"] = float(
+                            beta_surf[c].item()
+                        )
+                    run.summary[
+                        f"calibration/{mode}/{cal_mode}/alpha_volume_pressure"
+                    ] = float(alpha_vol[0].item())
+                    run.summary[
+                        f"calibration/{mode}/{cal_mode}/beta_volume_pressure"
+                    ] = float(beta_vol[0].item())
+
+                    # Log calibrated primary metrics to W&B history (and as
+                    # split-level summary keys for downstream parsing).
+                    val_log = {
+                        f"full_val_primary_calibrated/{mode}/{cal_mode}/{k}": v
+                        for k, v in val_cal_metrics.items()
+                    }
+                    test_log = {
+                        f"test_primary_calibrated/{mode}/{cal_mode}/{k}": v
+                        for k, v in test_cal_metrics.items()
+                    }
+                    wandb.log({**val_log, **test_log})
+
+                    # Per-cal_mode paper-facing scalars (H316 ablation arms).
+                    run.summary[f"val_abupt_h316_{cal_mode}_calibrated"] = val_cal_abupt
+                    run.summary[f"test_abupt_h316_{cal_mode}_calibrated"] = test_cal_abupt
 
             if run is not None:
-                # Log alpha/beta to W&B summary so they appear on the run page.
-                for c, name in enumerate(channel_names):
-                    run.summary[f"calibration/{mode}/alpha_{name}"] = float(alpha_surf[c].item())
-                    run.summary[f"calibration/{mode}/beta_{name}"] = float(beta_surf[c].item())
-                run.summary[f"calibration/{mode}/alpha_volume_pressure"] = float(alpha_vol[0].item())
-                run.summary[f"calibration/{mode}/beta_volume_pressure"] = float(beta_vol[0].item())
-
-                # Log calibrated primary metrics to W&B history (and as
-                # split-level summary keys for downstream parsing).
-                val_log = {
-                    f"full_val_primary_calibrated/{mode}/{k}": v
-                    for k, v in val_cal_metrics.items()
-                }
-                test_log = {
-                    f"test_primary_calibrated/{mode}/{k}": v
-                    for k, v in test_cal_metrics.items()
-                }
-                wandb.log({**val_log, **test_log})
-
-                # Single-line paper-facing primary metrics (no mode suffix).
-                run.summary["val_abupt_h300_calibrated"] = float(
-                    val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
-                )
-                run.summary["test_abupt_h300_calibrated"] = float(
-                    test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
-                )
+                # Single-line paper-facing primary metrics — "full" mode if present
+                # (matches H300 SOTA semantics); else the first listed mode.
+                ref_mode = "full" if "full" in cal_modes_list else cal_modes_list[0]
+                ref_val = cal_metrics_by_split_mode["val_surface"][mode][ref_mode][
+                    "abupt_axis_mean_rel_l2_pct"
+                ]
+                ref_test = cal_metrics_by_split_mode["test_surface"][mode][ref_mode][
+                    "abupt_axis_mean_rel_l2_pct"
+                ]
+                run.summary["val_abupt_h300_calibrated"] = float(ref_val)
+                run.summary["test_abupt_h300_calibrated"] = float(ref_test)
                 run.summary["val_abupt_h300_raw"] = float(
                     summary["val_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
                 run.summary["test_abupt_h300_raw"] = float(
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
+                run.summary["calibration/modes"] = ",".join(cal_modes_list)
+                run.summary["calibration/best_mode_val"] = best_mode_val or "none"
+                run.summary["calibration/best_mode_test"] = best_mode_test or "none"
+                run.summary["val_abupt_h316_best_calibrated"] = best_val_cal
+                run.summary["test_abupt_h316_best_calibrated"] = best_test_cal
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
@@ -1158,15 +1246,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"{modes_dict[m][k]:>22.4f}" for m in mode_keys
                 )
                 print(row)
-            cal_modes = cal_metrics_by_split_mode.get(split, {})
-            if cal_modes:
-                print(f"  --- calibrated (alpha,beta fit on val) ---")
-                for k in keys_to_show:
-                    row = f"  {k:<36s} " + " ".join(
-                        f"{cal_modes[m][k]:>22.4f}" if m in cal_modes else f"{'n/a':>22s}"
-                        for m in mode_keys
-                    )
-                    print(row)
+            cal_modes_dict = cal_metrics_by_split_mode.get(split, {})
+            if cal_modes_dict:
+                # cal_modes_dict: {mode: {cal_mode: metrics_dict}}
+                # Print one calibrated block per cal_mode listed.
+                all_cal_modes: list[str] = []
+                for m_dict in cal_modes_dict.values():
+                    for cm in m_dict.keys():
+                        if cm not in all_cal_modes:
+                            all_cal_modes.append(cm)
+                for cm in all_cal_modes:
+                    print(f"  --- calibrated cal_mode={cm} (alpha,beta fit on val) ---")
+                    for k in keys_to_show:
+                        row = f"  {k:<36s} " + " ".join(
+                            f"{cal_modes_dict[m][cm][k]:>22.4f}"
+                            if m in cal_modes_dict and cm in cal_modes_dict[m]
+                            else f"{'n/a':>22s}"
+                            for m in mode_keys
+                        )
+                        print(row)
 
         if run is not None:
             for split, modes_dict in summary.items():
@@ -1177,12 +1275,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                         except Exception:
                             pass
             for split, modes_dict in cal_metrics_by_split_mode.items():
-                for mode, metrics in modes_dict.items():
-                    for k, v in metrics.items():
-                        try:
-                            run.summary[f"{split}_calibrated/{mode}/{k}"] = float(v)
-                        except Exception:
-                            pass
+                for mode, cm_dict in modes_dict.items():
+                    for cm, metrics in cm_dict.items():
+                        for k, v in metrics.items():
+                            try:
+                                run.summary[
+                                    f"{split}_calibrated/{mode}/{cm}/{k}"
+                                ] = float(v)
+                            except Exception:
+                                pass
             run.finish()
 
     cleanup_distributed(state)
