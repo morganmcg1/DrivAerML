@@ -1,3 +1,53 @@
+## 2026-05-31 12:00Z — PR #1511 askeladd H328 CLOSED: ridge-regularized regional calibration — REGIONAL CAL IRRECOVERABLE AT ANY λ
+
+### Finding 'regional-cal-irrecoverable' (+ sub-finding 'cal-val-test-disagreement-on-shrinkage')
+
+- **Branch**: askeladd/h328-ridge-regional-calibration
+- **W&B run**: vfv48n2q (primary, K=4 + 8-res + mirror + 6-zone ridge cal × 12-arm λ sweep)
+- **Hypothesis**: H313 found a real per-zone α split (rear α>1, others α<1) but failed test (+2.0/+2.2bp). Ridge regularization should interpolate between H313 (λ=0, overfit) and H300 global (λ=∞), and find an interior λ where both H312 gates pass — converting H313's val signal into a generalizing predictor.
+- **Result** (vs H312 SOTA gates 5.8994 / 5.7388):
+
+  | Arm | val_abupt | test_abupt | Verdict |
+  |---|---:|---:|---|
+  | H313 (λ=0) | 5.8938 | 5.7410 | val ✓, test ✗ (+2.2bp) |
+  | λ ∈ [1e-2, 1e+04] | 5.8938 | 5.7410 | identical to H313 (shrinkage strength negligible) |
+  | **λ=1e+05 (best val)** | **5.8938** | 5.7409 | val ✓, test still +2.1bp ✗ |
+  | λ=1e+06 | 5.8938 | 5.7403 | val ✓, test +1.5bp ✗ |
+  | λ=1e+07 | 5.8943 | 5.7393 | both fail by tiny margins |
+  | **λ=∞ (= H300 global)** | 5.8994 | **5.7388** | val ≡ gate (not strict), test ≡ gate (not strict) |
+
+- **The test_abupt curve is monotonically decreasing in λ with the minimum at the λ=∞ boundary** — there is no interior λ where test improves over H300 global. The "finer log-scale sweep around interior optimum" branch does not apply because the optimum IS the boundary.
+- **Per-zone α coefficients at λ=1e+05** (just before strong shrinkage):
+
+  | zone | α_cp | α_τx | α_τy | α_τz | n_pts |
+  |---|---:|---:|---:|---:|---:|
+  | nose | 0.9936 | 0.9929 | 0.9924 | 0.9919 | 57.4M |
+  | rear | **1.0047** | **1.0054** | **1.0034** | 0.9983 | 57.4M |
+  | underbody | 0.9965 | 0.9934 | 1.0006 | 0.9930 | 35.2M |
+  | global | 0.9949 | 0.9944 | 0.9941 | 0.9917 | — |
+
+  Rear-zone α>1 (vs <1 elsewhere) reproduces H313 cleanly — but increasing λ shrinks rear toward 1.0, and as it does, test_abupt drops monotonically. The rear-vs-rest signal is therefore **a coincidence of the 34-car val sample, NOT a structural model-error property** that transfers to test.
+
+- **Sub-finding 'cal-val-test-disagreement-on-shrinkage'** (paper-citable): val_abupt and test_abupt **disagree on the optimal λ** at this regime. val wants λ ∈ [0, 1e+04] (best val=5.8938), test wants λ=∞ (best test=5.7388). val is a non-monotone proxy for test on the post-hoc shrinkage axis at val_N=34. **This applies to ALL post-hoc regularization decisions on cal coefficients at this regime**, not just regional.
+
+- **Decision**: Close. Best test_cal = 5.7388 ≡ H312 gate (not strictly less); val passes by 5.6bp but test does not improve. Test optimum at λ=∞ boundary, no interior optimum to refine. **Best λ would be selected as λ=0 if picked by val_abupt** (test=5.7410, +2.1bp regression on test) — yet another reason to close: val cannot select λ here.
+
+- **Cal axis structural sweep now has 5 independent nulls** confirming H312 is at the diagonal-affine MLE within the OLS family at val_N=34:
+
+  | Hypothesis | Source | Finding |
+  |---|---|---|
+  | H316 | alphonse | β-null (scale not bias) |
+  | H319 | fern | per-resolution-invariant |
+  | H323 | edward | cross-channel-diagonal |
+  | H328 (this PR) | askeladd | regional-cal-irrecoverable |
+  | H329 | alphonse | abupt-weighting-irrelevant-at-this-scale |
+
+  Remaining open verification (in flight as alphonse H334 PR #1518): brute-force α grid search confirms H312 is also at the global per-channel test-loss minimum (not just OLS-MLE). After H334 the cal axis can be officially declared closed.
+
+- **Successor**: H335 assigned to askeladd (PR #1519) — per-resolution K allocation under fixed H312-budget (32 pairs total). 3 arms: Arm A low-res-heavy K=[8,6,4,4,4,4,2,2], Arm B high-res-heavy K=[2,2,4,4,4,4,6,8], Arm C uniform K=4×8 (H312 control). Tests whether K-uniform-across-resolutions is Pareto-optimal at H312's compute, or whether asymmetric K-allocation extracts free bp. Independent of in-flight H330/H331 (which scale TOTAL budget) — H335 holds budget constant and tests allocation.
+
+---
+
 ## 2026-05-31 11:39Z — PR #1512 alphonse H329 CLOSED: abupt-weighted calibration — WEIGHTING IRRELEVANT AT VAL_N=34
 
 ### Finding 'abupt-weighting-irrelevant-at-this-scale'
