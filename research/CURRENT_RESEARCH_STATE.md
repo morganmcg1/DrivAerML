@@ -1,9 +1,70 @@
 # SENPAI Research State
 
-- **2026-05-31 11:10Z**
+- **2026-05-31 13:20Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 13:20Z snapshot — **H183 EP11 = 6.6407 ON SOTA TRAJECTORY** (EP10 gate PASSED, projecting EP30 ~6.44-6.55, VP at 3.62 borderline); H182 EP18 VP CONTINUES TO BREAK FLOOR (3.517, −0.126pp below); H184 EP9 stable phase +0.24pp behind H147 (WSD design lag, decay EP22+); H181 EP21 severely decelerated, NON-MERGE re-sealed
+
+**Active wave-5 fleet, all 4 students WIP. 13:20Z fleet:**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | EP30 projection | Decision |
+|---|---|---|---:|---:|---:|---:|---|
+| frieren | #1503 | H181 EMA-99995 | 21 | 6.8175 | 3.760 | 6.70-6.77 | NON-MERGE (sealed) |
+| nezuko | #1506 | H182 LR 1.3× | 18 | 6.7744 | **3.517** | 6.70-6.73 / VP=3.25-3.30 | **PARTIAL MERGE (VP-side)** |
+| tanjiro | #1510 | H183 per-channel heads | 11 | **6.6407** | 3.618 | **6.44-6.55** | **STRONGEST SOTA CANDIDATE** |
+| fern | #1513 | H184 WSD LR (main) | 9 | 6.8922 | 3.794 | 6.56-6.72 (decay EP22+) | continue, EP22 critical |
+
+### H183 (tanjiro) — STRONGEST SOTA CANDIDATE: EP11 val_WSS = 6.6407, EP10 gate PASSED
+
+| EP | val_WSS | descent | Δ vs H147 |
+|---:|---:|---:|---:|
+| 5 | 6.7497 | — | −0.000 (TIED) |
+| 8 | 6.6726 | −0.0257/EP (EP5→8) | ~tied EP8 |
+| **11** | **6.6407** | **−0.0106/EP (EP8→11)** | **~−0.04 from H147 trajectory** |
+
+**EP10 critical gate ≤6.66 PASSED** (EP10 interpolated ~6.65; EP11 = 6.6407 confirms persistent structural advantage of per-channel decoder heads). Per-axis τ_y/τ_z: 7.27/9.09 — cross-flow channels learning faster than H147 baseline.
+
+**EP30 terminal projections:**
+- Linear extrap (−0.011pp/EP × 19 EPs): **6.44** = BEATS H147 6.5409 by ~0.10pp
+- Conservative (continued deceleration): 6.55 = SLIGHTLY BEATS H147
+- Worst-case plateau: 6.65 = TIES H172, below H147
+
+**VP floor watch CRITICAL:** EP11 VP = 3.618, just −0.025pp below 3.643 floor. EP5 VP = 3.82 → descent of 0.20pp over 6 EPs. Watch for VP regress > 3.65 sustained = kill signal.
+
+**SP concern:** 3.85 vs floor 3.577 = +0.27pp above floor. H147 val_SP EP30 was ~3.6, so H183 needs SP to drop ~0.25pp by terminal.
+
+### H182 (nezuko) — VP FLOOR BREACH SUSTAINED (3.517 at EP18, partial-SOTA candidate on VP-side)
+
+| EP | val_WSS | val_VP | floor delta |
+|---:|---:|---:|---:|
+| 12 | 6.7901 | 3.5550 | −0.088 |
+| 15 | 6.7833 | 3.5251 | −0.118 |
+| **18** | **6.7744** | **3.5172** | **−0.126pp** |
+
+**WSS plateau confirmed at ~6.77** — H182 won't beat H147 on WSS (projected EP30 6.70-6.73 vs H147 6.5409). 
+
+**VP improvement persists.** Test_VP projection via val→test ~−0.20pp: 3.25-3.30 = beats H147 test_VP=3.4014 by ~0.10pp. **Channel-specific partial-SOTA candidate.** Mechanism (LR 1.3× × EMA-9999 windowing) failed on WSS but succeeded on VP. Continue to terminal for test harvest.
+
+### H184 (fern) — WSD stable phase, slow descent +0.24pp behind H147 (design lag)
+
+| EP | val_WSS | descent | lr | Δ vs H147 |
+|---:|---:|---:|---:|---:|
+| 5 | 6.9329 | — | 1e-4 | +0.183 |
+| **9** | **6.8922** | **−0.010/EP** | **1e-4** | **+0.240** |
+
+**lr=1e-4 holding** through stable phase (EP1-EP22 design). Descent rate −0.010pp/EP healthy but slow. **At current rate, EP22 = 6.76 = FAILS gate ≤6.65 by 0.11pp.** Decay phase EP22→EP29 (lr 1e-4 → 1e-6) should accelerate descent 2-5× over H147's flat-tail. Best-case EP30 = 6.56 (TIES/SLIGHTLY BEATS H147), realistic 6.62-6.66 (matches H172), worst case 6.72 (NO improvement). **EP22 boundary is the decisive read.**
+
+### H181 (frieren) — Descent SEVERELY decelerated, NON-MERGE RE-SEALED
+
+| EP | val_WSS | descent rate |
+|---:|---:|---:|
+| 15 | 6.8811 | — |
+| 18 | 6.8305 | −0.025/EP |
+| **21** | **6.8175** | **−0.004/EP** |
+
+Descent went from −0.060 (EP12-14) → −0.025 (EP15-18) → **−0.004 (EP18-21)**. Severely flattened. Terminal projection 6.70-6.77 (vs H147 6.5409, H172 6.6517) = **NON-MERGE confirmed.** Continue to natural terminal EP30 for clean test metric harvest. EMA decay 0.99995 too aggressive for 30-EP budget.
 
 ## 11:10Z snapshot — H182 EP15 PASS gate + VP HOLDING below floor; H183 EP8 tracking ~tied H147 (EP10 gate imminent); H181 descent decelerated but credible H172-beat path; H184 EP5 trailing H147 +0.183pp (WSD design lag)
 
