@@ -25,9 +25,20 @@ Mirror convention (H148/H183/H209), unchanged:
     volume_y predictions [volume_pressure] -> invariant
 
 Modes:
-    weight_noise_only:           K passes at a single eval_volume_points
-                                 (no mirror). Sanity-reproduces H242 noise_only.
-    weight_noise_mirror_res_avg: K x R x 2 = full stacked TTA.
+    weight_noise_only:                       K passes at a single eval_volume_points
+                                             (no mirror). Sanity-reproduces H242 noise_only.
+    weight_noise_mirror_res_avg:             K x R x M arithmetic mean (H252/H296/H300 SOTA).
+    weight_noise_mirror_res_median:          K x R x M point/channel-wise median (H315).
+    weight_noise_mirror_res_trimmed_mean:    K x R x M point/channel-wise symmetric
+                                             trimmed mean with --trim-fraction (H315).
+
+H315 multi-aggregator TTA (median, trimmed_mean): when the requested modes share
+the same (resolutions, use_mirror) TTA configuration, the inference sweep is run
+ONCE and per-pass predictions are collected into a stack of shape
+``(n_passes_total, n_points, n_channels)``. Per-aggregator predictions are then
+computed from the shared stack (a single ``torch.sort`` is reused across median
+and trimmed-mean). This makes adding aggregator variants effectively zero-cost
+on inference time.
 """
 
 from __future__ import annotations
@@ -96,6 +107,11 @@ class EvalConfig:
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
 
+    # H315: symmetric trim fraction for trimmed-mean aggregation.
+    # trim_k = max(1, int(n_passes_total * trim_fraction)) is dropped from each
+    # tail per (point, channel) along the K*R*M pass dimension.
+    trim_fraction: float = 0.10
+
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
     output_dir: str = "outputs/h252_eval"
@@ -146,6 +162,21 @@ def parse_args(argv: Iterable[str] | None = None) -> EvalConfig:
             parser.add_argument(*neg_args, action="store_false", dest=f.name)
         else:
             parser.add_argument(*cli_args, type=type(v), default=v, dest=f.name)
+    # H300 reproduce + H315 convention: --calibrate aliases --test-time-calibration.
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        dest="test_time_calibration",
+        help="Alias for --test-time-calibration (H300/H315 reproduce commands).",
+    )
+    # H315 convention: --tta-trim-fraction aliases --trim-fraction.
+    parser.add_argument(
+        "--tta-trim-fraction",
+        "--tta_trim_fraction",
+        type=float,
+        dest="trim_fraction",
+        help="Alias for --trim-fraction (symmetric tail fraction for trimmed_mean).",
+    )
     ns = parser.parse_args(argv)
     cfg = EvalConfig(**{f.name: getattr(ns, f.name) for f in fields(EvalConfig)})
     return cfg
@@ -287,6 +318,49 @@ def perturb_relative_(
         p.data.copy_(clean_p).add_(noise)
 
 
+# --- aggregation operators (H315) ---
+
+
+VALID_AGGREGATORS = ("mean", "median", "trimmed_mean")
+
+
+def _aggregate_from_stack_or_sum(
+    *,
+    aggregator: str,
+    stack: torch.Tensor | None,
+    running_sum: torch.Tensor,
+    running_cnt: torch.Tensor,
+    sorted_stack: torch.Tensor | None,
+    trim_fraction: float,
+) -> torch.Tensor:
+    """Compute per-point per-channel aggregated prediction.
+
+    For ``aggregator="mean"`` we use the cheap running sum/count (no stack
+    needed). For ``"median"`` and ``"trimmed_mean"`` we use a sorted stack
+    along the K*R*M pass dimension; ``sorted_stack`` is passed in so multiple
+    rank-statistic aggregators share one sort.
+    """
+    if aggregator == "mean":
+        return running_sum / running_cnt.unsqueeze(-1).to(torch.float32)
+    if sorted_stack is None:
+        raise RuntimeError(f"aggregator {aggregator!r} requires a sorted stack")
+    n_passes = sorted_stack.shape[0]
+    if aggregator == "median":
+        if n_passes % 2 == 0:
+            lo = sorted_stack[n_passes // 2 - 1]
+            hi = sorted_stack[n_passes // 2]
+            return 0.5 * (lo + hi)
+        return sorted_stack[n_passes // 2]
+    if aggregator == "trimmed_mean":
+        trim_k = max(1, int(n_passes * trim_fraction))
+        if 2 * trim_k >= n_passes:
+            raise ValueError(
+                f"trim_fraction={trim_fraction} drops {2*trim_k} of {n_passes} passes (must keep at least 1)"
+            )
+        return sorted_stack[trim_k : n_passes - trim_k].mean(dim=0)
+    raise ValueError(f"Unknown aggregator: {aggregator!r}")
+
+
 # --- per-case stacked TTA ---
 
 
@@ -306,24 +380,55 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
-    """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
-    averaged predictions in real units. The outer K loop perturbs the model
+    aggregators: Iterable[str] = ("mean",),
+    trim_fraction: float = 0.10,
+) -> tuple[dict[str, tuple[torch.Tensor, torch.Tensor]], torch.Tensor, torch.Tensor, int, dict]:
+    """Run K_eff x R x M (mirror) TTA passes for one case and return per-aggregator
+    per-point predictions in real units. The outer K loop perturbs the model
     weights and reuses the perturbed copy across all (res, mirror) inner passes.
 
     With ``antithetic=False`` K_eff = ``K_passes`` (i.i.d. samples). With
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    When any non-mean aggregator is requested (median, trimmed_mean), each
+    per-pass prediction is also written into a per-point stack of shape
+    (n_passes_total, n_points, n_channels). One ``torch.sort`` along the pass
+    dimension is shared across rank-based aggregators (H315).
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
     n_vol = counts["n_volume"]
 
+    aggregators = list(aggregators)
+    unknown = [a for a in aggregators if a not in VALID_AGGREGATORS]
+    if unknown:
+        raise ValueError(f"Unknown aggregators {unknown}; valid={VALID_AGGREGATORS}")
+    needs_stack = any(a != "mean" for a in aggregators)
+
+    K_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
+    M = 2 if use_mirror else 1
+    R_count = len(resolutions)
+    n_passes_total = K_eff * R_count * M
+
     surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
     surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
     vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
     vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
+
+    if needs_stack:
+        surf_stack = torch.zeros(n_passes_total, n_surf, 4, dtype=torch.float32)
+        vol_stack = torch.zeros(n_passes_total, n_vol, 1, dtype=torch.float32)
+        # Bookkeeping: how many writes each (pass_idx, point) saw. Each slot
+        # MUST receive exactly one write across all batches of its (k, R, mirror).
+        surf_stack_writes = torch.zeros(n_passes_total, n_surf, dtype=torch.int32)
+        vol_stack_writes = torch.zeros(n_passes_total, n_vol, dtype=torch.int32)
+    else:
+        surf_stack = None
+        vol_stack = None
+        surf_stack_writes = None
+        vol_stack_writes = None
 
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {
@@ -342,7 +447,7 @@ def process_case_stacked(
     else:
         schedule = [(k, +1.0) for k in range(K_passes)]
 
-    for k, sign in schedule:
+    for k_idx, (k, sign) in enumerate(schedule):
         # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
         t_p = time.time()
         if sigma > 0.0:
@@ -354,7 +459,7 @@ def process_case_stacked(
             restore_clean_params(eval_module, clean)
         timing["perturb_seconds"] += time.time() - t_p
 
-        for R in resolutions:
+        for r_idx, R in enumerate(resolutions):
             dataset = DrivAerMLSurfaceDataset(
                 case_ids=[case_id],
                 store=store,
@@ -375,7 +480,8 @@ def process_case_stacked(
             for batch in loader_iter:
                 batch = batch.to(device)
                 metas_cached = list(batch.metadata)
-                for mirror in mirror_flags:
+                for m_idx, mirror in enumerate(mirror_flags):
+                    pass_idx = k_idx * R_count * M + r_idx * M + m_idx
                     t0 = time.time()
                     model_input = mirror_inputs(batch) if mirror else batch
                     with autocast_context(device, cfg.amp_mode):
@@ -416,9 +522,11 @@ def process_case_stacked(
                                 )
                             if s_global.numel() > 0:
                                 surf_sum.index_add_(0, s_global, s_chunk)
-                                surf_cnt.index_add_(
-                                    0, s_global, torch.ones_like(s_global, dtype=torch.int32)
-                                )
+                                ones_s = torch.ones_like(s_global, dtype=torch.int32)
+                                surf_cnt.index_add_(0, s_global, ones_s)
+                                if needs_stack:
+                                    surf_stack[pass_idx].index_copy_(0, s_global, s_chunk)
+                                    surf_stack_writes[pass_idx].index_add_(0, s_global, ones_s)
 
                         if v_view_idx < v_view_count:
                             v_global = chunk_global_indices(v_view_idx, v_view_count, n_vol)
@@ -432,9 +540,11 @@ def process_case_stacked(
                                 )
                             if v_global.numel() > 0:
                                 vol_sum.index_add_(0, v_global, v_chunk)
-                                vol_cnt.index_add_(
-                                    0, v_global, torch.ones_like(v_global, dtype=torch.int32)
-                                )
+                                ones_v = torch.ones_like(v_global, dtype=torch.int32)
+                                vol_cnt.index_add_(0, v_global, ones_v)
+                                if needs_stack:
+                                    vol_stack[pass_idx].index_copy_(0, v_global, v_chunk)
+                                    vol_stack_writes[pass_idx].index_add_(0, v_global, ones_v)
                     timing["io_seconds"] += time.time() - t1
 
     if int(surf_cnt.min()) == 0:
@@ -448,16 +558,57 @@ def process_case_stacked(
             f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
         )
 
-    surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
-    vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
+    if needs_stack:
+        # Each (pass_idx, point) must be written exactly once.
+        if int(surf_stack_writes.min()) != 1 or int(surf_stack_writes.max()) != 1:
+            raise RuntimeError(
+                f"surface stack write-coverage broken for case {case_id}: "
+                f"min={int(surf_stack_writes.min())} max={int(surf_stack_writes.max())}"
+            )
+        if int(vol_stack_writes.min()) != 1 or int(vol_stack_writes.max()) != 1:
+            raise RuntimeError(
+                f"volume stack write-coverage broken for case {case_id}: "
+                f"min={int(vol_stack_writes.min())} max={int(vol_stack_writes.max())}"
+            )
+
+    # Share one sort across rank-based aggregators (median + trimmed_mean).
+    sorted_surf = None
+    sorted_vol = None
+    if needs_stack:
+        rank_aggregators = [a for a in aggregators if a in ("median", "trimmed_mean")]
+        if rank_aggregators:
+            sorted_surf, _ = torch.sort(surf_stack, dim=0)
+            sorted_vol, _ = torch.sort(vol_stack, dim=0)
+
+    per_agg_preds: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+    for agg in aggregators:
+        surf_pred = _aggregate_from_stack_or_sum(
+            aggregator=agg,
+            stack=surf_stack,
+            running_sum=surf_sum,
+            running_cnt=surf_cnt,
+            sorted_stack=sorted_surf,
+            trim_fraction=trim_fraction,
+        )
+        vol_pred = _aggregate_from_stack_or_sum(
+            aggregator=agg,
+            stack=vol_stack,
+            running_sum=vol_sum,
+            running_cnt=vol_cnt,
+            sorted_stack=sorted_vol,
+            trim_fraction=trim_fraction,
+        )
+        per_agg_preds[agg] = (surf_pred, vol_pred)
+
+    # Free stacks/sorted copies before loading targets (largest tensors).
+    del surf_stack, vol_stack, sorted_surf, sorted_vol
+    del surf_stack_writes, vol_stack_writes
 
     case = store.load_case(case_id)
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
-    n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
-    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
+    return per_agg_preds, surf_y, vol_y, n_passes_total, timing
 
 
 # --- H300 affine calibration helpers ---
@@ -748,7 +899,18 @@ def evaluate_split_stacked(
     distributed_state,
     antithetic: bool = False,
     collect_calibration: bool = False,
-) -> tuple[dict[str, float], CalibrationStats | None]:
+    aggregators: Iterable[str] = ("mean",),
+    trim_fraction: float = 0.10,
+) -> tuple[dict[str, dict[str, float]], dict[str, CalibrationStats | None]]:
+    """Run one TTA sweep over ``case_ids`` and compute metrics for every
+    requested aggregator.
+
+    Returns:
+        metrics_by_agg: {aggregator_name: finalized_metrics_dict}
+        cal_by_agg:     {aggregator_name: CalibrationStats or None}
+
+    Non-main ranks return ``({}, {})`` after the all_gather.
+    """
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
         distributed_state.world_size
@@ -757,8 +919,11 @@ def evaluate_split_stacked(
     )
     my_cases = case_ids[rank::world_size]
 
-    acc = EvalAccumulator()
-    cal = CalibrationStats() if collect_calibration else None
+    aggregators = list(aggregators)
+    accs: dict[str, EvalAccumulator] = {a: EvalAccumulator() for a in aggregators}
+    cals: dict[str, CalibrationStats | None] = {
+        a: (CalibrationStats() if collect_calibration else None) for a in aggregators
+    }
     total_t0 = time.time()
     total_forward = 0.0
     total_io = 0.0
@@ -766,7 +931,7 @@ def evaluate_split_stacked(
     total_forwards = 0
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_stacked(
+        per_agg_preds, surf_y, vol_y, n_passes, timing = process_case_stacked(
             case_id=case_id,
             model=model,
             transform=transform,
@@ -780,25 +945,29 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            aggregators=aggregators,
+            trim_fraction=trim_fraction,
         )
-        add_case_to_accumulator(
-            acc,
-            case_id=case_id,
-            surface_pred_real=surf_avg,
-            volume_pred_real=vol_avg,
-            surface_y=surf_y,
-            volume_y=vol_y,
-            transform=transform,
-        )
-        if cal is not None:
-            add_case_to_calibration(
-                cal,
+        for agg, (surf_pred, vol_pred) in per_agg_preds.items():
+            add_case_to_accumulator(
+                accs[agg],
                 case_id=case_id,
-                surface_pred_real=surf_avg,
-                volume_pred_real=vol_avg,
+                surface_pred_real=surf_pred,
+                volume_pred_real=vol_pred,
                 surface_y=surf_y,
                 volume_y=vol_y,
+                transform=transform,
             )
+            cal_acc = cals[agg]
+            if cal_acc is not None:
+                add_case_to_calibration(
+                    cal_acc,
+                    case_id=case_id,
+                    surface_pred_real=surf_pred,
+                    volume_pred_real=vol_pred,
+                    surface_y=surf_y,
+                    volume_y=vol_y,
+                )
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
         total_perturb += timing["perturb_seconds"]
@@ -806,7 +975,7 @@ def evaluate_split_stacked(
         dt = time.time() - t0
         print(
             f"  [rank {rank}] {split_name} {case_id} ({case_idx + 1}/{len(my_cases)}): "
-            f"n_passes={n_passes} forwards={timing['n_forwards']} "
+            f"n_passes={n_passes} forwards={timing['n_forwards']} aggregators={aggregators} "
             f"forward={timing['forward_seconds']:.1f}s "
             f"perturb={timing['perturb_seconds']:.1f}s "
             f"io={timing['io_seconds']:.1f}s total={dt:.1f}s",
@@ -821,26 +990,35 @@ def evaluate_split_stacked(
         flush=True,
     )
 
-    if distributed_state is not None and distributed_state.enabled:
-        gathered: list[EvalAccumulator | None] = [None for _ in range(world_size)]
-        dist.all_gather_object(gathered, acc)
-        gathered_cal: list[CalibrationStats | None] | None = None
-        if cal is not None:
-            gathered_cal = [None for _ in range(world_size)]
-            dist.all_gather_object(gathered_cal, cal)
-        if not distributed_state.is_main:
-            return {}, None
-        merged = merge_eval_accumulators(g for g in gathered if g is not None)
-        merged_cal = (
-            merge_calibration_stats(c for c in gathered_cal if c is not None)
-            if gathered_cal is not None
-            else None
-        )
-    else:
-        merged = acc
-        merged_cal = cal
+    metrics_by_agg: dict[str, dict[str, float]] = {}
+    cal_by_agg: dict[str, CalibrationStats | None] = {}
 
-    return finalize_eval_accumulator(merged), merged_cal
+    if distributed_state is not None and distributed_state.enabled:
+        for agg in aggregators:
+            gathered_acc: list[EvalAccumulator | None] = [None for _ in range(world_size)]
+            dist.all_gather_object(gathered_acc, accs[agg])
+            gathered_cal: list[CalibrationStats | None] | None = None
+            if cals[agg] is not None:
+                gathered_cal = [None for _ in range(world_size)]
+                dist.all_gather_object(gathered_cal, cals[agg])
+            if not distributed_state.is_main:
+                continue
+            merged_acc = merge_eval_accumulators(g for g in gathered_acc if g is not None)
+            merged_cal: CalibrationStats | None = (
+                merge_calibration_stats(c for c in gathered_cal if c is not None)
+                if gathered_cal is not None
+                else None
+            )
+            metrics_by_agg[agg] = finalize_eval_accumulator(merged_acc)
+            cal_by_agg[agg] = merged_cal
+        if not distributed_state.is_main:
+            return {}, {}
+    else:
+        for agg in aggregators:
+            metrics_by_agg[agg] = finalize_eval_accumulator(accs[agg])
+            cal_by_agg[agg] = cals[agg]
+
+    return metrics_by_agg, cal_by_agg
 
 
 def resolve_checkpoint_path(cfg: EvalConfig, state) -> tuple[Path, str]:
@@ -880,12 +1058,49 @@ def main(argv: Iterable[str] | None = None) -> None:
     resolutions = parse_resolutions(cfg.resolutions)
     modes = parse_modes(cfg.eval_modes)
     # PR-convention alias used by H275 instructions; semantically identical.
-    mode_aliases = {"mirror_res_weight_noise_avg": "weight_noise_mirror_res_avg"}
+    mode_aliases = {
+        "mirror_res_weight_noise_avg": "weight_noise_mirror_res_avg",
+        # H315 PR-instructions use `_calibrated` suffixes in the mode list; the
+        # _calibrated metrics are emitted automatically when --calibrate is set,
+        # so the calibrated-suffix modes resolve to their raw counterparts here.
+        "weight_noise_mirror_res_avg_calibrated": "weight_noise_mirror_res_avg",
+        "weight_noise_mirror_res_median_calibrated": "weight_noise_mirror_res_median",
+        "weight_noise_mirror_res_trimmed_mean_calibrated": "weight_noise_mirror_res_trimmed_mean",
+    }
     modes = [mode_aliases.get(m, m) for m in modes]
-    valid_modes = ("weight_noise_only", "weight_noise_mirror_res_avg")
+    # Dedup while preserving order — _calibrated aliases can collide with raw modes.
+    modes = list(dict.fromkeys(modes))
+    valid_modes = (
+        "weight_noise_only",
+        "weight_noise_mirror_res_avg",
+        "weight_noise_mirror_res_median",
+        "weight_noise_mirror_res_trimmed_mean",
+    )
     for mode in modes:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
+
+    # Mode -> (aggregator, TTA-config-key). TTA-config-key groups modes that
+    # share inference so the K*R*M sweep runs ONCE per group.
+    def mode_spec(mode: str) -> tuple[str, tuple[tuple[int, ...], bool]]:
+        if mode == "weight_noise_only":
+            return ("mean", ((cfg.eval_surface_points,), False))
+        if mode == "weight_noise_mirror_res_avg":
+            return ("mean", (tuple(resolutions), True))
+        if mode == "weight_noise_mirror_res_median":
+            return ("median", (tuple(resolutions), True))
+        if mode == "weight_noise_mirror_res_trimmed_mean":
+            return ("trimmed_mean", (tuple(resolutions), True))
+        raise ValueError(f"Unknown mode {mode!r}")
+
+    mode_to_agg: dict[str, str] = {}
+    mode_to_cfg: dict[str, tuple[tuple[int, ...], bool]] = {}
+    cfg_to_modes: dict[tuple[tuple[int, ...], bool], list[str]] = {}
+    for mode in modes:
+        agg, cfg_key = mode_spec(mode)
+        mode_to_agg[mode] = agg
+        mode_to_cfg[mode] = cfg_key
+        cfg_to_modes.setdefault(cfg_key, []).append(mode)
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
@@ -970,12 +1185,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             },
             tags=[
                 "h252",
+                "h315",
                 "tta",
                 "stacked",
                 "weight-noise",
                 "multi-res",
                 "mirror",
                 "eval-only",
+                "aggregation-sweep",
                 cfg.agent,
             ],
             reinit="finish_previous",
@@ -993,41 +1210,38 @@ def main(argv: Iterable[str] | None = None) -> None:
         summary[split_name] = {}
         cal_summary[split_name] = {}
         log_prefix_by_split[split_name] = log_prefix
-        for mode in modes:
-            if mode == "weight_noise_only":
-                # K-pass weight-noise average at a single resolution, no mirror.
-                # Used to reproduce the H242 noise_only result.
-                mode_resolutions = [cfg.eval_surface_points]  # single resolution
-                use_mirror = False
-            elif mode == "weight_noise_mirror_res_avg":
-                mode_resolutions = list(resolutions)
-                use_mirror = True
-            else:
-                raise ValueError(f"Unknown mode {mode!r}")
+        # Run one TTA sweep per (resolutions, use_mirror) config; compute every
+        # aggregator's metrics from the shared per-pass stack.
+        for cfg_key, group_modes in cfg_to_modes.items():
+            group_resolutions = list(cfg_key[0])
+            group_use_mirror = cfg_key[1]
+            group_aggregators = list(dict.fromkeys(mode_to_agg[m] for m in group_modes))
 
             if state.is_main:
                 k_eff_print = cfg.weight_noise_passes * (
                     2 if cfg.antithetic_noise else 1
                 )
                 print(
-                    f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
-                    f"mirror={use_mirror} K={cfg.weight_noise_passes} "
-                    f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-                    f"sigma={cfg.weight_noise_sigma} "
+                    f"\n=== {split_name} group_modes={group_modes} "
+                    f"aggregators={group_aggregators} "
+                    f"resolutions={group_resolutions} mirror={group_use_mirror} "
+                    f"K={cfg.weight_noise_passes} antithetic={cfg.antithetic_noise} "
+                    f"K_eff={k_eff_print} sigma={cfg.weight_noise_sigma} "
+                    f"trim_fraction={cfg.trim_fraction} "
                     f"calibration={cfg.test_time_calibration} ===",
                     flush=True,
                 )
             t0 = time.time()
-            metrics, cal_stats = evaluate_split_stacked(
-                split_name=f"{split_name}/{mode}",
+            metrics_by_agg, cal_by_agg = evaluate_split_stacked(
+                split_name=f"{split_name}/[{','.join(group_aggregators)}]",
                 case_ids=case_ids,
                 model=model,
                 transform=transform,
                 device=device,
                 store=store,
                 cfg=cfg,
-                resolutions=mode_resolutions,
-                use_mirror=use_mirror,
+                resolutions=group_resolutions,
+                use_mirror=group_use_mirror,
                 clean=clean,
                 K_passes=cfg.weight_noise_passes,
                 sigma=cfg.weight_noise_sigma,
@@ -1035,20 +1249,26 @@ def main(argv: Iterable[str] | None = None) -> None:
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
                 collect_calibration=cfg.test_time_calibration,
+                aggregators=group_aggregators,
+                trim_fraction=cfg.trim_fraction,
             )
             dt = time.time() - t0
             if state.is_main:
-                print(f"  total {split_name}/{mode}: {dt:.1f}s")
-                print_metrics(f"{split_name}/{mode}", metrics)
-                summary[split_name][mode] = metrics
-                cal_summary[split_name][mode] = cal_stats
+                print(f"  total {split_name}/group({group_aggregators}): {dt:.1f}s")
+                for mode in group_modes:
+                    agg = mode_to_agg[mode]
+                    metrics = metrics_by_agg[agg]
+                    cal_stats = cal_by_agg.get(agg)
+                    print_metrics(f"{split_name}/{mode}", metrics)
+                    summary[split_name][mode] = metrics
+                    cal_summary[split_name][mode] = cal_stats
 
-                log_obj: dict[str, float] = {}
-                log_obj.update(primary_metric_log(f"{log_prefix}_primary/{mode}", metrics))
-                log_obj.update({f"{log_prefix}_extra/{mode}/loss": metrics["loss"]})
-                log_obj[f"{log_prefix}_extra/{mode}/seconds"] = dt
-                if run is not None:
-                    wandb.log(log_obj)
+                    log_obj: dict[str, float] = {}
+                    log_obj.update(primary_metric_log(f"{log_prefix}_primary/{mode}", metrics))
+                    log_obj.update({f"{log_prefix}_extra/{mode}/loss": metrics["loss"]})
+                    log_obj[f"{log_prefix}_extra/{mode}/seconds"] = dt
+                    if run is not None:
+                        wandb.log(log_obj)
 
     # Always restore clean weights at the end.
     restore_clean_params(eval_module, clean)
@@ -1123,19 +1343,34 @@ def main(argv: Iterable[str] | None = None) -> None:
                 }
                 wandb.log({**val_log, **test_log})
 
-                # Single-line paper-facing primary metrics (no mode suffix).
-                run.summary["val_abupt_h300_calibrated"] = float(
+                # Per-aggregator single-line paper-facing primary metrics (H315).
+                agg = mode_to_agg.get(mode, "mean")
+                run.summary[f"val_abupt_h315_{agg}_calibrated"] = float(
                     val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
                 )
-                run.summary["test_abupt_h300_calibrated"] = float(
+                run.summary[f"test_abupt_h315_{agg}_calibrated"] = float(
                     test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
                 )
-                run.summary["val_abupt_h300_raw"] = float(
+                run.summary[f"val_abupt_h315_{agg}_raw"] = float(
                     summary["val_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
-                run.summary["test_abupt_h300_raw"] = float(
+                run.summary[f"test_abupt_h315_{agg}_raw"] = float(
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
+                # Preserve H300 dashboard keys only for the mean aggregator.
+                if agg == "mean":
+                    run.summary["val_abupt_h300_calibrated"] = float(
+                        val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    run.summary["test_abupt_h300_calibrated"] = float(
+                        test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    run.summary["val_abupt_h300_raw"] = float(
+                        summary["val_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
+                    )
+                    run.summary["test_abupt_h300_raw"] = float(
+                        summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
+                    )
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
