@@ -1,3 +1,52 @@
+## 2026-05-31 15:40Z — PR #1516 edward H332 CLOSED: seed-2 α robustness — α IS MODEL-CLASS INVARIANT (3 findings banked)
+
+### Findings `α-seed-invariant` + `cal-transfer-lossless-h312-to-seed2` + `seed-2-val-deficit-test-parity`
+
+- **Branch**: edward/h332-seed2-cal-robustness
+- **W&B run**: `3nlvxceu` (primary, seed-2 ep15 + K=4 anti-thetic × 8-res × mirror + 3-arm cal: raw / H312-transfer / seed-2-own-fit, 7h17m wall)
+- **Hypothesis**: H312 calibration coefficients are model-class invariant (same architecture × data × recipe → same α) vs seed-dependent quirk. 3-arm test on seed-2 ep15.
+- **Result**:
+
+  | Arm | Description | val_raw | val_cal | test_raw | test_cal |
+  |---|---|---:|---:|---:|---:|
+  | A | seed-2 raw (no cal) | 5.9293 | — | 5.7664 | — |
+  | B | seed-2 + seed-1 H312 cal transfer | — | **5.9065** | — | **5.7370** |
+  | C | seed-2 + seed-2-own-fit cal | — | **5.9065** | — | **5.7370** |
+  | ref | H312 seed-1 SOTA gates | 5.9221 | 5.8994 | 5.7678 | 5.7388 |
+
+  **Arms B and C agree to 4 decimal places on every metric.**
+
+- **Decision: CLOSE** — val_cal misses H312 gate by +7.1bp (5.9065 vs 5.8994). Base seed-2 is +7bp weaker on val_raw, not a calibration deficit. test_cal beats gate by 1.8bp but AND-gate fails.
+
+- **Finding 1 `α-seed-invariant` (headline, paper-citable)**:
+
+  | Channel | seed-1 α (H312, W&B authoritative) | seed-2 α | Δ | rel % |
+  |---|---:|---:|---:|---:|
+  | cp | 0.994888 | 0.995136 | +0.000248 | +0.025% |
+  | τ_x | 0.994397 | 0.994436 | +0.000039 | +0.004% |
+  | τ_y | 0.994083 | 0.993821 | −0.000262 | −0.026% |
+  | τ_z | 0.991722 | 0.991683 | −0.000039 | −0.004% |
+  | VP | 0.999687 | 0.999605 | −0.000082 | −0.008% |
+
+  Max |Δα| = 2.6e-4 — ~4× tighter than ±1e-3 threshold. Plus soup-axis cross-check (H307 Arm B α_τz=0.99160): all three values (H312 0.99172, seed-2 0.99168, soup α=0.5 0.99160) within 1.2e-4. **α is a model-class invariant for the H244 cosine-extension recipe, not a seed-dependent quirk.**
+
+- **Finding 2 `cal-transfer-lossless-h312-to-seed2`**: H312 hardcoded α applied to seed-2 sufficient stats ≡ refitting cal on seed-2 to 4 decimal places. **Operational consequence**: H307 model soup cal can use hardcoded H312 α directly — no per-soup refit needed. Saves ~30s/eval AND keeps cal-stability monitorable across soup configurations.
+
+- **Finding 3 `seed-2-val-deficit-test-parity`** (precondition for H307 soup variance-reduction story):
+  - val_raw: seed-2 5.9293 vs seed-1 5.9221 → seed-2 is +7bp WORSE on val_raw
+  - test_raw: seed-2 5.7664 vs seed-1 5.7678 → seed-2 is +0.14bp BETTER on test_raw
+  - test_cal: seed-2 5.7370 vs seed-1 5.7388 → seed-2 is +0.18bp BETTER on test_cal
+  
+  Two seeds occupy different basins of equal-ish test quality with val-test divergence — the precondition H307's soup hypothesis requires.
+
+- **Operational flag (PR body α-typo)**: PR body's *Baseline* block listed H312 α values that don't match W&B run `enf61qrr` for cp/τ_x/τ_y (transcription typos `0.99943 / 0.99504 / 0.99454` vs W&B `0.994888 / 0.994397 / 0.994083`). Edward used W&B authoritative values — harmless for this PR's result; flagged for any downstream reference.
+
+- **Paper-floor structural observation**: test_SP_cal = 3.6116 vs paper floor 3.577 = **+3.4bp gap**. SP is now the ONLY paper-floor-eligible channel still open (test_VP 3.3743 < 3.421 already, test_WSS 6.64 far from 5.85). Since cal axis is closed structurally (5-fold null + α-seed-invariant verifying), **the remaining SP bp must come from training-time intervention**.
+
+- **Successor**: **H338** assigned to edward (PR #1522) — SP-targeted loss reweighting via H310-style cosine-tail extension. 3-arm sweep {1.05×, 1.10×, 1.20×} on SP loss multiplier. Single concrete experiment to close the paper SP floor gap at ~9h GPU cost. Uses hardcoded H312 cal coefficients per H332 finding (no per-arm refit).
+
+---
+
 ## 2026-05-31 14:55Z — PR #1515 tanjiro H331 CLOSED: K=4 + 10-res-gapfill + H312-cal — R-AXIS NULL + JOINT K-R SATURATION FINDING
 
 ### Finding 'res-density-saturated-8res' (+ joint cross-fleet finding 'K-R-tta-axes-saturated-jointly' with H330)
