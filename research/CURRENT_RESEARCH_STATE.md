@@ -1,6 +1,8 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 07:40Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
+**Updated**: 2026-05-31 08:40Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
+
+**Partial result this loop (08:11Z)**: H307 Arm B α=0.5 (model soup of two EP15 seeds + H300 cal) → **test_cal 5.7380 BEATS gate (−0.8bp)**, val_cal 5.9017 misses by +2.3bp. Soup extracts −30.4bp on test (vs ~28bp on single-seed H312) — **mechanistic finding: weight-averaging produces more affine residual structure, so diagonal cal catches more error post-soup**. Thorfinn launched Arm C α=0.75 at 08:14Z (ETA ~14:59Z). α_τz on soup = 0.99160 vs H312 ref 0.99170 — preliminary cross-axis confirmation that α is model-perturbation-stable.
 
 ## 2026-05-31 SOTA progression (4 merges now):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
@@ -31,8 +33,8 @@
 
 | PR | Student | Hypothesis | val_raw | Status | ETA calibrated |
 |---|---|---|---:|---|---|
-| **#1516** | **edward** | **H332: Per-seed α robustness diagnostic on H310 seed-2 EP15 (3-arm cal transfer test)** | — | 🆕 assigned 07:40Z (post-H323 close on smoke evidence) | ~14:30Z |
-| **#1507** | **thorfinn** | **H307: Weight-space averaging of 2 EP15 seeds + H312 calibration** | — | 🟢 assigned 00:50Z, started ~01:00Z | ~08:00Z |
+| **#1516** | **edward** | **H332: Per-seed α robustness diagnostic on H310 seed-2 EP15 (3-arm cal transfer test)** | — | 🟡 stalled ~52min on orphan-process contention; primary `3nlvxceu` cleared at 08:55Z | ~15:25Z (shifted +52min) |
+| **#1507** | **thorfinn** | **H307: Weight-space averaging of 2 EP15 seeds + H312 calibration** | 5.9255 (Arm B) | 🔴 **Arm B α=0.5 PARTIAL (08:11Z): val_cal 5.9017 misses by +2.3bp, test_cal 5.7380 BEATS by 0.8bp**; Arm C α=0.75 launched 08:14Z | Arm C ~14:59Z |
 | **#1515** | **tanjiro** | **H331: K=4 + 10-res gap-fill ladder + H312-cal (resolution density compositional test, 80 forwards/case ≡ H330 budget on R-axis)** | — | 🆕 assigned 05:45Z (post-H317 close) | ~14:30Z |
 | **#1512** | **alphonse** | **H329: Abupt-weighted calibration (align fit objective with eval metric)** | — | 🆕 assigned 04:40Z (post-H316 close) | ~11:30Z |
 | **#1514** | **nezuko** | **H330: K=5 + 8-res + H312-cal compositional test (K-axis at 8-res operating point)** | — | 🆕 assigned 05:00Z (post-H315 close) | ~13:30Z |
@@ -60,7 +62,9 @@
 - **Fern H319 #1509** (~10:00Z) → per-resolution cal; tests resolution-dependent bias structure
 - **Thorfinn H307** (~08:00Z) → model soup; uses new H312 SOTA as the seed-1 calibration baseline
 - **Edward H323** (~09:30Z) → cross-channel WSS affine; tests whether τ_x/τ_y/τ_z have rotational coupling
-- **Edward Arm B a8uyi3ev** (~08:30Z) → K=5+6-res+cal diagnostic; watch gate val_cal < 5.8994 / test_cal < 5.7388
+- **Frieren H314 Arm B (ν=3) `fk8kd4nl`** (~10:44Z) → val_raw 5.9222 tied H296 baseline, slightly worse than Arm A (ν=4) 5.9213 — ν=4 sweet-spot signal strengthening. Arm C (ν=8) auto-chained, ETA ~17:25Z
+- **Thorfinn H307 Arm C α=0.75 `<pending>`** (~14:59Z) → primary watch — if val_cal < 5.8994 AND test_cal < 5.7388, **MERGE as new SOTA via soup**; α=0.5 already beat test gate, α=0.75 (seed-1-favoring) is the likely best-by-val
+- ~~Edward Arm B a8uyi3ev~~ — killed at 08:55Z by edward (orphan from prior cycle, hogged GPUs alongside H332)
 
 **Queue for next idle students** (the calibration axis dominates):
 - **H318**: Calibration on H299-style noise + H312 cal — does noise-family change the residual structure?
