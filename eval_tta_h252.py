@@ -95,6 +95,18 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H334: per-channel alpha-floor grid search. For each of the 5 channels
+    # (cp, tau_x, tau_y, tau_z, volume_pressure), grid-search alpha_c over
+    # [alpha_OLS_c - halfwidth, alpha_OLS_c + halfwidth] with `alpha_grid_steps`
+    # points (default 41 = step 0.0005 around H312/OLS), holding all other
+    # alpha at OLS-fit values and ALL beta fixed at OLS-fit values. Recomputes
+    # val_cal and test_cal at each grid point from saved per-car sufficient
+    # stats (no GPU re-runs). Reports per-channel argmin-test-cal + joint
+    # greedy coordinate-descent optimum to W&B. Requires --test-time-calibration.
+    alpha_grid_search: bool = False
+    alpha_grid_halfwidth: float = 0.01
+    alpha_grid_steps: int = 41
+    alpha_grid_joint_iters: int = 5
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -654,6 +666,330 @@ def compute_calibrated_metrics(
     }
 
 
+# --- H334 per-channel alpha-floor grid search ---
+
+
+# 5-channel layout: 4 surface (cp, tau_x, tau_y, tau_z) + 1 volume (volume_pressure).
+H334_CHANNEL_NAMES = ["cp", "tau_x", "tau_y", "tau_z", "volume_pressure"]
+H334_PRIMARY_KEY = "abupt_axis_mean_rel_l2_pct"
+
+
+def _split_global_alpha_beta(
+    alpha_global: torch.Tensor, beta_global: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Split a 5-channel (alpha, beta) into surface (4) and volume (1) tensors."""
+    return (
+        alpha_global[:4].contiguous(),
+        beta_global[:4].contiguous(),
+        alpha_global[4:5].contiguous(),
+        beta_global[4:5].contiguous(),
+    )
+
+
+def _eval_calibration_at(
+    val_cal: CalibrationStats,
+    test_cal: CalibrationStats,
+    alpha_global: torch.Tensor,
+    beta_global: torch.Tensor,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Compute val + test calibrated metrics at a single (alpha, beta) tuple."""
+    a_s, b_s, a_v, b_v = _split_global_alpha_beta(alpha_global, beta_global)
+    val_m = compute_calibrated_metrics(val_cal, a_s, b_s, a_v, b_v)
+    test_m = compute_calibrated_metrics(test_cal, a_s, b_s, a_v, b_v)
+    return val_m, test_m
+
+
+def alpha_grid_search_per_channel(
+    val_cal: CalibrationStats,
+    test_cal: CalibrationStats,
+    alpha_surf_fit: torch.Tensor,
+    beta_surf_fit: torch.Tensor,
+    alpha_vol_fit: torch.Tensor,
+    beta_vol_fit: torch.Tensor,
+    *,
+    halfwidth: float = 0.01,
+    n_steps: int = 41,
+    n_joint_iters: int = 5,
+) -> dict:
+    """Brute-force per-channel alpha grid search around the OLS fit.
+
+    For each of the 5 channels (cp, tau_x, tau_y, tau_z, volume_pressure), the
+    grid is alpha_OLS_c + linspace(-halfwidth, +halfwidth, n_steps). With
+    n_steps=41 and halfwidth=0.01 this is a step of 0.0005 across +/-0.01,
+    and H312's exact OLS alpha sits at the center grid index (n_steps // 2).
+
+    All beta are held at OLS values; when alpha_c moves on its grid all OTHER
+    alpha are held at OLS-fit values for the per-channel sweep. The joint
+    greedy descent then iteratively updates each channel to its argmin given
+    the current state.
+
+    Per-channel rel_l2 (and thus abupt-axis-mean) is separable across channels
+    when only alpha varies (beta fixed), so we expect the joint optimum to
+    equal the stack of per-channel optima within numerical noise; the joint
+    pass acts as a sanity check.
+
+    Returns a structured dict with the H312 reference, per-channel sweeps,
+    per-channel optima, joint greedy trace, and joint optimum.
+    """
+    alpha_h312 = torch.cat([alpha_surf_fit.detach().double(), alpha_vol_fit.detach().double()])
+    beta_h312 = torch.cat([beta_surf_fit.detach().double(), beta_vol_fit.detach().double()])
+    if alpha_h312.numel() != 5 or beta_h312.numel() != 5:
+        raise RuntimeError(
+            f"Expected 5-channel (alpha, beta); got alpha={tuple(alpha_h312.shape)} "
+            f"beta={tuple(beta_h312.shape)}"
+        )
+
+    if n_steps % 2 == 0:
+        raise ValueError(
+            f"alpha_grid_steps must be odd so H312/OLS alpha sits on the grid; got {n_steps}"
+        )
+    offsets = torch.linspace(
+        -float(halfwidth), float(halfwidth), int(n_steps), dtype=torch.float64
+    )
+    # Force the center grid point to be exactly the OLS-fit alpha by clearing
+    # any floating-point drift from linspace at index n_steps // 2.
+    center_idx = n_steps // 2
+    offsets[center_idx] = 0.0
+
+    h312_val, h312_test = _eval_calibration_at(val_cal, test_cal, alpha_h312, beta_h312)
+    h312_pct = float(h312_test[H334_PRIMARY_KEY])
+    h312_val_pct = float(h312_val[H334_PRIMARY_KEY])
+
+    channel_sweeps: dict[str, list[dict]] = {}
+    channel_optima: dict[str, dict] = {}
+    for c, name in enumerate(H334_CHANNEL_NAMES):
+        grid_alphas = alpha_h312[c] + offsets  # (n_steps,)
+        sweep: list[dict] = []
+        for step_idx, alpha_val in enumerate(grid_alphas.tolist()):
+            alpha_trial = alpha_h312.clone()
+            alpha_trial[c] = float(alpha_val)
+            val_m, test_m = _eval_calibration_at(val_cal, test_cal, alpha_trial, beta_h312)
+            sweep.append(
+                {
+                    "step": step_idx,
+                    "alpha": float(alpha_val),
+                    "val_metrics": val_m,
+                    "test_metrics": test_m,
+                }
+            )
+        best_idx = min(
+            range(len(sweep)), key=lambda i: sweep[i]["test_metrics"][H334_PRIMARY_KEY]
+        )
+        channel_sweeps[name] = sweep
+        channel_optima[name] = {
+            "channel_index": c,
+            "alpha_h312": float(alpha_h312[c].item()),
+            "alpha_opt": float(sweep[best_idx]["alpha"]),
+            "delta_alpha": float(sweep[best_idx]["alpha"] - alpha_h312[c].item()),
+            "step_index": best_idx,
+            "val_metrics_at_opt": sweep[best_idx]["val_metrics"],
+            "test_metrics_at_opt": sweep[best_idx]["test_metrics"],
+            "val_delta_bp_vs_h312": (
+                sweep[best_idx]["val_metrics"][H334_PRIMARY_KEY] - h312_val_pct
+            ) * 100.0,
+            "test_delta_bp_vs_h312": (
+                sweep[best_idx]["test_metrics"][H334_PRIMARY_KEY] - h312_pct
+            ) * 100.0,
+            "at_edge_low": best_idx == 0,
+            "at_edge_high": best_idx == len(sweep) - 1,
+        }
+
+    # Joint greedy coordinate descent. Sweep each channel, replacing its alpha
+    # with the argmin of test_cal_abupt given the current state. Repeat up to
+    # n_joint_iters times or until alpha vector stops moving.
+    alpha_current = alpha_h312.clone()
+    joint_trace: list[dict] = []
+    starting_val, starting_test = _eval_calibration_at(
+        val_cal, test_cal, alpha_current, beta_h312
+    )
+    joint_trace.append(
+        {
+            "iteration": 0,
+            "alpha_per_channel": [float(x) for x in alpha_current.tolist()],
+            "val_metrics": starting_val,
+            "test_metrics": starting_test,
+            "updates_in_iter": 0,
+        }
+    )
+    converged_iter: int | None = None
+    for iter_i in range(1, int(n_joint_iters) + 1):
+        n_updates_this_iter = 0
+        for c, _name in enumerate(H334_CHANNEL_NAMES):
+            grid_alphas = alpha_h312[c] + offsets  # original-centered grid
+            best = None
+            best_alpha = float(alpha_current[c].item())
+            for alpha_val in grid_alphas.tolist():
+                alpha_trial = alpha_current.clone()
+                alpha_trial[c] = float(alpha_val)
+                _, test_m = _eval_calibration_at(val_cal, test_cal, alpha_trial, beta_h312)
+                test_pct = float(test_m[H334_PRIMARY_KEY])
+                if best is None or test_pct < best:
+                    best = test_pct
+                    best_alpha = float(alpha_val)
+            if best_alpha != float(alpha_current[c].item()):
+                n_updates_this_iter += 1
+                alpha_current[c] = best_alpha
+        iter_val, iter_test = _eval_calibration_at(
+            val_cal, test_cal, alpha_current, beta_h312
+        )
+        joint_trace.append(
+            {
+                "iteration": iter_i,
+                "alpha_per_channel": [float(x) for x in alpha_current.tolist()],
+                "val_metrics": iter_val,
+                "test_metrics": iter_test,
+                "updates_in_iter": n_updates_this_iter,
+            }
+        )
+        if n_updates_this_iter == 0:
+            converged_iter = iter_i
+            break
+
+    final_val, final_test = _eval_calibration_at(
+        val_cal, test_cal, alpha_current, beta_h312
+    )
+    joint_optimum = {
+        "alpha_per_channel": {
+            name: float(alpha_current[c].item()) for c, name in enumerate(H334_CHANNEL_NAMES)
+        },
+        "alpha_vector": [float(x) for x in alpha_current.tolist()],
+        "delta_alpha_per_channel": {
+            name: float(alpha_current[c].item() - alpha_h312[c].item())
+            for c, name in enumerate(H334_CHANNEL_NAMES)
+        },
+        "val_metrics": final_val,
+        "test_metrics": final_test,
+        "val_delta_bp_vs_h312": (final_val[H334_PRIMARY_KEY] - h312_val_pct) * 100.0,
+        "test_delta_bp_vs_h312": (final_test[H334_PRIMARY_KEY] - h312_pct) * 100.0,
+        "converged_at_iter": converged_iter,
+        "iterations_used": len(joint_trace) - 1,
+    }
+
+    return {
+        "h312_reference": {
+            "alpha_per_channel": {
+                name: float(alpha_h312[c].item()) for c, name in enumerate(H334_CHANNEL_NAMES)
+            },
+            "alpha_vector": [float(x) for x in alpha_h312.tolist()],
+            "beta_per_channel": {
+                name: float(beta_h312[c].item()) for c, name in enumerate(H334_CHANNEL_NAMES)
+            },
+            "val_metrics": h312_val,
+            "test_metrics": h312_test,
+        },
+        "grid": {
+            "halfwidth": float(halfwidth),
+            "n_steps": int(n_steps),
+            "step_size": float(2.0 * halfwidth / (n_steps - 1)),
+            "center_idx": int(center_idx),
+        },
+        "channel_sweeps": channel_sweeps,
+        "channel_optima": channel_optima,
+        "joint_trace": joint_trace,
+        "joint_optimum": joint_optimum,
+    }
+
+
+def log_alpha_grid_to_wandb(
+    run, result: dict, mode: str, channel_names: list[str] = H334_CHANNEL_NAMES
+) -> None:
+    """Log H334 per-channel grid sweep + optima to W&B as table + summary keys."""
+    if run is None:
+        return
+
+    h312_test_pct = float(result["h312_reference"]["test_metrics"][H334_PRIMARY_KEY])
+    h312_val_pct = float(result["h312_reference"]["val_metrics"][H334_PRIMARY_KEY])
+
+    # Per-channel grid sweep as a single wandb.Table for plotting.
+    table_columns = [
+        "channel",
+        "step_index",
+        "alpha",
+        "val_abupt_pct",
+        "test_abupt_pct",
+        "val_delta_bp",
+        "test_delta_bp",
+    ]
+    table_rows = []
+    for name in channel_names:
+        for entry in result["channel_sweeps"][name]:
+            val_pct = float(entry["val_metrics"][H334_PRIMARY_KEY])
+            test_pct = float(entry["test_metrics"][H334_PRIMARY_KEY])
+            table_rows.append(
+                [
+                    name,
+                    int(entry["step"]),
+                    float(entry["alpha"]),
+                    val_pct,
+                    test_pct,
+                    (val_pct - h312_val_pct) * 100.0,
+                    (test_pct - h312_test_pct) * 100.0,
+                ]
+            )
+    run.log({f"h334_grid_table/{mode}": wandb.Table(columns=table_columns, data=table_rows)})
+
+    # Per-channel grid as parallel step series so W&B charts can render
+    # alpha vs val_cal / test_cal side by side.
+    n_steps = result["grid"]["n_steps"]
+    for step_idx in range(n_steps):
+        log_row: dict[str, float] = {f"h334_grid_step/{mode}/step_idx": step_idx}
+        for name in channel_names:
+            entry = result["channel_sweeps"][name][step_idx]
+            log_row[f"h334_grid_step/{mode}/{name}/alpha"] = float(entry["alpha"])
+            log_row[f"h334_grid_step/{mode}/{name}/val_abupt_pct"] = float(
+                entry["val_metrics"][H334_PRIMARY_KEY]
+            )
+            log_row[f"h334_grid_step/{mode}/{name}/test_abupt_pct"] = float(
+                entry["test_metrics"][H334_PRIMARY_KEY]
+            )
+        run.log(log_row)
+
+    # Per-channel optimum summary keys.
+    for name in channel_names:
+        opt = result["channel_optima"][name]
+        run.summary[f"h334/{mode}/{name}/alpha_h312"] = float(opt["alpha_h312"])
+        run.summary[f"h334/{mode}/{name}/alpha_opt"] = float(opt["alpha_opt"])
+        run.summary[f"h334/{mode}/{name}/delta_alpha"] = float(opt["delta_alpha"])
+        run.summary[f"h334/{mode}/{name}/val_abupt_at_opt"] = float(
+            opt["val_metrics_at_opt"][H334_PRIMARY_KEY]
+        )
+        run.summary[f"h334/{mode}/{name}/test_abupt_at_opt"] = float(
+            opt["test_metrics_at_opt"][H334_PRIMARY_KEY]
+        )
+        run.summary[f"h334/{mode}/{name}/val_delta_bp"] = float(opt["val_delta_bp_vs_h312"])
+        run.summary[f"h334/{mode}/{name}/test_delta_bp"] = float(opt["test_delta_bp_vs_h312"])
+        run.summary[f"h334/{mode}/{name}/at_grid_edge"] = bool(
+            opt["at_edge_low"] or opt["at_edge_high"]
+        )
+
+    # Joint optimum summary keys.
+    joint = result["joint_optimum"]
+    for name, val in joint["alpha_per_channel"].items():
+        run.summary[f"h334_joint/{mode}/alpha_{name}"] = float(val)
+    run.summary[f"h334_joint/{mode}/val_abupt_pct"] = float(
+        joint["val_metrics"][H334_PRIMARY_KEY]
+    )
+    run.summary[f"h334_joint/{mode}/test_abupt_pct"] = float(
+        joint["test_metrics"][H334_PRIMARY_KEY]
+    )
+    run.summary[f"h334_joint/{mode}/val_delta_bp"] = float(joint["val_delta_bp_vs_h312"])
+    run.summary[f"h334_joint/{mode}/test_delta_bp"] = float(joint["test_delta_bp_vs_h312"])
+    run.summary[f"h334_joint/{mode}/iterations_used"] = int(joint["iterations_used"])
+    run.summary[f"h334_joint/{mode}/converged_at_iter"] = (
+        int(joint["converged_at_iter"]) if joint["converged_at_iter"] is not None else -1
+    )
+
+    # Paper-facing primary keys (no mode suffix — joint optimum is the headline).
+    run.summary["val_abupt_h334_grid_optimal"] = float(
+        joint["val_metrics"][H334_PRIMARY_KEY]
+    )
+    run.summary["test_abupt_h334_grid_optimal"] = float(
+        joint["test_metrics"][H334_PRIMARY_KEY]
+    )
+    run.summary["val_abupt_h334_h312_reference"] = float(h312_val_pct)
+    run.summary["test_abupt_h334_h312_reference"] = float(h312_test_pct)
+
+
 def add_case_to_accumulator(
     acc: EvalAccumulator,
     *,
@@ -1136,6 +1472,88 @@ def main(argv: Iterable[str] | None = None) -> None:
                 run.summary["test_abupt_h300_raw"] = float(
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
+
+            # H334: per-channel alpha-floor grid search (post-hoc, no GPU).
+            if cfg.alpha_grid_search:
+                t_grid = time.time()
+                print(
+                    f"\n=== H334 alpha-floor grid search "
+                    f"(halfwidth={cfg.alpha_grid_halfwidth}, "
+                    f"steps={cfg.alpha_grid_steps}, "
+                    f"joint_iters={cfg.alpha_grid_joint_iters}, mode={mode}) ===",
+                    flush=True,
+                )
+                h334_result = alpha_grid_search_per_channel(
+                    val_cal=val_cal,
+                    test_cal=test_cal,
+                    alpha_surf_fit=alpha_surf,
+                    beta_surf_fit=beta_surf,
+                    alpha_vol_fit=alpha_vol,
+                    beta_vol_fit=beta_vol,
+                    halfwidth=cfg.alpha_grid_halfwidth,
+                    n_steps=cfg.alpha_grid_steps,
+                    n_joint_iters=cfg.alpha_grid_joint_iters,
+                )
+                grid_dt = time.time() - t_grid
+
+                h312_ref = h334_result["h312_reference"]
+                h312_val_pct = float(h312_ref["val_metrics"][H334_PRIMARY_KEY])
+                h312_test_pct = float(h312_ref["test_metrics"][H334_PRIMARY_KEY])
+
+                # Per-channel optimum table.
+                print(
+                    f"  H312 reference   val_abupt={h312_val_pct:.4f}  "
+                    f"test_abupt={h312_test_pct:.4f}",
+                    flush=True,
+                )
+                print(
+                    f"  {'channel':<18s} {'alpha_h312':>11s} {'alpha_opt':>11s} "
+                    f"{'delta_alpha':>11s} {'val_at_opt':>11s} {'test_at_opt':>11s} "
+                    f"{'val_d_bp':>9s} {'test_d_bp':>9s}",
+                    flush=True,
+                )
+                for name in H334_CHANNEL_NAMES:
+                    opt = h334_result["channel_optima"][name]
+                    edge_flag = (
+                        " EDGE" if (opt["at_edge_low"] or opt["at_edge_high"]) else ""
+                    )
+                    print(
+                        f"  {name:<18s} {opt['alpha_h312']:>+11.6f} "
+                        f"{opt['alpha_opt']:>+11.6f} {opt['delta_alpha']:>+11.6f} "
+                        f"{opt['val_metrics_at_opt'][H334_PRIMARY_KEY]:>11.4f} "
+                        f"{opt['test_metrics_at_opt'][H334_PRIMARY_KEY]:>11.4f} "
+                        f"{opt['val_delta_bp_vs_h312']:>+9.3f} "
+                        f"{opt['test_delta_bp_vs_h312']:>+9.3f}{edge_flag}",
+                        flush=True,
+                    )
+
+                # Joint greedy trace + final.
+                print(f"  --- joint greedy trace ---", flush=True)
+                for entry in h334_result["joint_trace"]:
+                    a_str = " ".join(f"{x:+.5f}" for x in entry["alpha_per_channel"])
+                    print(
+                        f"    iter={entry['iteration']:>2d}  updates={entry['updates_in_iter']:>2d}  "
+                        f"alpha=[{a_str}]  "
+                        f"val={entry['val_metrics'][H334_PRIMARY_KEY]:.4f}  "
+                        f"test={entry['test_metrics'][H334_PRIMARY_KEY]:.4f}",
+                        flush=True,
+                    )
+
+                joint = h334_result["joint_optimum"]
+                print(
+                    f"  joint optimum   val_abupt={joint['val_metrics'][H334_PRIMARY_KEY]:.4f} "
+                    f"(delta={joint['val_delta_bp_vs_h312']:+.3f}bp)  "
+                    f"test_abupt={joint['test_metrics'][H334_PRIMARY_KEY]:.4f} "
+                    f"(delta={joint['test_delta_bp_vs_h312']:+.3f}bp)",
+                    flush=True,
+                )
+                print(
+                    f"  grid search compute time: {grid_dt:.2f}s",
+                    flush=True,
+                )
+
+                if run is not None:
+                    log_alpha_grid_to_wandb(run, h334_result, mode)
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
