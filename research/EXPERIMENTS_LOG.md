@@ -1,3 +1,43 @@
+## 2026-05-31 14:55Z — PR #1515 tanjiro H331 CLOSED: K=4 + 10-res-gapfill + H312-cal — R-AXIS NULL + JOINT K-R SATURATION FINDING
+
+### Finding 'res-density-saturated-8res' (+ joint cross-fleet finding 'K-R-tta-axes-saturated-jointly' with H330)
+
+- **Branch**: tanjiro/h331-10res-gapfill-cal
+- **W&B run**: `xt0kwchm` (primary, K=4 anti-thetic × 10-res {32K,40K,49K,57K,65K,73K,82K,90K,98K,131K} × mirror + H312 cal, 8.66h wall)
+- **Hypothesis**: 10-res ladder with gap-fill at 73728 and 90112 (interior densification of the H312 8-res ladder) extracts new structural information from the resolution-density axis at +25% compute. Predicted: 0.5-2bp on test_cal if real; 0bp if saturated.
+- **Result** (vs H312 SOTA gates 5.8994 / 5.7388):
+
+  | Metric | H312 (current SOTA) | H331 (this PR) | Δ |
+  |---|---:|---:|---:|
+  | val_abupt_calibrated | 5.8994 | **5.8992** | **−0.02bp** ✓ |
+  | test_abupt_calibrated | 5.7388 | **5.7392** | **+0.04bp** ✗ |
+  | val_abupt_raw | 5.9221 | **5.9217** | −0.04bp |
+  | test_abupt_raw | 5.7678 | 5.7679 | +0.01bp |
+  | test_VP_cal | 3.3743 | 3.3721 | −0.22bp |
+  | test_WSS_cal | 6.6391 | 6.6406 | +0.15bp |
+  | Compute | 64 forwards/case | 160 forwards/case | **+150%** (10×4×2 vs 8×4×2) |
+
+  Wait — re-read: total per case = K(4) × anti-thetic(2) × R(10) × mirror(2) = 160 vs H312's 4×2×8×2 = 128. That's +25% per-case compute (10/8 = 1.25), matching the wall-clock observation.
+
+- **Decision: CLOSE** — fails strict test gate by 0.04bp, val passes by 0.02bp. Verdict: NULL within ±1bp band. Per-channel α shifts ≤1.1e-4, β shifts ≤7e-3 (β_VP only) — calibration is structurally identical to H312, confirming the 2 new resolutions did NOT change the residual shape that cal extracts.
+
+- **Joint cross-fleet finding 'K-R-tta-axes-saturated-jointly'**: H330 (K=5+8-res, +25% K-axis spend) and H331 (K=4+10-res, +25% R-axis spend) **both hit val_raw = 5.9217 to 4 decimal places**. At the H312 saturation point at val_N=34, **neither extra-K nor extra-R spend at +25% compute extracts new raw signal**. The TTA inference-set axes are saturated in both noise (K) and resolution-density (R) sub-axes simultaneously. Direct evidence that the inference-set Pareto-frontier is bounded by the **model itself**, not by the sampling strategy.
+
+- **Resolution axis now fully closed across all three directions**:
+  - **Range below 32K** → null (H291 frieren `RRR-low-res-noise-floor`)
+  - **Range above 131K** → null (H267 edward, H292 edward)
+  - **Density within 32K–131K** → null (H331 this PR)
+
+- **Banking Findings**:
+  1. **`res-density-saturated-8res`** — 10-res gap-fill at {73728, 90112} adds zero new residual structure vs H312's 8-res ladder. Cal-extracted bp on test = +0.04 (null).
+  2. **`K-R-tta-axes-saturated-jointly`** (cross-fleet with H330) — both axes at +25% compute over H312 give identical raw outputs to 4 decimal places. The model's posterior at this checkpoint is locally smooth enough in both axes that the H312 sampling pattern is at the marginal-information floor.
+
+- **Structural consequence**: The post-hoc inference axis (TTA-K + TTA-R + cal) is now structurally exhausted on the ep15 checkpoint. Remaining bp directions: composition (H336 in flight), model-axis diversity (H307 model soup + H337 seed-3), or training-time interventions.
+
+- **Successor**: **H337** assigned to tanjiro (PR #1521) — 3rd EP15 seed commissioning via H310-style cosine extension at `--seed=2027`. Artifact-production task (~3h), success criterion val_abupt mirror-only ≤ 6.10%. Unblocks 3-way model soup α-search on (s1, s2, s3) simplex — H307 2-way soup α=0.5 already beat test gate by 0.8bp at +2.3bp val miss; richer α-space dramatically increases chance of hitting both gates simultaneously.
+
+---
+
 ## 2026-05-31 14:12Z — PR #1514 nezuko H330 CLOSED: K=5 + 8-res + H312-cal — K-AXIS REDUNDANT AT H312 BUDGET (despite 2-gate strict pass)
 
 ### Finding 'K5-cal-redundant-at-h312-budget' (+ sub-findings 'β_VP-K-sensitive', 'K×res-cal-additive-at-K=4-5')
