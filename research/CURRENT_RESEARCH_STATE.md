@@ -21,7 +21,7 @@
 - **H172 EP28** (tanjiro, PR #1469): clean descent recovery confirmed; EP30 terminal ETA ~03:40Z
 - **H178 EP13** (fern, PR #1493): WSS flat at 6.83 (no descent), VP=4.036 still BREACH +0.39pp. Verdict NON-MERGE sealed; 3 more EPs cannot rescue.
 - **H181 EP4** (frieren, PR #1503): val_WSS=32.29 with student's correct EMA-99995 init-washout calculation (11.4% init mass at EP4). Kill ladder RECALIBRATED — student authorized to continue. Critical gates: EP10 ≤ 7.5, EP25 ≤ 6.60 (must clearly beat H172's 6.65 stack-floor).
-- **H182 main** (nezuko, PR #1506): launched 23:58Z, `j3eopxpp`, throughput 4.25 it/s, ~21.5h total. Tests LR 1.3× compound atop H172 EMA stack. EP1 ETA ~01:40Z.
+- **H182 main** (nezuko, PR #1506): rank-0 corrected to `ecw2sct9` (j3eopxpp was rank-4). EP1=48.70, EP2=43.51 — **STRONG early lead vs H172** (−3.32pp at EP1, −6.99pp at EP2, slope −0.473/1k WSS). LR 1.3× hypothesis showing genuine descent advantage in warmup/early-cosine. Decisive boundaries: EP10 must beat 6.78, EP20 must beat 6.55. Currently leading wave-4 candidate.
 - **Wave-5 catalog committed (`99097d2`):** Dispatch order: H-W5-1 WSD → fern (post H178 terminal ~02:30-03:30Z), H-W5-2 Per-Channel Heads → tanjiro (post H172 terminal ~03:40Z).
 
 **Path B partial walkback:** EMA-derivative at decay=0.9999 produces real (5-7bp) but sub-SOTA improvement. The wave-4 thesis is "EMA-derivative does not beat H147" — falsified mechanism would be "EMA degrades H147"; current evidence shows EMA improves slightly without beating. H181 (longer window) and H182 (higher LR × EMA) remain the wave-4 falsifiability tests.
@@ -166,10 +166,10 @@ Revised based on H180 walkback, H172 EP20→EP23 stall, and H172 leadership weak
 |---|---|---|---|---|
 | H176 | #1486 | frieren | ✓ CLOSED 20:24Z 2026-05-30 | H181 EMA 0.99995 dispatched (PR #1503) |
 | H180 | #1494 | nezuko | ✓ CLOSED 22:39Z 2026-05-30 | H182 EMA+LR 1.3× dispatched (PR #1506) |
-| H181 | #1503 | frieren | 2026-05-31 ~20:30Z | EP4 val_WSS=32.29 (EMA-99995 washout normal); kill ladder recalibrated; main running |
-| H182 | #1506 | nezuko | 2026-05-31 ~21:30Z | main launched 23:58Z 2026-05-30, j3eopxpp; EP1 ETA ~01:40Z |
-| H178 | #1493 | fern | ~02:30-03:30Z 2026-05-31 | EP13 WSS flat 6.83, VP=4.036 BREACH; NON-MERGE sealed; dispatch **H-W5-1 WSD LR Schedule** |
-| H172 | #1469 | tanjiro | ~03:40Z 2026-05-31 | EP28 val_WSS=6.6481 descent recovered; NON-MERGE on WSS but VP clears; dispatch **H-W5-2 Per-Channel Decoder Heads** |
+| H181 | #1503 | frieren | 2026-05-31 ~20:30Z | EP5 val_WSS=19.52 (washout proceeding normally, ~40%/EP descent) |
+| H182 | #1506 | nezuko | 2026-05-31 ~21:30Z | EP2 val_WSS=43.51 **−7pp vs H172 EP2**, strong early lead (rank-0 `ecw2sct9`) |
+| H178 | #1493 | fern | ~02:50Z 2026-05-31 | EP13 WSS plateau 6.83, VP=4.036 BREACH; terminal at EP16 imminent; dispatch **H-W5-1 WSD LR Schedule** |
+| H172 | #1469 | tanjiro | ~03:40Z 2026-05-31 | EP28 val_WSS=6.6481 descent decelerating (−0.0014/EP); EP30 terminal ~6.645; NON-MERGE on WSS; dispatch **H-W5-2 Per-Channel Decoder Heads** |
 
 ## H147 actual EP boundaries (from k6q4c3on val history, authoritative reference)
 
