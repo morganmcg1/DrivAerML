@@ -95,6 +95,19 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H333: cal-coefficient stability + robust-regression arms. When enabled,
+    # the OLS cal block additionally fits 4 alternative cal arms post-hoc on
+    # the per-car sufficient stats already collected by test_time_calibration:
+    #   B. LOO-CV mean       — 34 OLS refits each excluding one val car
+    #   C. Bootstrap mean    — n_bootstrap resamples with replacement
+    #   D. L1 / median       — QuantileRegressor(0.5) on per-car means weighted by N_c
+    #   E. Huber-psi1.345    — HuberRegressor(epsilon=1.345) on per-car means weighted by N_c
+    # Arm A is the existing OLS fit (H312 reference). All 5 arms apply
+    # the same compute_calibrated_metrics path and are logged independently.
+    cal_stability_arms: bool = False
+    cal_bootstrap_samples: int = 1000
+    cal_bootstrap_seed: int = 0
+    cal_huber_epsilon: float = 1.345
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -560,6 +573,238 @@ def fit_affine_per_channel(
     return alpha, beta
 
 
+# --- H333 cal stability + robust regression arms ---
+
+
+def _stack_per_case_stats(
+    per_case: dict[str, torch.Tensor],
+) -> tuple[list[str], torch.Tensor]:
+    """Stack a {case_id -> (n_ch, 6)} dict into a sorted (n_cars, n_ch, 6) tensor.
+
+    Returns (sorted_case_ids, stacked_stats). All callers use the same sort so
+    LOO / bootstrap indexing stays deterministic across arms.
+    """
+    case_ids = sorted(per_case.keys())
+    stacked = torch.stack([per_case[c] for c in case_ids], dim=0)
+    return case_ids, stacked
+
+
+def fit_affine_loo_per_channel(
+    global_stats: torch.Tensor,
+    per_case: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Leave-one-out OLS per channel over cars.
+
+    For each car c, refit OLS on (global_stats - per_case[c]). Returns
+    a dict with per-channel:
+      alpha_mean / beta_mean — mean over LOO folds (Arm B point estimate)
+      alpha_min / alpha_max  — range across folds
+      alpha_range            — max - min (primary stability diagnostic)
+      alpha_jack_std         — jackknife std = sqrt((N-1)/N * sum((a_i - a_mean)^2))
+      alpha_all / beta_all   — (n_cars, n_ch) full distribution
+    """
+    case_ids, stacked = _stack_per_case_stats(per_case)
+    n_cars = stacked.shape[0]
+    n_ch = stacked.shape[1]
+    alphas = torch.empty(n_cars, n_ch, dtype=torch.float64)
+    betas = torch.empty(n_cars, n_ch, dtype=torch.float64)
+    for i in range(n_cars):
+        loo = global_stats - stacked[i]
+        a, b = fit_affine_per_channel(loo)
+        alphas[i] = a
+        betas[i] = b
+    a_mean = alphas.mean(0)
+    a_max = alphas.max(0).values
+    a_min = alphas.min(0).values
+    jack_var = (n_cars - 1) / n_cars * ((alphas - a_mean.unsqueeze(0)) ** 2).sum(0)
+    return {
+        "alpha_mean": a_mean,
+        "beta_mean": betas.mean(0),
+        "alpha_min": a_min,
+        "alpha_max": a_max,
+        "alpha_range": a_max - a_min,
+        "alpha_jack_std": jack_var.clamp(min=0.0).sqrt(),
+        "alpha_all": alphas,
+        "beta_all": betas,
+        "case_ids": case_ids,
+    }
+
+
+def fit_affine_bootstrap_per_channel(
+    per_case: dict[str, torch.Tensor],
+    n_bootstrap: int = 1000,
+    seed: int = 0,
+) -> dict[str, torch.Tensor]:
+    """Bootstrap OLS per channel over cars.
+
+    Sample n_cars car ids with replacement, sum the corresponding per-car stats
+    (so a car drawn k times contributes k * per_case[c]), fit OLS. Repeat
+    n_bootstrap times. Returns per-channel alpha_mean / beta_mean / alpha_std.
+
+    Note: when a car appears k times in a resample, all its sufficient-stat
+    columns scale by k linearly. We implement this by multinomial counts then
+    a single tensor product, which is faster than re-summing per draw.
+    """
+    case_ids, stacked = _stack_per_case_stats(per_case)
+    n_cars = stacked.shape[0]
+    n_ch = stacked.shape[1]
+    n_cols = stacked.shape[2]
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(seed)
+    alphas = torch.empty(n_bootstrap, n_ch, dtype=torch.float64)
+    betas = torch.empty(n_bootstrap, n_ch, dtype=torch.float64)
+    flat_stats = stacked.reshape(n_cars, n_ch * n_cols)  # (n_cars, n_ch*6)
+    for b in range(n_bootstrap):
+        idx = torch.randint(0, n_cars, (n_cars,), generator=gen)
+        counts = torch.bincount(idx, minlength=n_cars).to(torch.float64)
+        boot_global_flat = counts @ flat_stats  # (n_ch*6,)
+        boot_global = boot_global_flat.view(n_ch, n_cols)
+        a, bb = fit_affine_per_channel(boot_global)
+        alphas[b] = a
+        betas[b] = bb
+    return {
+        "alpha_mean": alphas.mean(0),
+        "beta_mean": betas.mean(0),
+        "alpha_std": alphas.std(0, unbiased=True),
+        "beta_std": betas.std(0, unbiased=True),
+        "alpha_p025": torch.quantile(alphas, 0.025, dim=0),
+        "alpha_p975": torch.quantile(alphas, 0.975, dim=0),
+        "alpha_all": alphas,
+        "beta_all": betas,
+    }
+
+
+def _per_car_rmse(
+    stacked: torch.Tensor, alpha: torch.Tensor, beta: torch.Tensor
+) -> torch.Tensor:
+    """Per-car per-channel RMSE under affine map alpha*p+beta.
+
+    Vectorized form of ``sqrt(_affine_error_sq(stacked[c, ch], alpha[ch], beta[ch]) / N[c, ch])``.
+    Returns shape (n_cars, n_ch).
+    """
+    N = stacked[..., 0]
+    sum_p = stacked[..., 1]
+    sum_t = stacked[..., 2]
+    sum_pp = stacked[..., 3]
+    sum_tt = stacked[..., 4]
+    sum_pt = stacked[..., 5]
+    a = alpha.unsqueeze(0)
+    b = beta.unsqueeze(0)
+    sse = (
+        a * a * sum_pp
+        + 2.0 * a * b * sum_p
+        - 2.0 * a * sum_pt
+        + b * b * N
+        - 2.0 * b * sum_t
+        + sum_tt
+    ).clamp(min=0.0)
+    return torch.sqrt(sse / N.clamp(min=1.0))
+
+
+def _irls_fit_per_car(
+    stacked: torch.Tensor,
+    weight_fn,
+    max_iter: int = 50,
+    tol: float = 1e-9,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+    """Generic IRLS at the car level on per-car sufficient stats.
+
+    Args:
+      stacked: (n_cars, n_ch, 6) per-car sufficient stats.
+      weight_fn: callable (rmse_per_car: (n_cars, n_ch)) -> w_per_car: (n_cars, n_ch).
+        Each iteration computes per-car per-channel RMSE under the current
+        (alpha, beta) fit, passes to ``weight_fn`` to get per-car weights,
+        then re-fits OLS on ``sum_c w[c, ch] * stacked[c, ch, :]``.
+        Scaling all 6 stat columns by the same w_c is equivalent to
+        downweighting every point inside car c by w_c, since sufficient
+        stats are linear in per-point contributions.
+
+    Returns ``(alpha, beta, diag)`` where ``diag`` contains the final per-car
+    weights and the number of iterations to convergence.
+    """
+    global_stats = stacked.sum(dim=0)
+    alpha, beta = fit_affine_per_channel(global_stats)
+    last_w = torch.ones(stacked.shape[0], stacked.shape[1], dtype=torch.float64)
+    iters = 0
+    for iters in range(1, max_iter + 1):
+        rmse = _per_car_rmse(stacked, alpha, beta)
+        w = weight_fn(rmse)
+        # (n_cars, n_ch, 1) * (n_cars, n_ch, 6) -> (n_cars, n_ch, 6); sum cars.
+        weighted_global = (w.unsqueeze(-1) * stacked).sum(dim=0)
+        new_alpha, new_beta = fit_affine_per_channel(weighted_global)
+        delta = torch.maximum(
+            (new_alpha - alpha).abs().max(), (new_beta - beta).abs().max()
+        ).item()
+        alpha, beta = new_alpha, new_beta
+        last_w = w
+        if delta < tol:
+            break
+    return alpha, beta, {"weights": last_w, "iters": torch.tensor(float(iters))}
+
+
+def fit_affine_l1_per_channel(
+    per_case: dict[str, torch.Tensor],
+    max_iter: int = 100,
+    eps: float = 1e-10,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """L1 / median regression at the car level via IRLS on per-car stats.
+
+    Each iteration downweights cars proportional to ``1 / RMSE_c`` (the
+    standard L1 IRLS weight), where RMSE_c is the affine residual scale of
+    car c under the current fit. Scaling all 6 sufficient-stat columns of
+    car c by ``1/RMSE_c`` is equivalent to per-point weighting every point
+    in car c by ``1/RMSE_c`` (sufficient stats are linear in points).
+
+    This is the principled "robust-to-outlier-cars" regression — it asks
+    which (alpha, beta) minimize Σ_c RMSE_c rather than Σ_c RMSE_c² (OLS).
+    Per-car-mean L1 with N_c sample-weight is degenerate at val_N=34
+    because per-car means cluster tightly around the population mean.
+    """
+    _, stacked = _stack_per_case_stats(per_case)
+
+    def w_l1(rmse: torch.Tensor) -> torch.Tensor:
+        return 1.0 / rmse.clamp(min=eps)
+
+    alpha, beta, _ = _irls_fit_per_car(stacked, w_l1, max_iter=max_iter)
+    return alpha, beta
+
+
+def fit_affine_huber_per_channel(
+    per_case: dict[str, torch.Tensor],
+    epsilon: float = 1.345,
+    max_iter: int = 50,
+    eps: float = 1e-10,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Huber-psi regression at the car level via IRLS on per-car stats.
+
+    Per iteration:
+      1. Compute per-car per-channel RMSE_c under the current fit.
+      2. Estimate robust residual scale s_ch = MAD(RMSE_c) / 0.6745 per ch.
+      3. Per-car weight: w_c = 1 if RMSE_c < epsilon * s_ch else
+                       epsilon * s_ch / RMSE_c (standard Huber-psi clip).
+      4. Re-fit OLS on Σ_c w_c * stacked[c].
+
+    ``epsilon=1.345`` is the canonical Huber-psi tuning at ~95% Gaussian
+    efficiency. Like Arm D, this is a robust-to-outlier-cars M-estimator
+    fit on sufficient stats — the sklearn HuberRegressor variant on
+    per-car means is numerically degenerate at val_N=34.
+    """
+    _, stacked = _stack_per_case_stats(per_case)
+
+    def w_huber(rmse: torch.Tensor) -> torch.Tensor:
+        # Per-channel MAD scale.
+        med = torch.median(rmse, dim=0, keepdim=True).values  # (1, n_ch)
+        mad = torch.median((rmse - med).abs(), dim=0, keepdim=True).values  # (1, n_ch)
+        s = (mad / 0.6745).clamp(min=eps)  # (1, n_ch)
+        clip = epsilon * s  # (1, n_ch)
+        return torch.minimum(
+            torch.ones_like(rmse), clip / rmse.clamp(min=eps)
+        )
+
+    alpha, beta, _ = _irls_fit_per_car(stacked, w_huber, max_iter=max_iter)
+    return alpha, beta
+
+
 def _affine_error_sq(
     stats: torch.Tensor, alpha: torch.Tensor, beta: torch.Tensor
 ) -> torch.Tensor:
@@ -868,6 +1113,280 @@ def resolve_checkpoint_path(cfg: EvalConfig, state) -> tuple[Path, str]:
     return Path(ckpt_path_str), "wandb"
 
 
+# --- H333 cal stability orchestration ---
+
+
+def _summarize_alpha_stability(
+    label: str,
+    loo: dict[str, torch.Tensor],
+    boot: dict[str, torch.Tensor],
+    channel_names: list[str],
+    ols_alpha: torch.Tensor,
+) -> None:
+    """Print the per-channel stability comparison (LOO range / OLS alpha)."""
+    print(f"\n  --- {label} stability vs OLS ---", flush=True)
+    print(
+        f"  {'channel':>10s} | {'alpha_OLS':>11s} | {'a_LOO_mean':>11s} | "
+        f"{'a_LOO_range':>13s} | {'range/alpha%':>13s} | "
+        f"{'a_jack_std':>11s} | {'a_boot_mean':>12s} | {'a_boot_std':>11s}",
+        flush=True,
+    )
+    for i, name in enumerate(channel_names):
+        a_ols = float(ols_alpha[i].item())
+        a_loo_mean = float(loo["alpha_mean"][i].item())
+        a_loo_range = float(loo["alpha_range"][i].item())
+        ratio_pct = 100.0 * a_loo_range / max(abs(a_ols), 1e-12)
+        jack_std = float(loo["alpha_jack_std"][i].item())
+        a_boot_mean = float(boot["alpha_mean"][i].item())
+        a_boot_std = float(boot["alpha_std"][i].item())
+        print(
+            f"  {name:>10s} | {a_ols:>+11.6f} | {a_loo_mean:>+11.6f} | "
+            f"{a_loo_range:>13.6f} | {ratio_pct:>12.4f}% | "
+            f"{jack_std:>11.6f} | {a_boot_mean:>+12.6f} | {a_boot_std:>11.6f}",
+            flush=True,
+        )
+
+
+def _run_cal_stability_arms(
+    *,
+    mode: str,
+    val_cal: CalibrationStats,
+    test_cal: CalibrationStats,
+    alpha_surf_ols: torch.Tensor,
+    beta_surf_ols: torch.Tensor,
+    alpha_vol_ols: torch.Tensor,
+    beta_vol_ols: torch.Tensor,
+    val_raw: dict[str, float],
+    test_raw: dict[str, float],
+    val_cal_metrics_ols: dict[str, float],
+    test_cal_metrics_ols: dict[str, float],
+    cal_metrics_by_split_mode: dict[str, dict[str, dict[str, float]]],
+    run,
+    cfg: EvalConfig,
+) -> None:
+    """Fit arms B/C/D/E on val per-car stats, apply to val+test, log to W&B.
+
+    Surface (4 ch) and volume (1 ch) are fit independently per arm. The OLS arm
+    (A) is the existing val_cal_metrics_ols / test_cal_metrics_ols, replayed
+    here under the arm-prefixed keys for symmetry.
+    """
+    print(f"\n=== H333 cal-stability arms (mode={mode}) ===", flush=True)
+    surf_channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
+    vol_channel_names = ["volume_pressure"]
+
+    # Arm B: LOO over val cars (separately for surf and vol).
+    surf_loo = fit_affine_loo_per_channel(val_cal.surf_global, val_cal.surf_per_case)
+    vol_loo = fit_affine_loo_per_channel(val_cal.vol_global, val_cal.vol_per_case)
+
+    # Arm C: bootstrap over val cars.
+    surf_boot = fit_affine_bootstrap_per_channel(
+        val_cal.surf_per_case,
+        n_bootstrap=cfg.cal_bootstrap_samples,
+        seed=cfg.cal_bootstrap_seed,
+    )
+    vol_boot = fit_affine_bootstrap_per_channel(
+        val_cal.vol_per_case,
+        n_bootstrap=cfg.cal_bootstrap_samples,
+        seed=cfg.cal_bootstrap_seed,
+    )
+
+    # Stability diagnostic printout (dispositive: LOO range / OLS alpha).
+    _summarize_alpha_stability(
+        "surface", surf_loo, surf_boot, surf_channel_names, alpha_surf_ols
+    )
+    _summarize_alpha_stability(
+        "volume", vol_loo, vol_boot, vol_channel_names, alpha_vol_ols
+    )
+
+    # Arm D: L1 / median regression at car-level via IRLS on per-car stats.
+    alpha_surf_l1, beta_surf_l1 = fit_affine_l1_per_channel(val_cal.surf_per_case)
+    alpha_vol_l1, beta_vol_l1 = fit_affine_l1_per_channel(val_cal.vol_per_case)
+
+    # Arm E: Huber-psi regression at car-level via IRLS on per-car stats.
+    alpha_surf_huber, beta_surf_huber = fit_affine_huber_per_channel(
+        val_cal.surf_per_case, epsilon=cfg.cal_huber_epsilon
+    )
+    alpha_vol_huber, beta_vol_huber = fit_affine_huber_per_channel(
+        val_cal.vol_per_case, epsilon=cfg.cal_huber_epsilon
+    )
+
+    print(f"\n  --- per-channel alpha,beta (mode={mode}) ---", flush=True)
+    print(
+        f"  {'channel':>16s} | {'ols_a':>10s} {'ols_b':>11s} | "
+        f"{'loo_a':>10s} {'loo_b':>11s} | {'boot_a':>10s} {'boot_b':>11s} | "
+        f"{'l1_a':>10s} {'l1_b':>11s} | {'huber_a':>10s} {'huber_b':>11s}",
+        flush=True,
+    )
+    surf_pack = [
+        ("ols", alpha_surf_ols, beta_surf_ols),
+        ("loo", surf_loo["alpha_mean"], surf_loo["beta_mean"]),
+        ("boot", surf_boot["alpha_mean"], surf_boot["beta_mean"]),
+        ("l1", alpha_surf_l1, beta_surf_l1),
+        ("huber", alpha_surf_huber, beta_surf_huber),
+    ]
+    vol_pack = [
+        ("ols", alpha_vol_ols, beta_vol_ols),
+        ("loo", vol_loo["alpha_mean"], vol_loo["beta_mean"]),
+        ("boot", vol_boot["alpha_mean"], vol_boot["beta_mean"]),
+        ("l1", alpha_vol_l1, beta_vol_l1),
+        ("huber", alpha_vol_huber, beta_vol_huber),
+    ]
+    for c, name in enumerate(surf_channel_names):
+        cells = " | ".join(
+            f"{a[c].item():>+10.6f} {b[c].item():>+11.6f}" for _, a, b in surf_pack
+        )
+        print(f"  {name:>16s} | {cells}", flush=True)
+    for c, name in enumerate(vol_channel_names):
+        cells = " | ".join(
+            f"{a[c].item():>+10.6f} {b[c].item():>+11.6f}" for _, a, b in vol_pack
+        )
+        print(f"  {name:>16s} | {cells}", flush=True)
+
+    arms: list[tuple[str, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = [
+        ("ols", alpha_surf_ols, beta_surf_ols, alpha_vol_ols, beta_vol_ols),
+        (
+            "loo",
+            surf_loo["alpha_mean"],
+            surf_loo["beta_mean"],
+            vol_loo["alpha_mean"],
+            vol_loo["beta_mean"],
+        ),
+        (
+            "bootstrap",
+            surf_boot["alpha_mean"],
+            surf_boot["beta_mean"],
+            vol_boot["alpha_mean"],
+            vol_boot["beta_mean"],
+        ),
+        ("l1", alpha_surf_l1, beta_surf_l1, alpha_vol_l1, beta_vol_l1),
+        ("huber", alpha_surf_huber, beta_surf_huber, alpha_vol_huber, beta_vol_huber),
+    ]
+
+    print(f"\n  --- 5-arm comparison (mode={mode}) ---", flush=True)
+    print(
+        f"  {'arm':>10s} | {'val_raw':>9s} | {'val_cal':>9s} | "
+        f"{'test_raw':>9s} | {'test_cal':>9s}",
+        flush=True,
+    )
+    val_raw_abupt = val_raw["abupt_axis_mean_rel_l2_pct"]
+    test_raw_abupt = test_raw["abupt_axis_mean_rel_l2_pct"]
+    for arm_name, a_s, b_s, a_v, b_v in arms:
+        if arm_name == "ols":
+            val_m = val_cal_metrics_ols
+            test_m = test_cal_metrics_ols
+        else:
+            val_m = compute_calibrated_metrics(val_cal, a_s, b_s, a_v, b_v)
+            test_m = compute_calibrated_metrics(test_cal, a_s, b_s, a_v, b_v)
+            cal_metrics_by_split_mode.setdefault(
+                f"val_surface__h333_{arm_name}", {}
+            )[mode] = val_m
+            cal_metrics_by_split_mode.setdefault(
+                f"test_surface__h333_{arm_name}", {}
+            )[mode] = test_m
+        print(
+            f"  {arm_name:>10s} | {val_raw_abupt:>9.4f} | "
+            f"{val_m['abupt_axis_mean_rel_l2_pct']:>9.4f} | "
+            f"{test_raw_abupt:>9.4f} | "
+            f"{test_m['abupt_axis_mean_rel_l2_pct']:>9.4f}",
+            flush=True,
+        )
+
+        if run is not None:
+            # Per-arm alpha/beta on W&B summary.
+            for c, name in enumerate(surf_channel_names):
+                run.summary[
+                    f"h333_cal_{arm_name}/{mode}/alpha_{name}"
+                ] = float(a_s[c].item())
+                run.summary[
+                    f"h333_cal_{arm_name}/{mode}/beta_{name}"
+                ] = float(b_s[c].item())
+            run.summary[
+                f"h333_cal_{arm_name}/{mode}/alpha_volume_pressure"
+            ] = float(a_v[0].item())
+            run.summary[
+                f"h333_cal_{arm_name}/{mode}/beta_volume_pressure"
+            ] = float(b_v[0].item())
+
+            # Per-arm primary metrics. Use both a wandb.log() entry and a
+            # summary entry so dashboards and downstream parsers both see them.
+            val_log = {
+                f"full_val_primary_h333_{arm_name}/{mode}/{k}": v
+                for k, v in val_m.items()
+            }
+            test_log = {
+                f"test_primary_h333_{arm_name}/{mode}/{k}": v
+                for k, v in test_m.items()
+            }
+            wandb.log({**val_log, **test_log})
+            run.summary[f"val_abupt_h333_{arm_name}"] = float(
+                val_m["abupt_axis_mean_rel_l2_pct"]
+            )
+            run.summary[f"test_abupt_h333_{arm_name}"] = float(
+                test_m["abupt_axis_mean_rel_l2_pct"]
+            )
+
+    # Per-channel stability diagnostic to W&B summary (used by reporting).
+    if run is not None:
+        # OLS reference + LOO range / jack std + bootstrap std per channel.
+        for i, name in enumerate(surf_channel_names):
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_ols"
+            ] = float(alpha_surf_ols[i].item())
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_loo_mean"
+            ] = float(surf_loo["alpha_mean"][i].item())
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_loo_range"
+            ] = float(surf_loo["alpha_range"][i].item())
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_loo_range_ratio"
+            ] = float(
+                surf_loo["alpha_range"][i].item()
+                / max(abs(alpha_surf_ols[i].item()), 1e-12)
+            )
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_jack_std"
+            ] = float(surf_loo["alpha_jack_std"][i].item())
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_bootstrap_std"
+            ] = float(surf_boot["alpha_std"][i].item())
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_l1"
+            ] = float(alpha_surf_l1[i].item())
+            run.summary[
+                f"h333_stability/{mode}/alpha_{name}_huber"
+            ] = float(alpha_surf_huber[i].item())
+        # Volume single channel.
+        vname = vol_channel_names[0]
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_ols"
+        ] = float(alpha_vol_ols[0].item())
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_loo_mean"
+        ] = float(vol_loo["alpha_mean"][0].item())
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_loo_range"
+        ] = float(vol_loo["alpha_range"][0].item())
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_loo_range_ratio"
+        ] = float(
+            vol_loo["alpha_range"][0].item()
+            / max(abs(alpha_vol_ols[0].item()), 1e-12)
+        )
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_jack_std"
+        ] = float(vol_loo["alpha_jack_std"][0].item())
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_bootstrap_std"
+        ] = float(vol_boot["alpha_std"][0].item())
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_l1"
+        ] = float(alpha_vol_l1[0].item())
+        run.summary[
+            f"h333_stability/{mode}/alpha_{vname}_huber"
+        ] = float(alpha_vol_huber[0].item())
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     # NCCL TCPStore default is 600s; full-stack 60-pass eval can have val_surface
     # straggler waits >600s before the next collective, triggering a wait-timeout
@@ -1135,6 +1654,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
                 run.summary["test_abupt_h300_raw"] = float(
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
+                )
+
+            # H333: cal-coefficient stability + robust-regression arms.
+            if cfg.cal_stability_arms:
+                _run_cal_stability_arms(
+                    mode=mode,
+                    val_cal=val_cal,
+                    test_cal=test_cal,
+                    alpha_surf_ols=alpha_surf,
+                    beta_surf_ols=beta_surf,
+                    alpha_vol_ols=alpha_vol,
+                    beta_vol_ols=beta_vol,
+                    val_raw=summary["val_surface"][mode],
+                    test_raw=summary["test_surface"][mode],
+                    val_cal_metrics_ols=val_cal_metrics,
+                    test_cal_metrics_ols=test_cal_metrics,
+                    cal_metrics_by_split_mode=cal_metrics_by_split_mode,
+                    run=run,
+                    cfg=cfg,
                 )
 
     if state.is_main and summary:
