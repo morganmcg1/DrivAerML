@@ -95,6 +95,14 @@ class EvalConfig:
     # and calibrated rel_l2-family metrics; MAE is not analytically expressible
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
+    # H317: degree of the per-channel test-time calibration polynomial.
+    #   1 = affine     y = alpha*p + beta              (H300, 2 params/channel)
+    #   2 = quadratic  y = a0 + a1*p + a2*p^2          (H317, 3 params/channel)
+    # Quadratic adds 1 DOF/channel (+5 params total over the affine version) and
+    # is fit from extended sufficient stats (sum_ppp, sum_pppp, sum_ppt) on the
+    # val split, then applied to test. Only consulted when test_time_calibration
+    # is True.
+    test_time_calibration_degree: int = 1
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -466,16 +474,20 @@ def process_case_stacked(
 # Surface preds are [cp, tau_x, tau_y, tau_z]; volume preds are [volume_pressure].
 N_SURF_CHANNELS = 4
 N_VOL_CHANNELS = 1
-# Sufficient-stats column layout: [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt].
-N_STAT_COLS = 6
+# Sufficient-stats column layout. The first 6 columns are the H300 affine stats;
+# the last 3 are needed for the H317 per-channel quadratic fit (y = a0 + a1*p + a2*p^2)
+# and its analytic SSE under that quadratic map:
+#   [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt, sum_ppp, sum_pppp, sum_ppt]
+N_STAT_COLS = 9
 
 
 @dataclass
 class CalibrationStats:
-    """Per-case per-channel sufficient stats for fitting an affine OLS
-    calibration y_hat = alpha * y + beta and recomputing per-case rel_l2
-    metrics under that affine map. Surface has 4 channels (cp, tau_x, tau_y,
-    tau_z), volume has 1 (volume_pressure)."""
+    """Per-case per-channel sufficient stats for fitting either an affine
+    (H300, y = alpha*p + beta) or a quadratic (H317, y = a0 + a1*p + a2*p^2)
+    OLS calibration map and recomputing per-case rel_l2 metrics under it.
+    Surface has 4 channels (cp, tau_x, tau_y, tau_z); volume has 1
+    (volume_pressure)."""
 
     surf_global: torch.Tensor = field(
         default_factory=lambda: torch.zeros(N_SURF_CHANNELS, N_STAT_COLS, dtype=torch.float64)
@@ -488,22 +500,32 @@ class CalibrationStats:
 
 
 def _channel_stats(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Return (n_channels, 6) tensor with [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt].
+    """Return (n_channels, 9) tensor with the per-channel sufficient stats:
+    [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt, sum_ppp, sum_pppp, sum_ppt].
 
-    pred, target: (N_points, n_channels) tensors in real units. Computed in float64
-    so accumulation across cases / DDP ranks does not lose precision.
+    The first 6 columns are the H300 affine OLS stats; the last 3 are required
+    to (a) build the 3x3 normal equations for the H317 per-channel quadratic
+    fit and (b) compute the analytic SSE under the resulting quadratic map.
+
+    pred, target: (N_points, n_channels) tensors in real units. Computed in
+    float64 so accumulation across cases / DDP ranks does not lose precision
+    (especially for sum_ppp / sum_pppp, which grow like |p|^3 / |p|^4).
     """
     p = pred.double()
     t = target.double()
     n_points = p.shape[0]
     n_ch = p.shape[1]
+    pp = p * p
     stats = torch.empty(n_ch, N_STAT_COLS, dtype=torch.float64)
     stats[:, 0] = float(n_points)
     stats[:, 1] = p.sum(0)
     stats[:, 2] = t.sum(0)
-    stats[:, 3] = (p * p).sum(0)
+    stats[:, 3] = pp.sum(0)
     stats[:, 4] = (t * t).sum(0)
     stats[:, 5] = (p * t).sum(0)
+    stats[:, 6] = (pp * p).sum(0)
+    stats[:, 7] = (pp * pp).sum(0)
+    stats[:, 8] = (pp * t).sum(0)
     return stats
 
 
@@ -565,7 +587,7 @@ def _affine_error_sq(
 ) -> torch.Tensor:
     """Sum_p (alpha * p + beta - t)^2 per channel given sufficient stats.
 
-    stats: (..., 6) with [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt].
+    stats: (..., 9) with [N, sum_p, sum_t, sum_pp, sum_tt, sum_pt, ...].
     alpha, beta: broadcastable to stats[..., 0] shape.
     """
     N = stats[..., 0]
@@ -584,19 +606,135 @@ def _affine_error_sq(
     )
 
 
+def fit_quadratic_per_channel(
+    global_stats: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """H317: OLS a0, a1, a2 per channel for y = a0 + a1*p + a2*p^2.
+
+    Solves the 3x3 normal equations per channel from the sufficient stats:
+
+        [ N        sum_p     sum_pp   ] [a0]   [sum_t   ]
+        [ sum_p    sum_pp    sum_ppp  ] [a1] = [sum_pt  ]
+        [ sum_pp   sum_ppp   sum_pppp ] [a2]   [sum_ppt ]
+
+    Falls back to the identity map (a0=0, a1=1, a2=0) on any channel whose
+    3x3 design matrix is singular (e.g. constant predictions).
+    """
+    N = global_stats[:, 0]
+    sum_p = global_stats[:, 1]
+    sum_t = global_stats[:, 2]
+    sum_pp = global_stats[:, 3]
+    sum_pt = global_stats[:, 5]
+    sum_ppp = global_stats[:, 6]
+    sum_pppp = global_stats[:, 7]
+    sum_ppt = global_stats[:, 8]
+
+    n_channels = N.shape[0]
+    a0 = torch.zeros(n_channels, dtype=N.dtype, device=N.device)
+    a1 = torch.ones(n_channels, dtype=N.dtype, device=N.device)
+    a2 = torch.zeros(n_channels, dtype=N.dtype, device=N.device)
+    for c in range(n_channels):
+        M = torch.tensor(
+            [
+                [N[c].item(), sum_p[c].item(), sum_pp[c].item()],
+                [sum_p[c].item(), sum_pp[c].item(), sum_ppp[c].item()],
+                [sum_pp[c].item(), sum_ppp[c].item(), sum_pppp[c].item()],
+            ],
+            dtype=N.dtype,
+            device=N.device,
+        )
+        rhs = torch.tensor(
+            [sum_t[c].item(), sum_pt[c].item(), sum_ppt[c].item()],
+            dtype=N.dtype,
+            device=N.device,
+        )
+        try:
+            coeffs = torch.linalg.solve(M, rhs)
+            a0[c] = coeffs[0]
+            a1[c] = coeffs[1]
+            a2[c] = coeffs[2]
+        except torch._C._LinAlgError:
+            # Singular normal matrix (constant or near-constant predictions);
+            # keep the identity init (a0=0, a1=1, a2=0).
+            pass
+    return a0, a1, a2
+
+
+def _quadratic_error_sq(
+    stats: torch.Tensor,
+    a0: torch.Tensor,
+    a1: torch.Tensor,
+    a2: torch.Tensor,
+) -> torch.Tensor:
+    """Sum_p (a0 + a1*p + a2*p^2 - t)^2 per channel given sufficient stats.
+
+    Expanding the square and summing termwise:
+
+        sum (a0 + a1*p + a2*p^2 - t)^2
+          = a0^2 * N
+          + a1^2 * sum_pp
+          + a2^2 * sum_pppp
+          + 2*a0*a1 * sum_p
+          + 2*a0*a2 * sum_pp
+          + 2*a1*a2 * sum_ppp
+          - 2*a0 * sum_t
+          - 2*a1 * sum_pt
+          - 2*a2 * sum_ppt
+          + sum_tt
+
+    stats: (..., 9) sufficient-stats tensor; a0, a1, a2 broadcastable to
+    stats[..., 0] shape.
+    """
+    N = stats[..., 0]
+    sum_p = stats[..., 1]
+    sum_t = stats[..., 2]
+    sum_pp = stats[..., 3]
+    sum_tt = stats[..., 4]
+    sum_pt = stats[..., 5]
+    sum_ppp = stats[..., 6]
+    sum_pppp = stats[..., 7]
+    sum_ppt = stats[..., 8]
+    return (
+        a0 * a0 * N
+        + a1 * a1 * sum_pp
+        + a2 * a2 * sum_pppp
+        + 2.0 * a0 * a1 * sum_p
+        + 2.0 * a0 * a2 * sum_pp
+        + 2.0 * a1 * a2 * sum_ppp
+        - 2.0 * a0 * sum_t
+        - 2.0 * a1 * sum_pt
+        - 2.0 * a2 * sum_ppt
+        + sum_tt
+    )
+
+
 def compute_calibrated_metrics(
     cal: CalibrationStats,
-    alpha_surf: torch.Tensor,
-    beta_surf: torch.Tensor,
-    alpha_vol: torch.Tensor,
-    beta_vol: torch.Tensor,
+    surf_coeffs: tuple[torch.Tensor, ...],
+    vol_coeffs: tuple[torch.Tensor, ...],
 ) -> dict[str, float]:
     """Per-case averaged rel_l2 metrics on calibrated predictions.
 
     Mirrors the keys produced by ``finalize_eval_accumulator`` for the rel_l2
     family. MAE-style metrics are not analytically computable from these
-    sufficient stats under an affine map and are omitted.
+    sufficient stats under a polynomial map and are omitted.
+
+    ``surf_coeffs`` / ``vol_coeffs`` are per-channel coefficient tuples:
+      - length 2  -> affine     (alpha, beta), error via ``_affine_error_sq``
+      - length 3  -> quadratic  (a0, a1, a2), error via ``_quadratic_error_sq``
     """
+    if len(surf_coeffs) not in (2, 3) or len(vol_coeffs) != len(surf_coeffs):
+        raise ValueError(
+            f"compute_calibrated_metrics: surf_coeffs/vol_coeffs must both be "
+            f"length 2 (affine) or 3 (quadratic); got "
+            f"surf={len(surf_coeffs)} vol={len(vol_coeffs)}"
+        )
+
+    def _err_sq(stats: torch.Tensor, coeffs: tuple[torch.Tensor, ...]) -> torch.Tensor:
+        if len(coeffs) == 2:
+            return _affine_error_sq(stats, coeffs[0], coeffs[1])
+        return _quadratic_error_sq(stats, coeffs[0], coeffs[1], coeffs[2])
+
     surf_ids = sorted(cal.surf_per_case.keys())
     if not surf_ids:
         raise RuntimeError("CalibrationStats is empty; cannot compute calibrated metrics")
@@ -604,14 +742,15 @@ def compute_calibrated_metrics(
     surf_per_channel_rel_l2: list[torch.Tensor] = []
     vec_rel_l2_list: list[torch.Tensor] = []
     for case_id in surf_ids:
-        s = cal.surf_per_case[case_id]  # (4, 6)
-        e_sq = _affine_error_sq(s, alpha_surf, beta_surf)  # (4,)
+        s = cal.surf_per_case[case_id]  # (4, N_STAT_COLS)
+        e_sq = _err_sq(s, surf_coeffs)  # (4,)
         t_sq = s[..., 4]  # sum of squared targets per channel
         rel = torch.sqrt(e_sq.clamp(min=0.0) / t_sq.clamp(min=1e-12))
         surf_per_channel_rel_l2.append(rel)
 
-        s_vec = s[1:4]  # (3, 6): tau_x, tau_y, tau_z
-        e_sq_vec = _affine_error_sq(s_vec, alpha_surf[1:4], beta_surf[1:4])  # (3,)
+        s_vec = s[1:4]  # (3, N_STAT_COLS): tau_x, tau_y, tau_z
+        vec_coeffs = tuple(c[1:4] for c in surf_coeffs)
+        e_sq_vec = _err_sq(s_vec, vec_coeffs)  # (3,)
         t_sq_vec = s_vec[..., 4]
         rel_vec = torch.sqrt(e_sq_vec.sum().clamp(min=0.0) / t_sq_vec.sum().clamp(min=1e-12))
         vec_rel_l2_list.append(rel_vec)
@@ -621,8 +760,8 @@ def compute_calibrated_metrics(
     vol_ids = sorted(cal.vol_per_case.keys())
     vol_per_channel_rel_l2: list[torch.Tensor] = []
     for case_id in vol_ids:
-        v = cal.vol_per_case[case_id]  # (1, 6)
-        e_sq = _affine_error_sq(v, alpha_vol, beta_vol)  # (1,)
+        v = cal.vol_per_case[case_id]  # (1, N_STAT_COLS)
+        e_sq = _err_sq(v, vol_coeffs)  # (1,)
         t_sq = v[..., 4]
         rel = torch.sqrt(e_sq.clamp(min=0.0) / t_sq.clamp(min=1e-12))
         vol_per_channel_rel_l2.append(rel)
@@ -1053,9 +1192,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     # Always restore clean weights at the end.
     restore_clean_params(eval_module, clean)
 
-    # H300: per-channel affine calibration applied on val, transferred to test.
+    # H300/H317: per-channel test-time calibration fit on val, applied to test.
+    # Degree 1 = affine (H300); degree 2 = quadratic (H317).
     cal_metrics_by_split_mode: dict[str, dict[str, dict[str, float]]] = {}
     if cfg.test_time_calibration and state.is_main:
+        degree = int(cfg.test_time_calibration_degree)
+        if degree not in (1, 2):
+            raise ValueError(
+                f"--test-time-calibration-degree must be 1 (affine) or 2 (quadratic); "
+                f"got {degree}"
+            )
         for mode in modes:
             val_cal = cal_summary.get("val_surface", {}).get(mode)
             test_cal = cal_summary.get("test_surface", {}).get(mode)
@@ -1066,29 +1212,51 @@ def main(argv: Iterable[str] | None = None) -> None:
                     flush=True,
                 )
                 continue
-            alpha_surf, beta_surf = fit_affine_per_channel(val_cal.surf_global)
-            alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
 
             channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
-            print(f"\n=== H300 calibration (fit on val, mode={mode}) ===", flush=True)
-            for c, name in enumerate(channel_names):
+            if degree == 1:
+                alpha_surf, beta_surf = fit_affine_per_channel(val_cal.surf_global)
+                alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
+                surf_coeffs: tuple[torch.Tensor, ...] = (alpha_surf, beta_surf)
+                vol_coeffs: tuple[torch.Tensor, ...] = (alpha_vol, beta_vol)
                 print(
-                    f"  surface[{name:6s}]  alpha={alpha_surf[c].item():+.6f} "
-                    f"beta={beta_surf[c].item():+.6f}",
+                    f"\n=== H300 affine calibration (fit on val, mode={mode}) ===",
                     flush=True,
                 )
-            print(
-                f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
-                f"beta={beta_vol[0].item():+.6f}",
-                flush=True,
-            )
+                for c, name in enumerate(channel_names):
+                    print(
+                        f"  surface[{name:6s}]  alpha={alpha_surf[c].item():+.6f} "
+                        f"beta={beta_surf[c].item():+.6f}",
+                        flush=True,
+                    )
+                print(
+                    f"  volume[volume_pressure]  alpha={alpha_vol[0].item():+.6f} "
+                    f"beta={beta_vol[0].item():+.6f}",
+                    flush=True,
+                )
+            else:
+                a0_surf, a1_surf, a2_surf = fit_quadratic_per_channel(val_cal.surf_global)
+                a0_vol, a1_vol, a2_vol = fit_quadratic_per_channel(val_cal.vol_global)
+                surf_coeffs = (a0_surf, a1_surf, a2_surf)
+                vol_coeffs = (a0_vol, a1_vol, a2_vol)
+                print(
+                    f"\n=== H317 quadratic calibration (fit on val, mode={mode}) ===",
+                    flush=True,
+                )
+                for c, name in enumerate(channel_names):
+                    print(
+                        f"  surface[{name:6s}]  a0={a0_surf[c].item():+.6e} "
+                        f"a1={a1_surf[c].item():+.6f} a2={a2_surf[c].item():+.6e}",
+                        flush=True,
+                    )
+                print(
+                    f"  volume[volume_pressure]  a0={a0_vol[0].item():+.6e} "
+                    f"a1={a1_vol[0].item():+.6f} a2={a2_vol[0].item():+.6e}",
+                    flush=True,
+                )
 
-            val_cal_metrics = compute_calibrated_metrics(
-                val_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
-            )
-            test_cal_metrics = compute_calibrated_metrics(
-                test_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
-            )
+            val_cal_metrics = compute_calibrated_metrics(val_cal, surf_coeffs, vol_coeffs)
+            test_cal_metrics = compute_calibrated_metrics(test_cal, surf_coeffs, vol_coeffs)
             cal_metrics_by_split_mode.setdefault("val_surface", {})[mode] = val_cal_metrics
             cal_metrics_by_split_mode.setdefault("test_surface", {})[mode] = test_cal_metrics
 
@@ -1104,12 +1272,22 @@ def main(argv: Iterable[str] | None = None) -> None:
             )
 
             if run is not None:
-                # Log alpha/beta to W&B summary so they appear on the run page.
-                for c, name in enumerate(channel_names):
-                    run.summary[f"calibration/{mode}/alpha_{name}"] = float(alpha_surf[c].item())
-                    run.summary[f"calibration/{mode}/beta_{name}"] = float(beta_surf[c].item())
-                run.summary[f"calibration/{mode}/alpha_volume_pressure"] = float(alpha_vol[0].item())
-                run.summary[f"calibration/{mode}/beta_volume_pressure"] = float(beta_vol[0].item())
+                if degree == 1:
+                    # Log alpha/beta to W&B summary so they appear on the run page.
+                    for c, name in enumerate(channel_names):
+                        run.summary[f"calibration/{mode}/alpha_{name}"] = float(alpha_surf[c].item())
+                        run.summary[f"calibration/{mode}/beta_{name}"] = float(beta_surf[c].item())
+                    run.summary[f"calibration/{mode}/alpha_volume_pressure"] = float(alpha_vol[0].item())
+                    run.summary[f"calibration/{mode}/beta_volume_pressure"] = float(beta_vol[0].item())
+                else:
+                    # Log a0/a1/a2 per channel to W&B summary.
+                    for c, name in enumerate(channel_names):
+                        run.summary[f"calibration/quadratic/{mode}/a0_{name}"] = float(a0_surf[c].item())
+                        run.summary[f"calibration/quadratic/{mode}/a1_{name}"] = float(a1_surf[c].item())
+                        run.summary[f"calibration/quadratic/{mode}/a2_{name}"] = float(a2_surf[c].item())
+                    run.summary[f"calibration/quadratic/{mode}/a0_volume_pressure"] = float(a0_vol[0].item())
+                    run.summary[f"calibration/quadratic/{mode}/a1_volume_pressure"] = float(a1_vol[0].item())
+                    run.summary[f"calibration/quadratic/{mode}/a2_volume_pressure"] = float(a2_vol[0].item())
 
                 # Log calibrated primary metrics to W&B history (and as
                 # split-level summary keys for downstream parsing).
@@ -1136,6 +1314,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 run.summary["test_abupt_h300_raw"] = float(
                     summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
+                run.summary["test_time_calibration_degree"] = degree
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
