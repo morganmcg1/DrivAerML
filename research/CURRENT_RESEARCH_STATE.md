@@ -1,9 +1,50 @@
 # SENPAI Research State
 
-- **2026-05-31 01:50Z**
+- **2026-05-31 02:20Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 02:20Z snapshot — H182 EP3 lead sustained (−3.10pp vs H172); H181 EP6 washout on schedule; H172/H178 near terminal
+
+**MEMORY CORRECTION:** Earlier session-context note said "H172 EP3 = 7.36" — that was the RAW model value (now retracted). The EMA val_primary/wall_shear_rel_l2_pct at EP3 step 32,927 is **16.632** (verified from W&B). All H182 EP1-3 lead comparisons use the corrected EMA baseline.
+
+**H172 (tanjiro) corrected EP1-5 EMA baseline:**
+
+| EP | step | val_WSS | val_VP | val_SP | val_ABU |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 10,975 | 52.018 | 38.698 | 39.132 | 50.745 |
+| 2 | 21,951 | 50.497 | 39.502 | 36.373 | 48.123 |
+| 3 | 32,927 | **16.632** | 14.086 | 10.865 | 15.896 |
+| 4 | 43,903 | 8.695 | 6.915 | 5.335 | 8.235 |
+| 5 | 54,879 | 7.273 | 4.815 | 4.317 | 6.674 |
+
+**H182 (nezuko, PR #1506) EP1-3 with verified Δ vs H172:**
+
+| EP | H172 | H182 | Δ vs H172 |
+|---:|---:|---:|---:|
+| 1 | 52.018 | 48.701 | **−3.32pp** |
+| 2 | 50.497 | 43.508 | **−6.99pp** |
+| 3 | 16.632 | **13.528** | **−3.10pp** |
+
+H182 lead SUSTAINED through EP3 — LR 1.3× hypothesis still alive. Stop-loss criteria standing (>0.15pp regression triggers KILL). EP4 boundary ~02:40Z, EP5 ~02:55Z.
+
+**H181 (frieren, PR #1503) EMA-99995 washout trajectory:**
+
+| EP | val_WSS | init_mass | descent |
+|---:|---:|---:|---|
+| 2 | 75.130 | 33.3% | +21.3pp spike (known long-window signature) |
+| 3 | 54.076 | 19.2% | −21.0pp |
+| 4 | 32.290 | 11.1% | −21.8pp |
+| 5 | 19.519 | 6.4% | −12.8pp |
+| 6 | **13.678** | 3.7% | −5.8pp |
+
+Descent on recalibrated schedule. EP10 (step 109,759 ~04:00Z) is the critical gate: ≤ 7.5 = thesis alive, ≥ 8.0 = falsified (over-smoothing).
+
+- **H172 EP29 → EP30 terminal ETA ~02:30Z** (currently step ~322k of 329,250; throughput 4.07 it/s)
+- **H178 EP14 → EP15-16 terminal ETA ~03:20Z** (step ~155k of 175,600)
+- **H182 EP3 → EP4 ~02:40Z** (boundary watch continuing)
+- **H181 EP6 → EP10 critical gate ~04:00Z**
 
 ## 01:50Z snapshot — H172 EP29 mild uptick (plateau noise); H178 EP14 plateau confirmed; H182 EP3 boundary imminent
 
