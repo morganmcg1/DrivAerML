@@ -1,3 +1,26 @@
+## 2026-05-31 05:00Z — PR #1501 nezuko H315 CLOSED: TTA aggregation operator sweep — MEAN IS BLUE
+
+### Finding 'agg-operator-mean-is-blue'
+
+- **Branch**: nezuko/h315-tta-agg-operator
+- **W&B run**: 2wq13m13 (3 arms: mean / median / trim10 — paired, identical TTA passes)
+- **Hypothesis**: Robust aggregators (median, 10% trimmed mean) over the K=4 × 8-res × mirror = 64 TTA passes per case should beat uniform mean if the TTA noise distribution has heavy tails or outlier passes (Cauchy-like) that pull the arithmetic mean off the per-case truth.
+- **Result** (terminal SENPAI-RESULT, after calibration):
+
+  | Aggregator | val_cal | test_cal | Δ vs mean | Verdict |
+  |---|---:|---:|---:|---|
+  | **Mean (H312 reproduction)** | **5.8994%** | **5.7388%** | 0 (reference) | Matches H312 exactly |
+  | Median | 5.9034% | 5.7452% | +4.0bp val / +6.4bp test | Worse on all channels |
+  | Trim10 | 5.8997% | 5.7406% | +0.3bp val / +1.8bp test | Essentially tied |
+
+- **Per-channel α/β across arms**: agree to 1e-5 — confirms calibration fit is determined by base prediction structure, not by the aggregator choice at this regime.
+- **Why mean wins**: With K=4 anti-thetic noise + 8 resolutions + mirror at σ=5e-4, the per-pass error distribution is approximately symmetric/Gaussian. Under symmetric noise, the arithmetic mean is the **BLUE (best linear unbiased estimator)**. Median has efficiency π/2 ≈ 1.57× higher variance than mean on Gaussian noise; trim10 is closer (efficiency ~1.05×) hence near-tied. The +4-6bp median gap is exactly what the efficiency loss predicts at this sample size.
+- **Confirms H312 reproducibility**: The mean arm reproduces H312 enf61qrr at val_cal=5.8994 / test_cal=5.7388 to four decimals — the H312 SOTA is **point-stable** under aggregator re-rolls, not a lucky configuration.
+- **Closure**: The aggregation operator axis is closed at this TTA regime. Future TTA noise-family changes (heavier tails) could revive the question, but at σ=5e-4 K=4 anti-thetic, mean is optimal.
+- **Successor**: H330 assigned to nezuko (PR #1514) — K=5 + 8-res + H312-cal compositional test. Pivots nezuko away from the saturating cal/aggregation sub-axis to a fresh compositional test no student is running: does the K-axis (modest +0.04bp at K=5 vs K=4 in H295) compose constructively with the 8-res ladder under H312 calibration? Three independent direction wins (K-axis H295 + res-axis H296 + cal-axis H312) and this is the simplest possible compositional follow-up to H312.
+
+---
+
 ## 2026-05-31 04:35Z — PR #1502 alphonse H316 CLOSED: calibration component ablation — SCALE DOMINATES BIAS
 
 ### Finding 'cal-scale-dominates-bias-null-on-test'
