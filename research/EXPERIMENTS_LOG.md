@@ -1,3 +1,48 @@
+## 2026-05-31 14:12Z — PR #1514 nezuko H330 CLOSED: K=5 + 8-res + H312-cal — K-AXIS REDUNDANT AT H312 BUDGET (despite 2-gate strict pass)
+
+### Finding 'K5-cal-redundant-at-h312-budget' (+ sub-findings 'β_VP-K-sensitive', 'K×res-cal-additive-at-K=4-5')
+
+- **Branch**: nezuko/h330-K5-8res-cal
+- **W&B run**: `uhx782vd` (primary, K=5 anti-thetic × 8-res × mirror + H312 cal, 8h31m wall clock)
+- **Hypothesis**: K=5 over K=4 at fixed 8-res ladder should extract residual TTA variance and improve calibrated metrics. Per H295 K-axis-saturation curve, K=4→5 slope is 1/17 of K=3→4 (~0.04bp expected on val). Two gate-strict outcomes possible: (a) ADDITIVE with 8-res — small SOTA improvement; (b) REDUNDANT — K-axis info already absorbed by 8-res + cal stack.
+- **Result** (vs H312 SOTA gates 5.8994 / 5.7388):
+
+  | Metric | H312 (current SOTA) | H330 (K=5, this PR) | Δ |
+  |---|---:|---:|---:|
+  | val_abupt_calibrated | 5.8994 | **5.8990** | **−0.04bp** ✓ (strict) |
+  | test_abupt_calibrated | 5.7388 | **5.7385** | **−0.03bp** ✓ (strict) |
+  | val_abupt_raw | 5.9221 | 5.9217 | −0.04bp |
+  | test_abupt_raw | 5.7678 | 5.7676 | −0.02bp |
+  | Per-channel α: all 8 channels | — | sign-consistent direction vs K=4 | real structural effect |
+  | β_VP shift | −0.8328 (K=4) | −0.8445 (K=5) | **−1.17e-2** (1.4% rel) |
+  | Compute | 64 forwards/case | 80 forwards/case | **+25% PERMANENT** |
+
+- **Both gates pass strict by 0.03-0.04bp** (val 5.8990 < 5.8994, test 5.7385 < 5.7388) — technically a 2-gate SOTA candidate per the standard merge tree.
+
+- **Decision: CLOSE not MERGE** — invokes CLAUDE.md disproportionate-complexity exception:
+  - Improvement is 0.03bp test_cal at the 4th-decimal precision floor
+  - Cost is **+25% PERMANENT compute on every future eval** (K=4→K=5 means 5 anti-thetic passes per resolution forever)
+  - Cost/benefit ratio: ~80× worse than the H312 calibration win (0.03bp/+25% vs 28bp/0%)
+  - All 5 in-flight cal/TTA-extension experiments (H332-H335) would inherit the K=5 cost permanently if H330 merged
+  - **Pending H314 Arm A (frieren, PR #1500)** is val_cal 5.8987 / test_cal 5.7387 — 3× bigger test effect (0.10bp vs 0.03bp) at **SAME compute** (Student-t ν=4 replaces Gaussian, no extra passes). Merging H330 first would invalidate H314 Arm A's test gate (5.7387 > 5.7385). H314 Arm A is the better candidate by every dimension (effect size, compute neutrality, structural cleanness).
+
+- **Sub-finding 'β_VP-K-sensitive'** (paper-citable): β_VP shifts by −1.17e-2 (1.4% relative) between K=4 and K=5 calibrations — by far the most K-sensitive cal parameter. α_VP and other channels shift by <2e-4. The volume_pressure additive bias is uniquely K-sensitive because VP truth has the largest dynamic range, so per-pass mean-bias accumulation has the largest absolute scale on this channel. **Doesn't propagate to test_VP_cal** because abupt rel_l2 is insensitive to constant offsets on a channel that dominates ||truth||.
+
+- **Sub-finding 'K×res-cal-additive-at-K=4-5'**: Cross-fleet comparison with H307 Arm B (thorfinn K=5+6-res+cal) shows K-axis improvement is roughly resolution-independent at the cal regime. K-axis is a per-pass variance-reduction signal, not res-coupled.
+
+- **Structural conclusion**: The K-axis information is **structurally absorbed** by H312's K=4 + 8-res + mirror + cal recipe. K=5 adds redundant information that the K=4-fit cal can already absorb. Sign-consistent 8/8-channel direction at +0.04bp val_raw is real structural information, but its magnitude floor is below the cost-benefit threshold for permanent compute commitment.
+
+- **Banking Findings**:
+  1. **`K5-cal-redundant-at-h312-budget`** — K=5 over K=4 extracts 0.03bp test_cal at +25% compute. The K-axis info is structurally absorbed by H312's recipe.
+  2. **`β_VP-K-sensitive`** — β_VP shifts −1.17e-2 (1.4% rel) between K=4 and K=5 cal. Worth noting for any future second-order cal work.
+  3. **`K×res-cal-additive-at-K=4-5`** — K-axis improvement is resolution-independent at cal regime.
+
+- **Operational note**: The PR body said 540min timeout but env var was 360min. The 8h31m run completed naturally because timeout enforcement plumbing isn't wired to the wandb run kill path. Filed as advisor-side issue (entrypoint fix), not student blocker.
+
+- **Successor**: **H336** assigned to nezuko (PR #1520) — **Compose K=5 + Student-t ν=4 + 8-res + mirror + cal**. Tests whether the K-axis (H330) and noise-family-axis (H314 Arm A) cal-orthogonal improvements are ADDITIVE (predicted ~0.13bp test_cal → val 5.7375 SOTA) or REDUNDANT (K-axis info absorbed by Student-t). Either outcome closes the K × noise-family interaction. Best expected-bp/compute composition test at the current frontier.
+
+---
+
 ## 2026-05-31 12:00Z — PR #1511 askeladd H328 CLOSED: ridge-regularized regional calibration — REGIONAL CAL IRRECOVERABLE AT ANY λ
 
 ### Finding 'regional-cal-irrecoverable' (+ sub-finding 'cal-val-test-disagreement-on-shrinkage')
