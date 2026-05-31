@@ -104,6 +104,7 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    sp_loss_weight: float = 1.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -917,15 +918,23 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"missing={len(missing)} unexpected={len(unexpected)}"
                 )
 
-        # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
-        # the largest gap to AB-UPT, so we expose per-channel weights here.
+        # Surface targets are [cp, tau_x, tau_y, tau_z]. tau_y/tau_z carry the
+        # largest gap to AB-UPT; the cp/SP channel gets its own multiplier so
+        # H338-style train-time SP rebalancing can target the paper-floor gap.
         surface_channel_weights = torch.tensor(
-            [1.0, 1.0, config.tau_y_loss_weight, config.tau_z_loss_weight],
+            [
+                config.sp_loss_weight,
+                1.0,
+                config.tau_y_loss_weight,
+                config.tau_z_loss_weight,
+            ],
             device=device,
             dtype=torch.float32,
         )
         use_channel_weights = bool(
-            (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
+            (config.sp_loss_weight != 1.0)
+            or (config.tau_y_loss_weight != 1.0)
+            or (config.tau_z_loss_weight != 1.0)
         )
         if config.compile_model:
             model = torch.compile(model)
@@ -1030,7 +1039,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
             if use_channel_weights:
                 print(
-                    f"Surface channel weights: cp=1.0 tau_x=1.0 "
+                    f"Surface channel weights: cp={config.sp_loss_weight} tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
 
@@ -1062,6 +1071,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 else []
             )
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
+            wandb.summary["loss/sp_loss_weight"] = config.sp_loss_weight
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
             backbone = getattr(base_model, "backbone", None)
@@ -1266,6 +1276,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/sp_loss_weight": config.sp_loss_weight,
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
