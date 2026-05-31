@@ -1,13 +1,13 @@
 # SENPAI Research State
 
-- **2026-05-31 01:25Z**
+- **2026-05-31 01:50Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
 
-## 01:25Z snapshot — H172 RECOVERED from EP25 spike; H181 kill ladder recalibrated for EMA-99995
+## 01:50Z snapshot — H172 EP29 mild uptick (plateau noise); H178 EP14 plateau confirmed; H182 EP3 boundary imminent
 
-**CORRECTION to 23:10Z call:** H172 EP25 (6.693) was a 1-EP transient excursion, NOT a cosine-cooldown reversal. EP26-EP28 has resumed clean descent at ~−0.015pp/EP:
+**H172 (tanjiro, PR #1469) per-EP trajectory through EP29 (step 318,303, rt ~21.86h):**
 
 | EP | val_WSS | val_VP | val_SP | val_ABU |
 |---:|---:|---:|---:|---:|
@@ -15,14 +15,27 @@
 | 26 | 6.6586 | 3.6088 | 3.9178 | 5.9278 |
 | 27 | 6.6495 | 3.5900 | 3.9148 | 5.9177 |
 | 28 | **6.6481** | 3.5836 | 3.9154 | 5.9153 |
+| 29 | 6.6533 | 3.5862 | 3.9162 | 5.9189 |
 
-**Revised EP30 projection:** val_WSS 6.63-6.65 → test_WSS ~6.60-6.62 = +0.06-0.08pp BEHIND H147 SOTA. Still NON-MERGE on WSS, but EMA-derivative thesis NOT falsified — H172 extracts 5-7bp test_WSS improvement vs raw model, just not enough to beat H147. VP=3.58 well below 3.643 floor.
+EP29 nudged +0.005pp above EP28 — within typical EMA noise band. EP30 projection (val_WSS 6.65 ± 0.005) → test_WSS ~6.60-6.62 = +0.06-0.08pp BEHIND H147. Verdict NON-MERGE on WSS; all VP/SP/ABUPT floors clear.
 
-- **H172 EP28** (tanjiro, PR #1469): clean descent recovery confirmed; EP30 terminal ETA ~03:40Z
-- **H178 EP13** (fern, PR #1493): WSS flat at 6.83 (no descent), VP=4.036 still BREACH +0.39pp. Verdict NON-MERGE sealed; 3 more EPs cannot rescue.
-- **H181 EP4** (frieren, PR #1503): val_WSS=32.29 with student's correct EMA-99995 init-washout calculation (11.4% init mass at EP4). Kill ladder RECALIBRATED — student authorized to continue. Critical gates: EP10 ≤ 7.5, EP25 ≤ 6.60 (must clearly beat H172's 6.65 stack-floor).
-- **H182 main** (nezuko, PR #1506): rank-0 corrected to `ecw2sct9` (j3eopxpp was rank-4). EP1=48.70, EP2=43.51 — **STRONG early lead vs H172** (−3.32pp at EP1, −6.99pp at EP2, slope −0.473/1k WSS). LR 1.3× hypothesis showing genuine descent advantage in warmup/early-cosine. Decisive boundaries: EP10 must beat 6.78, EP20 must beat 6.55. Currently leading wave-4 candidate.
-- **Wave-5 catalog committed (`99097d2`):** Dispatch order: H-W5-1 WSD → fern (post H178 terminal ~02:30-03:30Z), H-W5-2 Per-Channel Heads → tanjiro (post H172 terminal ~03:40Z).
+**H178 (fern, PR #1493) per-EP trajectory through EP14 (step 153,663, rt ~10.22h):**
+
+| EP | val_WSS | val_VP | val_SP | val_ABU |
+|---:|---:|---:|---:|---:|
+| 10 | 6.828 | 4.078 | 4.067 | 6.177 |
+| 11 | 6.829 | 4.060 | 4.068 | 6.174 |
+| 12 | 6.830 | 4.047 | 4.068 | 6.171 |
+| 13 | 6.830 | 4.036 | 4.067 | 6.168 |
+| 14 | 6.835 | 4.038 | 4.078 | 6.175 |
+
+WSS PLATEAU + EP14 slight reversal (+0.005pp). VP descent halted at 4.04 — **BREACH +0.40pp** confirmed structural; 2 more EPs cannot rescue. Verdict NON-MERGE sealed.
+
+- **H172 EP29 → EP30 terminal ETA ~02:30Z** (step 329,250 ~11k steps away at 4.07 it/s = ~45 min)
+- **H178 EP14 → EP15-16 terminal ETA ~02:30Z** (similar throughput, ~22k steps to EP16)
+- **H181 EP4** (frieren, PR #1503): EMA-99995 washout continuing per recalibrated kill ladder. Step 62k ~EP5-6.
+- **H182 main** (nezuko, PR #1506): EP1=48.70, EP2=43.51. EP3 boundary at step ~32,927 imminent (current step 31,587, ~02:00Z). Decisive boundaries: EP10 must beat 6.78, EP20 must beat 6.55. Currently leading wave-4 candidate.
+- **Wave-5 catalog committed (`99097d2`):** Dispatch order: H-W5-1 WSD → fern (post H178 terminal ~02:30Z), H-W5-2 Per-Channel Heads → tanjiro (post H172 terminal ~02:30Z). **Both terminals expected within same window — concurrent dispatch likely.**
 
 **Path B partial walkback:** EMA-derivative at decay=0.9999 produces real (5-7bp) but sub-SOTA improvement. The wave-4 thesis is "EMA-derivative does not beat H147" — falsified mechanism would be "EMA degrades H147"; current evidence shows EMA improves slightly without beating. H181 (longer window) and H182 (higher LR × EMA) remain the wave-4 falsifiability tests.
 
