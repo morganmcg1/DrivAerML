@@ -1,3 +1,37 @@
+## 2026-05-31 10:45Z — PR #1509 fern H319 CLOSED: per-resolution H312 calibration — α IS RESOLUTION-INVARIANT
+
+### Finding 'per-resolution-cal-invariant'
+
+- **Branch**: fern/h319-per-resolution-cal
+- **W&B run**: 6hatu1qg (primary, runtime ~7h13m)
+- **Hypothesis**: Fit 8 per-resolution α/β coefficients per channel (80 params total) instead of H312's single global 10 params; expectation was that residual structure varies across TTA resolutions and per-res cal would extract a few additional bp.
+- **Results**:
+
+  | Metric | H312 (current SOTA) | H319 per-res cal | Δ |
+  |---|---:|---:|---:|
+  | val_abupt_cal | 5.8994 | 5.899394 | −0.0001 (≈0 bp) |
+  | test_abupt_cal | 5.7388 | 5.738691 | −0.0001 (−0.011 bp) |
+  | test_WSS | 6.6391 | 6.6391 | 0.0000 |
+
+- **Per-channel α range across 8 resolutions** (the dispositive diagnostic):
+
+  | Channel | α_range | α_range / α_H312 | Verdict |
+  |---|---:|---:|---|
+  | cp | 0.000952 | 0.10% | invariant |
+  | τ_x | 0.000488 | 0.05% | invariant |
+  | τ_y | 0.001039 | 0.10% | invariant |
+  | τ_z | **0.002023** | 0.20% | invariant (largest) |
+  | VP | 0.000914 | 0.09% (α) | invariant |
+
+  **All α_range < 0.005 threshold** → per-resolution α structure is below val_N=34 effective DoF.
+
+- **β_VP monotone-in-resolution** (range 0.271, ~36% swing): β_VP = −0.762 at R=32K → −1.033 at R=131K. Only resolution-dependent signal found — but VP is 1/5 of abupt and the variation does not propagate to the aggregate metric.
+- **Decision**: Close — both gates technically pass by 0.0001bp (below noise floor) at the cost of 8× parameter count (10 → 80). Disproportionate complexity for tiny gain triggers the CLAUDE.md exception. Student concurred on close.
+- **Structural conclusion**: At val_N=34, **the model's per-channel α calibration is resolution-stable to <0.5% per channel**. The diagonal-affine cal axis is now confirmed saturated across structural dimensions: per-channel (H316 β-null), cross-channel (H323 diagonal-only), per-region (H313 overfits-val), per-resolution (H319 invariant). Next axis for fern: cal-coefficient statistical stability under LOO-CV/bootstrap/robust regression (H333 PR #1517).
+- **Successor**: H333 assigned to fern (PR #1517) — 5-arm post-hoc cal comparison (OLS reference + LOO-CV + Bootstrap + L1 + Huber) on a fresh K=4+8-res+mirror+cal pass with extended per-car sufficient stats. Diagnostic for whether H312's OLS fit is statistically deterministic on 34 cars.
+
+---
+
 ## 2026-05-31 07:35Z — PR #1508 edward H323 CLOSED: cross-channel WSS calibration — A IS DIAGONAL
 
 ### Finding 'cross-channel-wss-diagonal'
