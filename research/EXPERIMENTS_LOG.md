@@ -1,3 +1,28 @@
+## 2026-05-31 07:35Z — PR #1508 edward H323 CLOSED: cross-channel WSS calibration — A IS DIAGONAL
+
+### Finding 'cross-channel-wss-diagonal'
+
+- **Branch**: edward/h323-cross-channel-wss
+- **W&B runs**: wvoqx8r9 (smoke v2 per-point pooled OLS)
+- **Hypothesis**: 3×3 affine A mixing matrix for WSS channels (τ_x, τ_y, τ_z) captures cross-channel coupling beyond H300/H312's diagonal per-channel α.
+- **Process**: smoke v1 had per-car-mean OLS objective mismatch (off-diag = -14% on τ_x row, predictions blew up); edward correctly diagnosed the mismatch (per-car-mean OLS minimizes case-level errors but cal metric averages per-point per-case errors) and rewrote with per-point pooled OLS using H323-extended sufficient stats.
+- **Smoke v2 result** (per-point pooled OLS, K_eff=4, 2-res):
+
+  | Off-diag row | max\|A_kj, j≠k\| | ratio vs diag |
+  |---|---:|---:|
+  | τ_x | 3.04e-04 | **3.06e-04** |
+  | τ_y | 7.35e-05 | **7.40e-05** |
+  | τ_z | 2.39e-04 | **2.41e-04** |
+
+  All three ratios are **16× below the 5e-3 close threshold** and 33× below the original 1e-2 "statistically meaningful" threshold.
+- **Cross == diag to <0.01bp** on every WSS channel and abupt metric. Largest improvement is 0.01bp on test_wss_y (noise level).
+- **A matrix diagonal entries reproduce H312 per-channel α exactly**: A[0,0]=0.99430 ≡ α_τx, A[1,1]=0.99399 ≡ α_τy, A[2,2]=0.99127 ≡ α_τz.
+- **Closed on smoke evidence** (option A) without launching primary K=4+8-res. By construction of per-point pooled OLS, off-diagonals can only grow above threshold by fitting out-of-set per-point noise. At K_eff=8 vs K_eff=4 the sufficient stats refine marginally but the diagonal/cross gap cannot move. 7h of GPU time reclaimed.
+- **Structural conclusion**: At val-set scale (~24M points) and the H244-recipe operating point, **WSS channels have no cross-channel coupling**. Combined with H316's "α is the calibration win" finding, this rules out the 3×3 mixing structure as a fit target — the optimal cal structure is per-channel diagonal at this regime.
+- **Successor**: H332 assigned to edward (PR #1516) — per-seed α robustness diagnostic on H310 seed-2 EP15. Tests whether H312 α is a seed-independent model property (informs H307 model soup cal transfer) and whether seed-2 is competitive standalone.
+
+---
+
 ## 2026-05-31 05:35Z — PR #1504 tanjiro H317 CLOSED: quadratic per-channel calibration — MEMORIZES VAL NOISE
 
 ### Finding 'quadratic-cal-memorizes-val'
