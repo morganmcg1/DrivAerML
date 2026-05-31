@@ -1,3 +1,22 @@
+## 2026-05-31 00:50Z — PR #1505 thorfinn H310 CLOSED: 2nd EP15 seed commissioning ACCEPTED (H307 unblocked)
+
+### Finding 'cosine-tail-flat-in-h244-cohort'
+
+- **Branch**: thorfinn/h310-ep15-seed2-retrain
+- **W&B runs**: m1ddrlcu (primary 16-epoch training), yxyth201 (EP15 mirror eval)
+- **Hypothesis**: Re-run the H244 cosine-extension recipe under `--seed=2026` to produce a second EP15 checkpoint with independent SGD trajectory. Success criterion: artifact exists + val_abupt within ~0.1pp of seed-1 reference.
+- **Result (commissioning)**:
+  - val_abupt (EP15 mirror-only) = **6.0151%** (seed-1 reference ~5.96%, gap +0.055pp — well within ~0.1pp tolerance)
+  - val_abupt (EP16 ema, best) = 6.0119%
+  - test_abupt (EP15 TTA K=4 1-res mirror) = 5.8149% (not directly comparable to H300 SOTA — full K=4+8-res stack pending)
+  - Artifact uploaded: `model-thorfinn-h310-h185-ep16-cosine-ext-seed2-m1ddrlcu:v1` (alias `epoch-15`, `latest`); EP16 also saved as `:v0` (alias `epoch-16`, `best`)
+  - Total wall: 150 min (faster than the 18-20h estimate — H244 cosine extension is only 3 epochs of new compute)
+- **Observation**: val_abupt at step 7129 was 6.0138%, at EP15/16 was 6.0119/6.0151% — the second half of cosine decay did not deliver further gains, it **plateaued**. This matches broader H185/H244 cohort behavior. Banked as Finding 'cosine-tail-flat-in-h244-cohort' — for future seed commissions in this cohort, EP13-equivalent checkpoints may be ~equivalent to EP15/16, saving ~50% wall.
+- **Closure**: Closed (not merged — val 6.0151% > SOTA gate 5.9011%, but this PR was an artifact-production task, not a metric-improvement experiment; success criteria met). H307 weight-space-averaging family now unblocked (assigned to thorfinn as PR #1507).
+- **Bonus**: `--seed` flag plumbing now exists on the thorfinn/h310 branch. Can be cherry-picked when H320 (3+ seed sweep) is queued.
+
+---
+
 ## 2026-05-30 20:55Z — PR #1496 thorfinn H305 CLOSED: BC tangent projection destructive
 
 ### Finding 'bc-tangent-projection-destructive'

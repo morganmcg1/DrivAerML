@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-30 21:00Z | Branch: `tay` | **SOTA: H300 per-channel calibration — MERGED 18:48Z** | Round 4k+2
+**Updated**: 2026-05-31 00:55Z | Branch: `tay` | **SOTA: H300 per-channel calibration — MERGED 18:48Z** | Round 4k+2
 
 ## Today's SOTA progression (3 merges in 4 hours):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
@@ -27,39 +27,38 @@
 
 ---
 
-## Active Fleet (as of 21:00Z — 8 students active, all assigned)
+## Active Fleet (as of 00:55Z 2026-05-31 — 8 students active, all assigned)
 
-| PR | Student | Hypothesis | val_abupt | Status | ETA |
+| PR | Student | Hypothesis | val_raw | Status | ETA calibrated |
 |---|---|---|---:|---|---|
-| **#1505** | **thorfinn** | **H310: Commission 2nd EP15 seed retrain (--seed flag + H244-equiv extension)** | — | 🆕 assigned 21:00Z — UNBLOCKS H307 family | ~15:00Z next-day (training ~18h) |
-| **#1504** | **tanjiro** | **H317: Quadratic per-channel calibration (15 params vs H300's 10)** | — | 🆕 assigned 21:00Z | ~02:30Z |
-| **#1502** | **alphonse** | **H316: Calibration component ablation — bias-only vs scale-only vs full** | — | 🟢 yg4sbrtw primary running | ~03:00Z (3 arms ~5h) |
-| **#1501** | **nezuko** | **H315: TTA aggregation operator sweep — median & trimmed-mean** | — | 🟢 2wq13m13 primary running | ~01:30Z |
-| **#1500** | **frieren** | **H314: Student-t weight-space noise for TTA diversity (df=4)** | — | 🟢 ga7cwm4a primary running | ~01:15Z |
-| **#1499** | **askeladd** | **H313: Regional per-zone post-hoc affine calibration** | — | 🟢 5e9h0isl primary running | ~01:30Z |
-| **#1498** | **edward** | **H312: H296 (K=4+8-res+mirror) + full calibration** | — | 🟢 enf61qrr primary running | ~00:00Z |
-| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | — | 🟢 dsgl7bn8 retry running (spsor9f8 crashed 19:04Z) | ~00:30Z |
+| **#1507** | **thorfinn** | **H307: Weight-space averaging of 2 EP15 seeds + H300 calibration (model soup)** | — | 🆕 assigned 00:50Z — H310 artifact ready | ~08:00Z (3 arms ~7h) |
+| **#1504** | **tanjiro** | **H317: Quadratic per-channel calibration (15 params vs H300's 10)** | — | 🟢 nld6viep primary running (wall 105min @ 00:00Z) | ~03:00Z |
+| **#1502** | **alphonse** | **H316: Calibration component ablation — bias-only vs scale-only vs full** | — | 🟢 yg4sbrtw 3-arm bundle running (wall 130min @ 22:45Z) | ~01:30Z |
+| **#1501** | **nezuko** | **H315: TTA aggregation operator sweep — median & trimmed-mean** | — | 🟢 2wq13m13 primary running (wall 122min @ 22:35Z) | ~02:00Z |
+| **#1500** | **frieren** | **H314: Student-t weight-space noise (df=4)** | **5.9213%** ⭐ | 🟢 2scozlaf running — INTERIM val −0.08bp vs H296 | ~03:00Z |
+| **#1499** | **askeladd** | **H313: Regional per-zone post-hoc affine calibration** | — | 🟢 iya68eq8 primary running (wall 143min @ 23:10Z) | ~02:00Z |
+| **#1498** | **edward** | **H312: H296 (K=4+8-res+mirror) + full calibration** | **5.9221%** | 🟢 enf61qrr test pass at 16/49 (~31%) @ 23:18Z | ~02:00-02:30Z |
+| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | **5.9222%** | 🔴 dsgl7bn8 val NULL (Δ=+0.0001pp); test in-flight; TIMEOUT 01:28Z (likely truncated) | partial |
 
-**Closed this loop (20:00-21:00Z)**:
-- **PR #1496 thorfinn H305** — CLOSED 20:55Z. Finding 'bc-tangent-projection-destructive' banked (val=10.86%, +490bp). Combined with 'coord-noise-harmful' = **geometry-aware post-hoc correction axis fully closed**.
-- **PR #1495 tanjiro H303** — CLOSED 20:55Z. Finding 'sigma-axis-globally-closed-at-K5' banked (val 5.9247, fails new gate). σ-axis CLOSED for anti-thetic across all K.
-- **PR #1487 alphonse H298** — CLOSED 20:02Z. Finding 'coord-noise-harmful'.
+**Closed this loop (00:00-00:55Z)**:
+- **PR #1505 thorfinn H310** — CLOSED 00:50Z. Finding 'cosine-tail-flat-in-h244-cohort' banked. **Artifact commission ACCEPTED** (val 6.0151% within +0.055pp of seed-1 tolerance). H307 family UNBLOCKED — assigned as PR #1507.
 
-**Hot watch (21:00Z)**:
-- **Edward H312** (~00:00Z) → highest-probability next SOTA (K=4+8-res + full cal)
-- **Fern H306 retry dsgl7bn8** (~00:30Z) → per-point confidence weighting; may stack with calibration
-- **Frieren H314** (~01:15Z) → Student-t df=4 noise; heavy-tail TTA diversity
-- **Askeladd H313 / Nezuko H315** (~01:30Z) → new orthogonal axes (regional cal, robust agg)
-- **Tanjiro H317** (~02:30Z) → quadratic cal; tests if 15 params > 10 on test (overfitting risk)
-- **Alphonse H316** (~03:00Z) → bias-only vs scale-only ablation
-- **Thorfinn H310** (~15:00Z next-day) → 2nd EP15 seed artifact; unblocks H307 weight-space SWA
+**Hot watch (00:55Z 05-31)**:
+- **Edward H312 enf61qrr** (~02:00-02:30Z) → highest-probability next SOTA (K=4+8-res + full cal). Test pass at ~31% complete.
+- **Frieren H314 2scozlaf** (~03:00Z) → **INTERIM SIGNAL POSITIVE**: val_raw 5.9213% (−0.08bp vs H296). If calibrated metrics pass H300 gate, becomes SOTA candidate #2 tonight.
+- **Tanjiro H317 nld6viep** (~03:00Z) → quadratic cal; if 5bp+ gain vs H300, opens cubic axis.
+- **Alphonse H316 yg4sbrtw** (~01:30Z) → bias-only vs scale-only ablation; informs whether H300's gain is α or β dominant.
+- **Nezuko H315 2wq13m13** (~02:00Z) → median & trim10 aggregators; tests TTA distribution shape.
+- **Askeladd H313 iya68eq8** (~02:00Z) → regional per-zone calibration; if 4-zone or 6-zone > global, opens spatial-cal axis.
+- **Fern H306 dsgl7bn8** — VAL NULL CONFIRMED (conf_avg ≡ avg at T=1.0). Close at SENPAI-RESULT.
+- **Thorfinn H307** (~08:00Z next-day) → weight-space averaging on H310-commissioned seed pair.
 
-**Queue for next idle students (none right now; will fire as runs land tonight)**:
-- **H307**: weight-space averaging (linear interp + uniform avg) — pending H310 artifact
+**Queue for next idle students (will fire as runs land)**:
 - **H318**: Calibration on H299 embedding-only noise — does Finding UUU reverse under cal overlay?
 - **H319**: Re-evaluate H301 best-of-K + cal — orthogonal stacking test
-- **H320**: Cubic per-channel calibration if H317 quadratic shows additional gain
+- **H320**: 3rd seed commission + 3-way soup (if H307 wins) OR cubic calibration (if H317 wins quadratic)
 - **H321**: Jackknife / leave-one-out calibration variance estimate on 34-car val
+- **H322**: Weight-space soup × calibration co-fit (joint optimization) — if H307 wins
 
 ---
 
