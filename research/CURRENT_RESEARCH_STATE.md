@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 22:01Z | Branch: `tay` | **SOTA: H314 Student-t ν=4 — MERGED 17:45Z** | Round 4k+3 | **All inference axes closed (TTA K+R, cal 7-fold null after H333+H334, noise-family ν-sweep, weight-space soup α∈[0.5,0.85] H307 monotone-no-cross). Open frontier: (a) training-time SP-floor gap H338/edward; (b) training-time WSS uniform reweight H339/frieren; (c) training-time WSS wz-only reweight H341/fern (per-axis decomposition); (d) composition K×noise-family H336/nezuko (rebase pending); (e) σ-axis at ν=4 H340/tanjiro; (f) multi-checkpoint output-averaging H342/alphonse (output-space ensemble); (g) **thorfinn — pending NEW hypothesis assignment after H307 closure (22:01Z)**.
+**Updated**: 2026-05-31 22:10Z | Branch: `tay` | **SOTA: H314 Student-t ν=4 — MERGED 17:45Z** | Round 4k+3 | **All inference axes closed (TTA K+R, cal 7-fold null after H333+H334, noise-family ν-sweep, weight-space soup α∈[0.5,0.85] H307 monotone-no-cross). Open frontier: (a) training-time SP-floor gap H338/edward; (b) training-time WSS uniform reweight H339/frieren; (c) training-time WSS wz-only reweight H341/fern (per-axis decomposition); (d) composition K×noise-family H336/nezuko (rebase pending); (e) σ-axis at ν=4 H340/tanjiro; (f) multi-checkpoint output-averaging H342/alphonse (output-space ensemble); (g) **H343 SAM cosine-tail thorfinn (PR #1528, NEW — flatter-minimum optimizer-axis, orthogonal to all in-flight)**.
 
 **Partial result this loop (08:11Z)**: H307 Arm B α=0.5 (model soup of two EP15 seeds + H300 cal) → **test_cal 5.7380 BEATS gate (−0.8bp)**, val_cal 5.9017 misses by +2.3bp. Soup extracts −30.4bp on test (vs ~28bp on single-seed H312) — **mechanistic finding: weight-averaging produces more affine residual structure, so diagonal cal catches more error post-soup**. Thorfinn launched Arm C α=0.75 at 08:14Z (ETA ~14:59Z). α_τz on soup = 0.99160 vs H312 ref 0.99170 — preliminary cross-axis confirmation that α is model-perturbation-stable.
 
@@ -30,10 +30,11 @@
 
 ---
 
-## Active Fleet (as of 22:01Z 2026-05-31 — 7 students active + 1 idle [thorfinn] post-H307 close)
+## Active Fleet (as of 22:10Z 2026-05-31 — 8 students active, all assigned)
 
 | PR | Student | Hypothesis | val_raw | Status | ETA calibrated |
 |---|---|---|---:|---|---|
+| **#1528** | **thorfinn** | **H343: SAM cosine-tail — Sharpness-Aware Minimization optimizer during ep12→ep16 extension (ρ∈{0.05, 0.02}). Orthogonal optimizer-axis attack: flatter minimum expected to close val→test OOD gap, especially test_WSS_z bottleneck channel.** | — | 🆕 assigned 22:10Z (post-H307 close) | ~10-14h chained (2 arms × 3h SAM-train + 2 eval × 6-7h) |
 | **#1522** | **edward** | **H338: SP-targeted loss reweighting cosine-tail (3-arm SP-weight sweep {1.05, 1.10, 1.20} to close paper SP floor gap +3.4bp)** | — | 🆕 assigned 15:45Z (post-H332 close) | ~01:00Z+1 (3 arms × 3h sequential) |
 | **#1524** | **tanjiro** | **H340: σ-sweep at Student-t ν=4 — last inference-axis question. 3 arms σ ∈ {2.5e-4, 5e-4 ref, 1e-3} on H185 ep15. Arm B reproduces H314 (sanity).** | — | 🆕 assigned 18:55Z (post-H337 close, post-H314 merge) | ~14:00Z+1 (~18-21h chained eval) |
 | **#1526** | **alphonse** | **H342: Multi-checkpoint output-averaging TTA (ep14+ep15+ep16 EMA from H312 SOTA cosine-tail run-enf61qrr) — 3 evals + 4 post-hoc arms (ep15 alone control, ep14+ep15, ep15+ep16, ep14+ep15+ep16). Orthogonal output-space ensemble vs H307 weight-space.** | — | 🆕 assigned 19:58Z (post-H334 close) | ~13:00Z+1 (3 evals × ~6-7h + post-hoc avg) |
