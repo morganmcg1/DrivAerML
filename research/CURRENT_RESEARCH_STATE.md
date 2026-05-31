@@ -41,10 +41,10 @@ H182 lead SUSTAINED through EP3 — LR 1.3× hypothesis still alive. Stop-loss c
 
 Descent on recalibrated schedule. EP10 (step 109,759 ~04:00Z) is the critical gate: ≤ 7.5 = thesis alive, ≥ 8.0 = falsified (over-smoothing).
 
-- **H172 EP29 → EP30 terminal ETA ~02:30Z** (currently step ~322k of 329,250; throughput 4.07 it/s)
-- **H178 EP14 → EP15-16 terminal ETA ~03:20Z** (step ~155k of 175,600)
-- **H182 EP3 → EP4 ~02:40Z** (boundary watch continuing)
-- **H181 EP6 → EP10 critical gate ~04:00Z**
+- **H172 EP30 LANDED at 6.6517** (step 329,279, rt 22.6h); val_WSS plateau confirmed (EP28=6.6481, EP29=6.6528, EP30=6.6517). Test harvest pending (run still in "running" state). Projected test_WSS ~6.60-6.62 = +0.06-0.08pp BEHIND H147. **NON-MERGE on WSS** verdict held; all VP/SP/ABUPT floors clear. Awaiting SENPAI-RESULT from tanjiro.
+- **H178 EP15 landed at 6.8372** (step 164,639) — slight uptick from EP14 (6.8349). WSS plateau + EP16 boundary pending (~03:20Z). VP 4.035 BREACH confirmed structural.
+- **H182 EP4 boundary imminent** (step 43,901; currently step ~43,401 at ~02:50Z = ~2min). EP3 lead −3.10pp sustained.
+- **H181 EP10 critical gate ~04:00Z** (step 74,237 currently, target 109,759).
 
 ## 01:50Z snapshot — H172 EP29 mild uptick (plateau noise); H178 EP14 plateau confirmed; H182 EP3 boundary imminent
 
