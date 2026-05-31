@@ -4869,3 +4869,48 @@ NON-MERGE. Two floor cap breaches (VP marginal +0.021, SP +0.134) + WSS regressi
 None of the 4 arms produces a H147-beater. EMA-0.9999 (H172, wave-3) remains the only mechanism that materially undercut H147 mid-train references, but H172's descent stalled EP20→EP23.
 
 Wave-4 H182 (EMA 0.9999 + LR 1.3×) dispatched to nezuko (PR #1506).
+
+---
+
+## 2026-05-31 03:25Z — PR #1469: H172 EMA decay=0.9999 — NON-MERGE terminal
+
+- **dl24-tanjiro/h172-ema-weights** (run `7d83go4z`, 30-EP DDP8, 22.5h)
+- **Hypothesis:** EMA model weight averaging at decay=0.9999 smooths over cosine-descent trajectory to select a lower-loss basin than the terminal raw checkpoint (H147 uses decay=0.999)
+
+### Test metrics (best EMA checkpoint at EP28)
+
+| Metric | H172 | H147 SOTA | Δ | vs floor | Verdict |
+|---|---:|---:|---:|---|---|
+| test_WSS | 6.5893 | 6.5409 | **+0.0484pp** | — | primary regress |
+| test_SP | 3.6101 | 3.5634 | +0.047pp | **+0.033pp ABOVE 3.577** | **BREACH** |
+| test_VP | 3.5429 | 3.4014 | +0.142pp | −0.100pp under 3.643 | clear |
+| test_ABUPT | 5.7394 | 5.6648 | +0.075pp | −0.105pp under 5.844 | clear |
+
+### Val trajectory per EP (EMA branch, selected highlights)
+
+| EP | val_WSS | val_VP | val_SP | val_ABU | notes |
+|---:|---:|---:|---:|---:|---|
+| 6 | 6.968 | 4.105 | 4.107 | 6.277 | EMA-raw crossover |
+| 10 | 6.728 | 3.697 | 3.954 | 6.001 | kill gate PASS |
+| 15 | 6.683 | 3.626 | 3.930 | 5.950 | EMA recovered from EP14 transient |
+| 20 | 6.652 | 3.589 | 3.914 | 5.918 | local minimum |
+| 25 | 6.693 | 3.648 | 3.944 | 5.964 | 1-EP noise excursion |
+| 28 | **6.652** | 3.588 | 3.915 | 5.915 | **best checkpoint (val_ABU selection)** |
+| 30 | 6.652 | 3.588 | 3.915 | 5.918 | terminal (parity with EP28) |
+
+### Analysis
+
+**Mechanism confirmed but insufficient:** EMA-0.9999 produced a real mid-train crossover signal (EP6 EMA < raw by ~0.10pp on WSS), with the EMA shadow leading the raw model by 0.10-0.19pp from EP10-EP20. The "free descent" via long-window averaging is a genuine phenomenon in the cosine descent phase. However:
+
+1. **EMA parity by EP28:** EMA and raw converge to within 0.01pp at the best checkpoint — the smoothing benefit dissolves at convergence. The long horizon average ultimately tracks the converged point, not a deeper basin.
+
+2. **SP anti-correlation:** val_SP=3.915 → test_SP=3.6101 (+0.033pp above the 3.577 cap). SP is more sensitive to high-decay EMA than WSS — sharp near-surface features are degraded by the 10k-step averaging window.
+
+3. **Val→test gap unfavorable:** val_WSS=6.652 (EP28) → test_WSS=6.5893. H147's raw-weight checkpoint generalizes slightly better despite equal val_WSS at some EPs.
+
+4. **EP25 excursion was noise:** The apparent stall at EP23 and EP25 spike were transient — descent resumed and EP28 remains the all-time best val_WSS. No permanent reversal.
+
+**Verdict:** FALSIFIED on primary metric (WSS regress) + SP floor breach. Closes EMA-0.9999 as a standalone mechanism. Informs wave-4 H181/H182 design.
+
+**Follow-up dispatched:** H183 Per-Channel Decoder Heads (PR #1510, tanjiro) — addresses the SP-WSS capacity competition at the decoder level, which H172's SP regression pointed toward.
+

@@ -1,9 +1,51 @@
 # SENPAI Research State
 
-- **2026-05-31 02:20Z**
+- **2026-05-31 03:25Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 03:25Z snapshot — H172 CLOSED NON-MERGE; H183 dispatched to tanjiro; H178 terminal ~03:37Z; H182 EP4 lead sustained; H181 EP7 washout continuing
+
+**H172 CLOSED (PR #1469, tanjiro, run `7d83go4z`):**
+Test metrics (EP28 best-EMA checkpoint):
+- test_WSS=**6.5893** vs H147=6.5409 → **+0.0484pp BEHIND** (primary regress)
+- test_SP=**3.6101** vs cap 3.577 → **+0.033pp BREACH**
+- test_VP=3.5429 (clears 3.643 cap), test_ABUPT=5.7394 (clears 5.844 cap)
+- **NON-MERGE:** EMA-0.9999 mid-train mechanism confirmed (EP6-EP20 lead), BUT does not survive convergence. SP is anti-correlated with high-decay EMA. Hypothesis **FALSIFIED** on primary metric and floor contracts.
+
+**H183 dispatched to tanjiro (PR #1510):** Per-channel decoder heads — split shared surface_out MLP 4×1 into independent channel heads. Highest-upside wave-5 idea; directly targets the capacity bottleneck between cp (3.5%, well-fit) and τ_z (8.5%, lagging). Expected gain −0.1 to −0.3pp test_WSS.
+
+**H178 (fern, PR #1493) — EP11-EP15 plateau, terminal ~03:37Z:**
+
+| EP | val_WSS | val_VP | val_SP | val_ABU |
+|---:|---:|---:|---:|---:|
+| 11 | 6.8294 | 4.0598 | 4.0684 | 6.1744 |
+| 12 | 6.8300 | 4.0465 | 4.0684 | 6.1713 |
+| 13 | 6.8296 | 4.0357 | 4.0672 | 6.1684 |
+| 14 | 6.8349 | 4.0377 | 4.0783 | 6.1746 |
+| 15 | 6.8372 | 4.0351 | 4.0778 | 6.1746 |
+
+WSS plateaued since EP11 (~6.830). VP stagnated at 4.04 — structural BREACH +0.40pp over 3.643 floor. EP16 terminal ETA ~03:37Z. **NON-MERGE sealed; awaiting SENPAI-RESULT then close + dispatch H-W5-1 WSD LR Schedule to fern.**
+
+**H182 (nezuko, PR #1506) — EP4 boundary confirmed, lead sustained:**
+
+| EP | H172 (ref) | H182 | Δ vs H172 | Gate |
+|---:|---:|---:|---:|---|
+| 1 | 52.018 | 48.701 | −3.32pp | PASS |
+| 2 | 50.497 | 43.508 | −6.99pp | PASS |
+| 3 | 16.632 | 13.528 | −3.10pp | PASS |
+| **4** | **8.695** | **8.443** | **−0.252pp** | **PASS** |
+
+Kill criterion was ≤ 8.85. H182 at EP4 = 8.443, −0.252pp AHEAD of H172 at same EP. EMA contamination at EP4 = 11.1% — residual −0.252pp lead is pure signal from 1.3× LR. EP5 boundary (step 54,879) imminent ~04:00Z.
+
+**H181 (frieren, PR #1503) — EP7 mid-wash, step ~79k:**
+EMA-99995 washout continuing. At ~03:12Z: step=79,434, EP7.2, summary val_WSS=10.60 (mid-epoch, not final EP7 boundary). EP7 likely landed near 11.0-11.5 (extrapolating from EP6=13.678 at −5.8pp/EP and acceleration). EP10 critical gate (step 109,759) ~04:30Z.
+
+**Wave-5 dispatch plan:**
+- **Tanjiro:** H183 Per-Channel Decoder Heads (PR #1510) — dispatched 03:20Z
+- **Fern:** H184 WSD LR Schedule (H-W5-1) — dispatch ~03:40Z after H178 SENPAI-RESULT
+- **Nezuko/Frieren:** monitoring active WIP (H182/H181)
 
 ## 02:20Z snapshot — H182 EP3 lead sustained (−3.10pp vs H172); H181 EP6 washout on schedule; H172/H178 near terminal
 
