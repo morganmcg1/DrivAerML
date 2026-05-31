@@ -1,9 +1,73 @@
 # SENPAI Research State
 
-- **2026-05-31 20:31Z**
+- **2026-05-31 22:43Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 22:43Z snapshot — **H182 CLOSED NON-MERGE** (test_WSS=6.6180, test_SP=3.6723 BREACH); H186 `layers=8` assigned to nezuko (PR #1529); H183/H184/H185 still active
+
+**Active fleet, 4 students, 3 WIP + 1 new assignment (nezuko just freed by H182 closure):**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | val_SP | Status |
+|---|---|---|---:|---:|---:|---:|---|
+| frieren | #1527 | H185 hidden_dim=640 | 2 | EP1=11.49 (−1.33 vs H147) | — | — | EP5 watch ~01:30Z |
+| nezuko | #1529 | H186 layers=8 (depth) | — | — | — | — | NEW ASSIGNMENT |
+| tanjiro | #1510 | H183 per-channel heads | 22 | 6.5894 (plateau) | 3.5802 | **3.8386 (flat)** | NON-MERGE on SP floor confirmed; terminal ~03:30Z |
+| fern | #1513 | H184 WSD LR | 16 | 6.8560 (stall) | 3.7216 | 4.0635 | EP22 decay binary read ~01:00Z |
+
+### H182 (PR #1506) CLOSED NON-MERGE — 22:46Z terminal
+
+W&B run `ecw2sct9` — 30 EPs, 22.43h, EMA best EP23.
+
+Test metrics (regress on ALL 4 axes vs H147):
+- test_WSS=**6.6180** (+0.0771 vs H147 SOTA) ❌ primary regress
+- test_VP=**3.4648** (+0.0634 vs H147, passes 3.643 floor) — partial-SOTA candidacy on VP FAILED
+- test_SP=**3.6723** (BREACH 3.577 floor by +0.0953) ❌
+- test_ABU=**5.7474** (+0.0826 vs H147, passes 5.844 floor)
+
+**Critical methodological finding**: val→test pattern shifted significantly from H147 baseline. My 15:34Z/19:00Z projections used H147's val→test deltas (VP +0.06pp UP, SP −0.20pp DOWN) but H182 actual deltas were VP −0.018pp (basically flat) and SP −0.27pp DOWN. The val_VP=3.4830 partial-SOTA signal **did not generalize to test_VP**. Future hypotheses claiming val_VP improvements must show test-side validation; val_VP < 3.55 is NOT a reliable test_VP signal.
+
+**Closes the lr-boost direction definitively**: H149 (β1=0.93/β2=0.97 + H147 lr) → H150 (β1=0.97/β2=0.985) → H182 (lr=1.3e-4 + ema=0.9999 compound) all NON-MERGE. Lion + lr=1e-4 + β1=0.95/β2=0.98 is a tight local optimum.
+
+### H186 hypothesis (PR #1529, dl24-nezuko)
+
+`model-layers=8` on H147 stack (single-flag change). Tests the **depth axis**, orthogonal to H185's **width axis** (hidden_dim=640). Together H185 and H186 jointly characterize the capacity-axis space on the H147 architecture for the first time.
+
+- 25 EPs DDP8 (budget-constrained from 30) — loses ~−0.02 to −0.04pp cosine tail
+- Smoke 1-EP first to measure throughput (kill if >56 min/EP)
+- Kill ladder: EP1 ≤13.5, EP5 ≤6.95, EP10 ≤6.75, EP15 ≤6.65, EP20 ≤6.55, EP25 ≤6.50 + all 4 floors clear
+- Companion to H185 (frieren PR #1527); if both win → compose width+depth next cycle
+
+### H185 (frieren, PR #1527) — STRONG EP1 START (−1.33pp vs H147)
+
+EP1 val_WSS=11.49% (H147 EP1=12.82%). EP1 timing ~53 min (~20% slower than H147 as expected with +25% width). Plan: complete 30-EP cosine; truncate at EP27 if budget tight (frieren's call).
+
+Per-axis EP1 WSS: τ_x=10.20, τ_y=12.83, τ_z=14.74 — wider model helps all 3 axes from EP1.
+
+EP5 gate at ≤6.90% — ~3.5h after EP1 = ~01:30Z next day.
+
+### H183 (tanjiro, PR #1510) — SP FLOOR BREACH CONFIRMED, NON-MERGE projected; CONTINUE to EP30 for scientific value
+
+EP18-22 disambiguation read: EP18 val_SP=3.8491 > 3.840 threshold = **CONSERVATIVE READ CONFIRMS** (the EP16→17 −0.025pp drop was noise, not decay-phase mechanism). SP slope EP15→EP22 = −0.0008pp/EP (essentially flat through 8 EPs).
+
+Projected terminal val_SP ~3.83 → test_SP ~3.63 = **FAILS 3.577 floor by ~0.05pp** = NON-MERGE.
+
+WSS plateau ~6.587-6.589 at EP22; terminal projection 6.55-6.59 val → test 6.39-6.43 = TIES or NARROWLY BEATS H147 (best case −0.15pp). Per-channel-heads decoder approach extracted some WSS-axis benefit but introduced SP regression.
+
+Terminal at EP30 expected ~03:30Z (47 min/EP × 8 EPs from EP22 22:22Z). Will close NON-MERGE upon terminal.
+
+**Scientific contribution recovery**: per-axis τ slopes EP15→EP22 (τ_x −0.0028pp/EP, τ_y −0.0070pp/EP, τ_z −0.0014pp/EP) confirm τ_y is the most-improvable WSS axis with axis-decoupled heads, τ_z is the persistent bottleneck (consistent with H154/H155/H156 falsifications).
+
+### H184 (fern, PR #1513) — EP22 decay binary read pending, ~01:00Z
+
+EP15-19 val_WSS stuck at ~6.84 (descent collapsed from −0.016pp/EP to flat). val_SP=4.06 (+0.49 above floor) is severely off-trajectory — even strong WSS decay won't pull SP through 3.577 floor unless decay delivers >−0.50pp SP over 8 EPs (very unlikely).
+
+EP22 decay activation (~01:00Z) tests:
+- WSS decay magnitude (target −0.30pp over 8 EPs for SOTA candidacy)
+- SP decay magnitude (target ≥−0.50pp to reach floor — almost certainly fails)
+
+**Most likely outcome: NON-MERGE on SP floor + likely WSS as well**, but EP22+ data informs future WSD-schedule decisions.
 
 ## 20:31Z snapshot — **H181 CLOSED NON-MERGE** (test_SP=3.6808 floor breach +0.104pp); H185 `hidden_dim=640` assigned to frieren (PR #1527); H182/H183/H184 still active
 

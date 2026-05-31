@@ -1,5 +1,48 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-31 22:43Z — PR #1506: H182 lr=1.3e-4 + ema=0.9999 compound (nezuko) CLOSED NON-MERGE
+
+- dl24-nezuko/h182-ema-lr-13x-compound
+- W&B rank0 run: `ecw2sct9` — 30 EP DDP8, 22.43h runtime, EMA best checkpoint EP23
+- **Hypothesis**: lr=1.3e-4 (30% boost over H147's 1e-4) combined with EMA decay=0.9999 (H172 family) on H147 Lion β1=0.95/β2=0.98 stack would compound a faster-warmup descent with the H172 EMA setup. Multiple H172/H181/H182 EMA experiments would jointly characterize the ema-decay axis.
+
+### Terminal test metrics (full-fidelity rank-0 eval, 50 cases)
+
+| metric | H182 | H147 SOTA | Δ vs H147 | floor cap | floor status |
+|---|---:|---:|---:|---:|---|
+| test_WSS | **6.6180** | 6.5409 | **+0.0771** | (primary) | **REGRESS** ❌ |
+| test_VP | **3.4648** | 3.4014 | **+0.0634** | ≤3.643 | passes (−0.178) but BEHIND H147 |
+| test_SP | **3.6723** | 3.5634 | **+0.1089** | ≤3.577 | **BREACH** by +0.0953 ❌ |
+| test_ABU | **5.7474** | 5.6648 | **+0.0826** | ≤5.844 | passes (−0.097) but BEHIND H147 |
+| test_WSS_x | 5.8934 | 5.8155 | +0.0779 | — | — |
+| test_WSS_y | 7.1500 | 7.0556 | +0.0944 | — | — |
+| test_WSS_z | 8.5568 | 8.4882 | +0.0686 | — | — |
+
+### Val terminal + trajectory
+
+EP30 val: WSS=6.7848, VP=3.4830, SP=3.9384, ABU=5.9712. val_WSS plateau started ~EP12 (6.82) and only dropped −0.04pp through EP30 — **stable phase saturated at higher WSS minimum than H147**.
+
+VP descent trajectory was deepening (3.55 EP12 → 3.49 EP21 → 3.48 EP30), suggesting val-side overfitting on VP at higher lr — the test_VP=3.4648 did NOT track val_VP=3.4830 (val→test +0.018pp, far below H147's +0.06pp pattern).
+
+### Key findings
+
+1. **lr-boost direction definitively FALSIFIED for SOTA candidacy.** H149 (β1=0.93/β2=0.97 + H147 lr) + H150 (β1=0.97/β2=0.985) + H182 (lr=1.3e-4 + ema=0.9999 compound) all NON-MERGE. Lion + lr=1e-4 + β1=0.95/β2=0.98 is a tight local optimum. The +30% lr drives faster early-EP descent (EP4-EP10 lead over H172) but saturates at a HIGHER WSS minimum.
+
+2. **EMA decay=0.9999 is sub-optimal** (third NON-MERGE in EMA family): H147 ema=0.999 (SOTA), H172 ema=0.9999 (NON), H181 ema=0.99995 (NON), now H182 ema=0.9999 + lr=1.3e-4 (NON). Confirms optimal EMA at decay=0.999 (N≈10k steps).
+
+3. **CRITICAL METHODOLOGICAL FINDING: val_VP < 3.55 is NOT a reliable test_VP improvement signal.** H182 val_VP=3.4830 (−0.16pp below H172 baseline) showed strong partial-SOTA candidacy through mid-training. But test_VP=3.4648 vs H147 test_VP=3.4014 = **BEHIND H147 by 0.063pp**. The val_VP improvement was overfitting, not generalization. Future hypotheses tuning vol_p loss/learning rates must validate on test-side.
+
+4. **val→test pattern shifts substantially with stack changes.** H182 deltas (WSS −0.167, VP −0.018, SP −0.266, ABU −0.224) deviated from H147's pattern (WSS −0.06, VP +0.06, SP −0.20, ABU −0.18). This means projections from val to test using H147's pattern as a multiplier are unreliable for compound stack perturbations.
+
+### Conclusions
+
+- **Closes the lr-boost compound direction.** No further hypotheses combining lr changes with Lion β-config perturbations.
+- **EMA family characterized**: decay=0.999 SOTA, decay=0.9999/0.99995 NON-MERGE. No further EMA-axis hypotheses.
+- **Next-cycle structural axes** must move to fundamentally different territory: depth (H186 dispatched), width (H185 dispatched), or non-Lion optimizer family.
+- **Methodological correction**: future projections must hold val_VP/val_SP improvements with skepticism until test-side numbers land. H182's misleading val partial-SOTA signal cost ~22h of GPU time before clarification.
+
+---
+
 ## 2026-05-30 09:10Z — Wave-2 EP4/EP5 cluster: H173 mechanism payoff DEEPENING, H174/H175 main launches, H172 EP5 PASS
 
 **4 active runs in flight, all healthy:**
