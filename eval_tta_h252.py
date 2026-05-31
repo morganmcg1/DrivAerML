@@ -97,6 +97,14 @@ class EvalConfig:
     weight_noise_dist: str = "gaussian"
     weight_noise_df: int = 4
 
+    # H335: per-resolution K allocation. When set, overrides
+    # ``weight_noise_passes`` with a comma-separated list of per-resolution K
+    # values, one per entry in ``--resolutions``. Schedule preserves H312 noise
+    # seeding: K_max = max(per_res_K) (k, sign) pairs are built, and at each
+    # (k, sign) only resolutions with K_r > k receive a forward. Same noise
+    # samples are reused across resolutions where they appear.
+    per_res_K: str = ""
+
     # H300: per-channel affine calibration. Fits alpha_c, beta_c via OLS on val
     # predictions vs val targets (after TTA aggregation), then applies the SAME
     # (alpha, beta) to test predictions before metric computation. Logs both raw
@@ -171,6 +179,29 @@ def parse_resolutions(spec: str) -> list[int]:
 
 def parse_modes(spec: str) -> list[str]:
     return [m.strip() for m in spec.split(",") if m.strip()]
+
+
+def parse_per_res_K(spec: str, n_res: int) -> list[int] | None:
+    """Parse --per-res-K into a list[int] of length n_res, or None if unset.
+
+    Raises ValueError on length mismatch or non-positive entries (a K_r=0
+    would silently disable that resolution; force the user to drop the
+    resolution from --resolutions instead).
+    """
+    if not spec.strip():
+        return None
+    values = [int(p) for p in spec.split(",") if p.strip()]
+    if len(values) != n_res:
+        raise ValueError(
+            f"--per-res-K has {len(values)} entries but --resolutions has "
+            f"{n_res}; lengths must match."
+        )
+    if any(v <= 0 for v in values):
+        raise ValueError(
+            f"--per-res-K must be positive ints (got {values}); drop a "
+            f"resolution rather than passing K_r=0."
+        )
+    return values
 
 
 def build_model(cfg: EvalConfig) -> SurfaceTransolver:
@@ -363,6 +394,7 @@ def process_case_stacked(
     antithetic: bool = False,
     noise_dist: str = "gaussian",
     noise_df: int = 4,
+    per_res_K: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
@@ -372,6 +404,11 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    When ``per_res_K`` is provided, K_max = max(per_res_K) drives the schedule
+    and resolutions with K_r < K_max receive forwards only for k < K_r. The
+    per-point average then weights each resolution by its K_r (× 2 for
+    antithetic, × 2 for mirror).
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
@@ -392,12 +429,24 @@ def process_case_stacked(
 
     mirror_flags = (False, True) if use_mirror else (False,)
 
+    if per_res_K is not None:
+        if len(per_res_K) != len(resolutions):
+            raise ValueError(
+                f"per_res_K length {len(per_res_K)} != resolutions length "
+                f"{len(resolutions)}"
+            )
+        K_max = max(per_res_K)
+        K_by_R = list(zip(resolutions, per_res_K))
+    else:
+        K_max = K_passes
+        K_by_R = [(R, K_passes) for R in resolutions]
+
     # Build the (noise_idx, sign) schedule. Anti-thetic pairs share a seed so
     # +ε / −ε use the SAME draw of ε (otherwise it would just be 2K i.i.d.).
     if antithetic and sigma > 0.0:
-        schedule = [(k, sign) for k in range(K_passes) for sign in (+1.0, -1.0)]
+        schedule = [(k, sign) for k in range(K_max) for sign in (+1.0, -1.0)]
     else:
-        schedule = [(k, +1.0) for k in range(K_passes)]
+        schedule = [(k, +1.0) for k in range(K_max)]
 
     for k, sign in schedule:
         # Perturb once per (k, sign); reuse across (res, mirror) inner passes.
@@ -418,7 +467,9 @@ def process_case_stacked(
             restore_clean_params(eval_module, clean)
         timing["perturb_seconds"] += time.time() - t_p
 
-        for R in resolutions:
+        for R, K_r in K_by_R:
+            if k >= K_r:
+                continue
             dataset = DrivAerMLSurfaceDataset(
                 case_ids=[case_id],
                 store=store,
@@ -519,8 +570,12 @@ def process_case_stacked(
     surf_y = case.surface_y.float()
     vol_y = case.volume_y.float()
 
-    k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
-    n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
+    sign_mult = 2 if (antithetic and sigma > 0.0) else 1
+    mirror_mult = 2 if use_mirror else 1
+    if per_res_K is not None:
+        n_passes = sum(per_res_K) * sign_mult * mirror_mult
+    else:
+        n_passes = K_passes * sign_mult * len(resolutions) * mirror_mult
     return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
 
 
@@ -814,6 +869,7 @@ def evaluate_split_stacked(
     collect_calibration: bool = False,
     noise_dist: str = "gaussian",
     noise_df: int = 4,
+    per_res_K: list[int] | None = None,
 ) -> tuple[dict[str, float], CalibrationStats | None]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -848,6 +904,7 @@ def evaluate_split_stacked(
             antithetic=antithetic,
             noise_dist=noise_dist,
             noise_df=noise_df,
+            per_res_K=per_res_K,
         )
         add_case_to_accumulator(
             acc,
@@ -965,23 +1022,36 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"--weight-noise-df {cfg.weight_noise_df!r} not supported for "
             "student_t (df>=3 required for finite variance)"
         )
+    per_res_K = parse_per_res_K(cfg.per_res_K, len(resolutions))
 
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
         print(f"Resolutions: {resolutions}")
         print(f"Modes: {modes}")
-        k_eff_print = cfg.weight_noise_passes * (2 if cfg.antithetic_noise else 1)
         dist_suffix = (
             f" df={cfg.weight_noise_df}" if cfg.weight_noise_dist == "student_t" else ""
         )
-        print(
-            f"Weight-noise TTA: dist={cfg.weight_noise_dist}{dist_suffix} "
-            f"sigma_rel={cfg.weight_noise_sigma} "
-            f"K_passes={cfg.weight_noise_passes} "
-            f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-            f"seed_base={cfg.weight_noise_seed_base}"
-        )
+        if per_res_K is not None:
+            sign_mult = 2 if cfg.antithetic_noise else 1
+            total_passes_per_case = sum(per_res_K) * sign_mult * 2  # × mirror
+            print(
+                f"Weight-noise TTA: dist={cfg.weight_noise_dist}{dist_suffix} "
+                f"sigma_rel={cfg.weight_noise_sigma} "
+                f"per_res_K={per_res_K} (K_max={max(per_res_K)} sum={sum(per_res_K)}) "
+                f"antithetic={cfg.antithetic_noise} "
+                f"seed_base={cfg.weight_noise_seed_base} "
+                f"total_forwards_per_case_mirror_mode={total_passes_per_case}"
+            )
+        else:
+            k_eff_print = cfg.weight_noise_passes * (2 if cfg.antithetic_noise else 1)
+            print(
+                f"Weight-noise TTA: dist={cfg.weight_noise_dist}{dist_suffix} "
+                f"sigma_rel={cfg.weight_noise_sigma} "
+                f"K_passes={cfg.weight_noise_passes} "
+                f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
+                f"seed_base={cfg.weight_noise_seed_base}"
+            )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
     if state.is_main:
@@ -1088,18 +1158,31 @@ def main(argv: Iterable[str] | None = None) -> None:
             else:
                 raise ValueError(f"Unknown mode {mode!r}")
 
+            # weight_noise_only uses a single resolution (cfg.eval_surface_points)
+            # so per_res_K (length-matched to --resolutions) cannot apply there.
+            mode_per_res_K = per_res_K if mode == "weight_noise_mirror_res_avg" else None
             if state.is_main:
-                k_eff_print = cfg.weight_noise_passes * (
-                    2 if cfg.antithetic_noise else 1
-                )
-                print(
-                    f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
-                    f"mirror={use_mirror} K={cfg.weight_noise_passes} "
-                    f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-                    f"sigma={cfg.weight_noise_sigma} "
-                    f"calibration={cfg.test_time_calibration} ===",
-                    flush=True,
-                )
+                if mode_per_res_K is not None:
+                    print(
+                        f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
+                        f"mirror={use_mirror} per_res_K={mode_per_res_K} "
+                        f"antithetic={cfg.antithetic_noise} "
+                        f"sigma={cfg.weight_noise_sigma} "
+                        f"calibration={cfg.test_time_calibration} ===",
+                        flush=True,
+                    )
+                else:
+                    k_eff_print = cfg.weight_noise_passes * (
+                        2 if cfg.antithetic_noise else 1
+                    )
+                    print(
+                        f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
+                        f"mirror={use_mirror} K={cfg.weight_noise_passes} "
+                        f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
+                        f"sigma={cfg.weight_noise_sigma} "
+                        f"calibration={cfg.test_time_calibration} ===",
+                        flush=True,
+                    )
             t0 = time.time()
             metrics, cal_stats = evaluate_split_stacked(
                 split_name=f"{split_name}/{mode}",
@@ -1120,6 +1203,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 collect_calibration=cfg.test_time_calibration,
                 noise_dist=cfg.weight_noise_dist,
                 noise_df=cfg.weight_noise_df,
+                per_res_K=mode_per_res_K,
             )
             dt = time.time() - t0
             if state.is_main:
