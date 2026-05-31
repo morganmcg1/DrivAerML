@@ -33,6 +33,7 @@ Modes:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import time
 from dataclasses import asdict, dataclass, field, fields
@@ -110,6 +111,17 @@ class EvalConfig:
     # across all (ckpt, k, R, mirror) passes (uniform per-point contributions),
     # so the per-case averaged form is sufficient for H342's hypothesis.
     save_raw_predictions: str = ""
+
+    # H338: optional hardcoded alpha/beta override. When the surf strings are
+    # non-empty (comma-separated 4-tuples in [cp, tau_x, tau_y, tau_z] order)
+    # and/or the vp scalars are not NaN, those values replace the OLS-on-val
+    # fit. Used to transfer cal coefficients across seeds/arms (H332 shows the
+    # affine cal is seed-invariant, so we can apply the H312-fit coefficients
+    # to H338 arms without refitting on a noisy val_N=34).
+    cal_hardcoded_alpha_surf: str = ""
+    cal_hardcoded_beta_surf: str = ""
+    cal_hardcoded_alpha_vp: float = float("nan")
+    cal_hardcoded_beta_vp: float = float("nan")
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -1245,8 +1257,44 @@ def main(argv: Iterable[str] | None = None) -> None:
             alpha_surf, beta_surf = fit_affine_per_channel(val_cal.surf_global)
             alpha_vol, beta_vol = fit_affine_per_channel(val_cal.vol_global)
 
+            cal_source_surf_alpha = "ols_val"
+            cal_source_surf_beta = "ols_val"
+            cal_source_vp_alpha = "ols_val"
+            cal_source_vp_beta = "ols_val"
+            if cfg.cal_hardcoded_alpha_surf:
+                hc = [float(x) for x in cfg.cal_hardcoded_alpha_surf.split(",")]
+                if len(hc) != alpha_surf.numel():
+                    raise ValueError(
+                        f"--cal-hardcoded-alpha-surf expected {alpha_surf.numel()} values, got {len(hc)}"
+                    )
+                alpha_surf = torch.tensor(hc, dtype=alpha_surf.dtype, device=alpha_surf.device)
+                cal_source_surf_alpha = "hardcoded"
+            if cfg.cal_hardcoded_beta_surf:
+                hc = [float(x) for x in cfg.cal_hardcoded_beta_surf.split(",")]
+                if len(hc) != beta_surf.numel():
+                    raise ValueError(
+                        f"--cal-hardcoded-beta-surf expected {beta_surf.numel()} values, got {len(hc)}"
+                    )
+                beta_surf = torch.tensor(hc, dtype=beta_surf.dtype, device=beta_surf.device)
+                cal_source_surf_beta = "hardcoded"
+            if not math.isnan(cfg.cal_hardcoded_alpha_vp):
+                alpha_vol = torch.tensor(
+                    [cfg.cal_hardcoded_alpha_vp], dtype=alpha_vol.dtype, device=alpha_vol.device
+                )
+                cal_source_vp_alpha = "hardcoded"
+            if not math.isnan(cfg.cal_hardcoded_beta_vp):
+                beta_vol = torch.tensor(
+                    [cfg.cal_hardcoded_beta_vp], dtype=beta_vol.dtype, device=beta_vol.device
+                )
+                cal_source_vp_beta = "hardcoded"
+
             channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
-            print(f"\n=== H300 calibration (fit on val, mode={mode}) ===", flush=True)
+            print(
+                f"\n=== H300 calibration (mode={mode}; "
+                f"surf alpha={cal_source_surf_alpha}, beta={cal_source_surf_beta}; "
+                f"vp alpha={cal_source_vp_alpha}, beta={cal_source_vp_beta}) ===",
+                flush=True,
+            )
             for c, name in enumerate(channel_names):
                 print(
                     f"  surface[{name:6s}]  alpha={alpha_surf[c].item():+.6f} "
@@ -1286,6 +1334,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                     run.summary[f"calibration/{mode}/beta_{name}"] = float(beta_surf[c].item())
                 run.summary[f"calibration/{mode}/alpha_volume_pressure"] = float(alpha_vol[0].item())
                 run.summary[f"calibration/{mode}/beta_volume_pressure"] = float(beta_vol[0].item())
+                run.summary[f"calibration/{mode}/source_surf_alpha"] = cal_source_surf_alpha
+                run.summary[f"calibration/{mode}/source_surf_beta"] = cal_source_surf_beta
+                run.summary[f"calibration/{mode}/source_vp_alpha"] = cal_source_vp_alpha
+                run.summary[f"calibration/{mode}/source_vp_beta"] = cal_source_vp_beta
 
                 # Log calibrated primary metrics to W&B history (and as
                 # split-level summary keys for downstream parsing).
