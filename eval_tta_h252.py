@@ -96,13 +96,6 @@ class EvalConfig:
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
 
-    # H307: skip the test_surface loop entirely. Useful when the only goal is
-    # to fit affine calibration coefficients on val and emit
-    # val_abupt_h300_calibrated for triage on a tight budget. When skip_test is
-    # True the calibration block computes alpha/beta from val_cal alone and
-    # writes only val_*_h300_calibrated summary keys.
-    skip_test: bool = False
-
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
     output_dir: str = "outputs/h252_eval"
@@ -992,10 +985,6 @@ def main(argv: Iterable[str] | None = None) -> None:
         ("val_surface", val_case_ids, "full_val"),
         ("test_surface", test_case_ids, "test"),
     ]
-    if cfg.skip_test:
-        splits = [s for s in splits if s[0] != "test_surface"]
-        if state.is_main:
-            print("[skip_test] test_surface loop disabled; calibration fit on val only", flush=True)
 
     summary: dict[str, dict[str, dict[str, float]]] = {}
     cal_summary: dict[str, dict[str, CalibrationStats | None]] = {}
@@ -1065,22 +1054,15 @@ def main(argv: Iterable[str] | None = None) -> None:
     restore_clean_params(eval_module, clean)
 
     # H300: per-channel affine calibration applied on val, transferred to test.
-    # H307: allow val-only calibration (test_cal absent) when skip_test=True.
     cal_metrics_by_split_mode: dict[str, dict[str, dict[str, float]]] = {}
     if cfg.test_time_calibration and state.is_main:
         for mode in modes:
             val_cal = cal_summary.get("val_surface", {}).get(mode)
             test_cal = cal_summary.get("test_surface", {}).get(mode)
-            if val_cal is None:
+            if val_cal is None or test_cal is None:
                 print(
-                    f"[calibration] mode={mode}: missing val cal stats; skipping",
-                    flush=True,
-                )
-                continue
-            if test_cal is None and not cfg.skip_test:
-                print(
-                    f"[calibration] mode={mode}: missing test cal stats and "
-                    "skip_test=False; skipping",
+                    f"[calibration] mode={mode}: missing cal stats "
+                    f"(val={val_cal is not None}, test={test_cal is not None}); skipping",
                     flush=True,
                 )
                 continue
@@ -1104,28 +1086,22 @@ def main(argv: Iterable[str] | None = None) -> None:
             val_cal_metrics = compute_calibrated_metrics(
                 val_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
             )
-            test_cal_metrics: dict[str, float] | None = None
-            if test_cal is not None:
-                test_cal_metrics = compute_calibrated_metrics(
-                    test_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
-                )
+            test_cal_metrics = compute_calibrated_metrics(
+                test_cal, alpha_surf, beta_surf, alpha_vol, beta_vol
+            )
             cal_metrics_by_split_mode.setdefault("val_surface", {})[mode] = val_cal_metrics
-            if test_cal_metrics is not None:
-                cal_metrics_by_split_mode.setdefault("test_surface", {})[mode] = test_cal_metrics
+            cal_metrics_by_split_mode.setdefault("test_surface", {})[mode] = test_cal_metrics
 
             print(
                 f"  val  (raw -> cal)  abupt {summary['val_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
                 f"-> {val_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
                 flush=True,
             )
-            if test_cal_metrics is not None:
-                print(
-                    f"  test (raw -> cal)  abupt {summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
-                    f"-> {test_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
-                    flush=True,
-                )
-            else:
-                print("  test (raw -> cal)  skipped (skip_test=True)", flush=True)
+            print(
+                f"  test (raw -> cal)  abupt {summary['test_surface'][mode]['abupt_axis_mean_rel_l2_pct']:.4f} "
+                f"-> {test_cal_metrics['abupt_axis_mean_rel_l2_pct']:.4f}",
+                flush=True,
+            )
 
             if run is not None:
                 # Log alpha/beta to W&B summary so they appear on the run page.
@@ -1141,30 +1117,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"full_val_primary_calibrated/{mode}/{k}": v
                     for k, v in val_cal_metrics.items()
                 }
-                log_payload: dict[str, float] = dict(val_log)
-                if test_cal_metrics is not None:
-                    log_payload.update(
-                        {
-                            f"test_primary_calibrated/{mode}/{k}": v
-                            for k, v in test_cal_metrics.items()
-                        }
-                    )
-                wandb.log(log_payload)
+                test_log = {
+                    f"test_primary_calibrated/{mode}/{k}": v
+                    for k, v in test_cal_metrics.items()
+                }
+                wandb.log({**val_log, **test_log})
 
                 # Single-line paper-facing primary metrics (no mode suffix).
                 run.summary["val_abupt_h300_calibrated"] = float(
                     val_cal_metrics["abupt_axis_mean_rel_l2_pct"]
                 )
+                run.summary["test_abupt_h300_calibrated"] = float(
+                    test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
+                )
                 run.summary["val_abupt_h300_raw"] = float(
                     summary["val_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
                 )
-                if test_cal_metrics is not None:
-                    run.summary["test_abupt_h300_calibrated"] = float(
-                        test_cal_metrics["abupt_axis_mean_rel_l2_pct"]
-                    )
-                    run.summary["test_abupt_h300_raw"] = float(
-                        summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
-                    )
+                run.summary["test_abupt_h300_raw"] = float(
+                    summary["test_surface"][mode]["abupt_axis_mean_rel_l2_pct"]
+                )
 
     if state.is_main and summary:
         print("\n=== Summary (rel_l2_pct lower-is-better) ===")
