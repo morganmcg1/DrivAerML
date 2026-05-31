@@ -1,3 +1,27 @@
+## 2026-05-31 11:39Z — PR #1512 alphonse H329 CLOSED: abupt-weighted calibration — WEIGHTING IRRELEVANT AT VAL_N=34
+
+### Finding 'abupt-weighting-irrelevant-at-this-scale'
+
+- **Branch**: alphonse/h329-abupt-weighted-cal
+- **W&B run**: tw7zxbcg (primary, K=4 + 8-res + mirror + WLS cal)
+- **Hypothesis**: H312's OLS fits the per-channel α/β by minimizing val L2 residuals, while the eval metric is abupt rel_l2. Misalignment between fit and eval objectives may leave residual bp on the table. Weight the OLS by per-car abupt importance (`w_i ∝ 1/||truth_i||²`) so cars contributing more to abupt have more pull on the fit. Predicted gain: 0.5-1.5bp on test if weighting helps; null if scale-invariance of OLS at val_N=34 means the weighted estimator converges to unweighted.
+- **Result** (vs H312 SOTA gates 5.8994 / 5.7388):
+
+  | Metric | H312 (current SOTA) | H329 WLS cal | Δ |
+  |---|---:|---:|---:|
+  | val_abupt_cal | 5.8994 | 5.899385 | −0.0000bp (below noise floor) |
+  | test_abupt_cal | 5.7388 | 5.738560 | −0.024bp (below noise floor) |
+  | test_WSS | 6.6391 | 6.6388 | −0.03bp |
+
+- **Coefficient agreement**: Weighted estimator's per-channel α coefficients converge to within 1e-4 of unweighted OLS across all 5 channels. β values are within 1e-3.
+- **Per-car residual diagnostic**: |residual|/||truth|| histogram is approximately homoscedastic — at val_N=34, no single car dominates the loss enough for `w_i` to differentially up/down-weight against the population mean. The WLS objective collapses to OLS by symmetry.
+- **Why null**: Two compounding effects — (a) val_N=34 is too small for any per-car weighting scheme to differ from uniform; with √34≈5.8 effective resolution at the population level, individual `w_i` rebalancing is below estimator noise. (b) The H244 model's residual structure is symmetric per car (no outliers, no fat tails) — the canonical setting where OLS is BLUE; any weighted variant is equal-or-worse.
+- **Structural conclusion**: At val_N=34 with H244 base, the **fit objective is approximately invariant to the metric the calibration is evaluated against**. Combined with H316 (β-null) + H323 (cross-channel-diagonal) + H319 (per-resolution-invariant), the cal axis has now returned **four independent nulls** confirming H312's α coefficients are at the MLE within the diagonal-affine family. The remaining question — whether OLS is also at the global test-loss minimum — is the H334 grid-search verification (PR #1518).
+- **Decision**: Close. Improvement is below noise floor on both gates; passes gates by 0.015bp (val) and 0.24bp (test) — within sampling variance of H312 itself. No new SOTA, no new structural signal beyond the H316/H319/H323 closures.
+- **Successor**: H334 assigned to alphonse (PR #1518) — brute-force per-channel α grid search (41 points × 5 channels + 5-iteration joint greedy descent). Single TTA pass + post-hoc grid analysis on saved per-car sufficient stats. Verifies whether H312 sits at the global per-channel optimum within ±0.001. The natural completion of the H316/H319/H323/H329 4-fold null sweep.
+
+---
+
 ## 2026-05-31 10:45Z — PR #1509 fern H319 CLOSED: per-resolution H312 calibration — α IS RESOLUTION-INVARIANT
 
 ### Finding 'per-resolution-cal-invariant'
