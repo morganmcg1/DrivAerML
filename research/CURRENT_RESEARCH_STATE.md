@@ -1,9 +1,81 @@
 # SENPAI Research State
 
-- **2026-05-31 15:34Z**
+- **2026-05-31 17:42Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 17:42Z snapshot — **H183 SP floor is now the dominant merge risk** (val_SP=3.85 flat slope projects test_SP=3.62, FAILS floor 3.577 by 0.04pp); H184 descent STALLED in stable phase (−0.0018/EP, decay-phase EP22 must deliver 4-5× boost); H182 EP24 val_VP=3.481 still deepening (partial-SOTA on VP); H181 EP26.8 climbing NON-MERGE confirmed
+
+**Active wave-5 fleet, all 4 students WIP. 17:42Z fleet:**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | val_SP | EP30 risk | Decision |
+|---|---|---|---:|---:|---:|---:|---|---|
+| frieren | #1503 | H181 EMA-99995 | 26.8 | 6.8499 (↑) | 3.792 | 4.022 | NON-MERGE (terminal hold) | continue to EP30 ~19:00Z |
+| nezuko | #1506 | H182 LR 1.3× | 24.0 | 6.7671 | **3.481** | 3.930 | WSS NON-MERGE / VP partial SOTA | continue to EP30 ~20:30Z |
+| tanjiro | #1510 | H183 per-channel heads | 16.2 | 6.6188 | 3.604 | **3.866** | **SP FLOOR BLOCKER** | continue, SP decay-phase critical |
+| fern | #1513 | H184 WSD LR | 14.7 | 6.8404 | 3.745 | 4.054 | descent STALLED, EP22 decay critical | continue, decisive read EP22 ~21:00Z |
+
+### H183 (tanjiro) — SP FLOOR IS THE BLOCKER (WSS path still credible)
+
+Tanjiro's EP15 boundary read (15:37Z): val_WSS=6.6140, val_VP=3.5927, val_SP=3.8450. All kill gates PASS, but SP slope is flat (~−0.002pp/EP). Mapping val→test from H147 pattern:
+
+| Channel | H147 val EP30 | H147 test EP30 | val→test Δ |
+|---|---:|---:|---:|
+| WSS | ~6.60 | 6.5409 | −0.06 |
+| VP | ~3.60 | 3.4014 | −0.20 |
+| **SP** | **~3.76** | **3.5634** | **−0.20** |
+
+**If H183 val_SP terminal = 3.82, projected test_SP = 3.62 = FAILS floor 3.577 by 0.04pp.** This blocks merge regardless of WSS performance.
+
+**EP30 projections (val):**
+- WSS at current −0.005pp/EP: 6.55 (TIES H147); with decay boost: **6.45-6.50 (BEATS H147)** ✓
+- VP at current −0.020pp/EP: 3.32 (healthy below floor) ✓
+- **SP at flat slope: 3.82 → test_SP = 3.62 = FAILS floor** ✗
+
+**Decision: CONTINUE — but EP22+ decay phase MUST accelerate SP descent.** H147's cosine reaches lr~1e-6 by EP30. If H183 SP follows same pattern, end-game descent could be 5-10× current rate. EP20 and EP25 boundary reads are decisive for SP.
+
+### H184 (fern) — descent STALLED in stable phase (decay phase EP22 is now MUST-DELIVER)
+
+| EP | val_WSS | descent rate |
+|---:|---:|---:|
+| 9 | 6.8922 | — |
+| 11.9 | 6.8454 | −0.016/EP |
+| **14.7** | **6.8404** | **−0.0018/EP (STALL)** |
+
+**Descent stalled from −0.016 to −0.0018pp/EP** — 9× slowdown. The WSD design predicted continued stable-phase descent at lr=1e-4. This stall is unexpected.
+
+**Updated EP22 projection:** 6.8404 - 0.0018×7.3 = **6.83** (vs my 15:34Z projection 6.69). +0.20pp behind H147 EP22 ~6.58.
+
+**Decay phase EP22→EP29 (lr 1e-4 → 1e-6) MUST deliver 4-5× boost to reach H147 territory:**
+- Best case (5× boost = −0.10pp/EP × 7 EPs = −0.70pp total): EP30 = **6.13** (improbable, overshoot)
+- Realistic (3× boost = −0.06pp/EP × 7 EPs = −0.42pp): EP30 = **6.41** (BEATS H147 by 0.13pp)
+- Conservative (2× boost = −0.04pp/EP × 7 EPs = −0.28pp): EP30 = **6.55** (TIES H147)
+- Worst (decay-phase fizzles): EP30 = 6.75-6.80 = NON-MERGE
+
+**Decision: CONTINUE — EP22 decay-phase activation is the binary read.** If decay activates strongly: H184 is a credible SOTA candidate. If decay fails to activate: NON-MERGE. EP22 boundary ~21:00Z.
+
+### H182 (nezuko) — VP=3.481 still deepening at EP24 (partial-SOTA holding)
+
+| EP | val_WSS | val_VP | floor delta |
+|---:|---:|---:|---:|
+| 18 | 6.7744 | 3.5172 | −0.126 |
+| 21 | 6.7716 | 3.4872 | −0.156 |
+| **24** | **6.7671** | **3.4807** | **−0.162** |
+
+VP descent slowing to −0.0022pp/EP EP21→EP24 (vs −0.010 EP18→21). Plateau approaching at ~3.45-3.48 range. **Test_VP projection val→test ~−0.20pp:** EP30 val_VP ~3.45 → test_VP ~3.25 = **beats H147 test_VP=3.4014 by ~0.15pp** (partial-SOTA candidate confirmed).
+
+WSS plateau holding at 6.77 = NON-MERGE on WSS.
+
+### H181 (frieren) — EP26.8 climbing, NON-MERGE terminal-hold
+
+| EP | val_WSS |
+|---:|---:|
+| 21 | 6.8175 |
+| 24 | 6.8285 |
+| **26.8** | **6.8499 (continued climb)** |
+
+EMA-9999.5 averaging window producing unstable convergence — descent reversed by EP21, accelerating climb EP24→26.8 (+0.021pp/3EPs vs +0.011 EP21→24). EP30 projection 6.85-6.90 = consistently behind H147 6.5409 and H172 6.6517. **NON-MERGE — terminal harvest ~19:00Z.**
 
 ## 15:34Z snapshot — **H182 VP=3.487 DEEPENING (−0.156pp below floor, partial-SOTA strengthening, test_VP proj 3.20 = beats H147 by 0.20pp);** H183 EP13.6 = 6.6306 descent severely slowed (EP15 borderline FAIL, EP30 proj 6.51-6.57 still beats H147); **H184 EP11.9 = 6.8454 descent ACCELERATING to −0.016/EP (re-projected EP30 6.44-6.54 with decay boost = STRONG SOTA candidate);** H181 EP24 = 6.8285 slight uptick (NON-MERGE confirmed)
 
