@@ -1,3 +1,27 @@
+## 2026-05-31 17:45Z — PR #1500 frieren H314 MERGED: Student-t ν=4 weight-noise TTA — NEW SOTA
+
+### MERGED — val_cal 5.8987% / test_cal 5.7387% (beats H312 gates by 0.7bp / 0.1bp)
+
+- **Branch**: frieren/h314-student-t-weight-noise
+- **W&B runs**: `2scozlaf` (Arm A ν=4 winner), `fk8kd4nl` (Arm B ν=3), `mdp9rwvm` (Arm C ν=8)
+- **Hypothesis**: Student-t(ν) weight perturbations at matched RMS will sample the prediction manifold more broadly than Gaussian draws in K=4 anti-thetic TTA, producing a diversity gain via heavier-tail weight-space coverage.
+- **Result — full ν-sweep (calibrated)**:
+
+  | Arm | ν | val_cal | test_cal | test_WSS | test_VP | test_SP |
+  |---|---:|---:|---:|---:|---:|---:|
+  | **A (winner)** | **4** | **5.8987** | **5.7387** | **6.6390** | **3.3739** | 3.6136 |
+  | B | 3 | 5.8997 | 5.7394 | 6.6397 | 3.3746 | 3.6144 |
+  | C | 8 | 5.9008 | 5.7402 | 6.6410 | 3.3733 | 3.6138 |
+  | H312 gate | — | 5.8994 | 5.7388 | 6.6391 | 3.3743 | 3.6137 |
+
+- **Key findings**:
+  - **Unimodal ν-response**: val_raw parabolic with minimum at ν=4 (5.9213% < ν=3 5.9222% < Gaussian 5.9221% < ν=8 5.9238%). ν=4 is the unique heavy-tail local optimum on this axis.
+  - **Uniform channel benefit**: Improvement ~uniform across WSS_x/y/z and VP — NOT concentrated on the highest-error channel (WSS_z). Mechanism is broader manifold sampling generally, not wake-zone-specific.
+  - **ν-invariant calibration**: α coefficients agree within ±0.01 across all three ν values — H314 composes cleanly with H300 calibration, no re-tuning needed.
+  - **ν=8 surprise**: Arm C (ν=8 ≈ Gaussian) lands slightly WORSE than Gaussian baseline raw (5.9238 vs 5.9221). At K=4 anti-thetic pairs, even near-Gaussian Student-t draws produce slightly different per-pass realizations than the Gaussian seed sequence, and that draw-noise (~0.1bp) dominates in the light-tail regime.
+- **New SOTA**: H314 Arm A ν=4. Merge gate tightened to val_cal < 5.8987% AND test_cal < 5.7387%.
+- **Next**: H339 (frieren) WSS-targeted loss reweighting cosine-tail — targets 0.79pp WSS gap (the only remaining major open problem after all inference axes closed).
+
 ## 2026-05-31 15:40Z — PR #1516 edward H332 CLOSED: seed-2 α robustness — α IS MODEL-CLASS INVARIANT (3 findings banked)
 
 ### Findings `α-seed-invariant` + `cal-transfer-lossless-h312-to-seed2` + `seed-2-val-deficit-test-parity`

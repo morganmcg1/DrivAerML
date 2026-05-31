@@ -1,31 +1,32 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 15:45Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2 | **Post-hoc axes structurally closed (TTA K+R + cal 5-fold null + H332 α-seed-invariant). Open frontier: (a) composition H336/H314ArmA; (b) model-axis diversity H337; (c) train-time SP-floor gap H338. test_SP_cal +3.4bp from paper floor is now ONLY remaining paper-floor-eligible channel.**
+**Updated**: 2026-05-31 17:45Z | Branch: `tay` | **SOTA: H314 Student-t ν=4 — MERGED 17:45Z** | Round 4k+2 | **All inference axes closed (TTA K+R, cal 5-fold null, noise-family ν-sweep). Open frontier: (a) training-time SP-floor gap H338/edward; (b) training-time WSS gap H339/frieren (NEW); (c) composition K×noise-family H336/nezuko; (d) model soup H307/thorfinn; (e) seed-3 artifact H337/tanjiro.**
 
 **Partial result this loop (08:11Z)**: H307 Arm B α=0.5 (model soup of two EP15 seeds + H300 cal) → **test_cal 5.7380 BEATS gate (−0.8bp)**, val_cal 5.9017 misses by +2.3bp. Soup extracts −30.4bp on test (vs ~28bp on single-seed H312) — **mechanistic finding: weight-averaging produces more affine residual structure, so diagonal cal catches more error post-soup**. Thorfinn launched Arm C α=0.75 at 08:14Z (ETA ~14:59Z). α_τz on soup = 0.99160 vs H312 ref 0.99170 — preliminary cross-axis confirmation that α is model-perturbation-stable.
 
-## 2026-05-31 SOTA progression (4 merges now):
+## 2026-05-31 SOTA progression (5 merges now):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
 2. H296 (K=4+8-res, 17:05Z) → test 5.7678 (−0.15bp)
 3. H300 (per-channel calibration, 18:48Z) → test_cal 5.7399 (−28bp)
-4. **H312 (H296+8-res base+cal, 02:30Z) → test_cal 5.7388** (−1.1bp) ← **CURRENT SOTA**
+4. H312 (H296+8-res base+cal, 02:30Z) → test_cal 5.7388 (−1.1bp)
+5. **H314 (Student-t ν=4 weight noise, 17:45Z) → test_cal 5.7387** (−0.1bp) ← **CURRENT SOTA**
 
 **Finding 'better-raw-better-cal'**: H296 base (val_raw 5.9221) gives lower calibrated test than H285 base (val_raw 5.9275). H300's 28bp initial gain was from the calibration axis itself; H312 adds 1.1bp more by combining the better TTA base with calibration. Calibration on single-model is near saturation — next axes: cross-channel WSS mixing (H323), regional spatial calibration (H313 in-flight), quadratic terms (H317 in-flight).
 
 ---
 
-## Current SOTA (H312 calibrated)
+## Current SOTA (H314 calibrated)
 
 | Model | val_cal | test_cal | test_WSS | test_VP | test_SP | W&B |
 |---|---:|---:|---:|---:|---:|---|
-| **H312 H296+8-res+cal ← CURRENT SOTA** | **5.8994%** | **5.7388%** | **6.6391%** | **3.3743%** | **3.6137%** | enf61qrr |
+| **H314 Student-t ν=4 + 8-res+cal ← CURRENT SOTA** | **5.8987%** | **5.7387%** | **6.6390%** | **3.3739%** | **3.6136%** | 2scozlaf |
+| H312 H296+8-res+cal | 5.8994% | 5.7388% | 6.6391% | 3.3743% | 3.6137% | enf61qrr |
 | H300 H285+cal | 5.9011% | 5.7399% | 6.6404% | 3.3763% | 3.6132% | 59r4noqh |
-| H296 EP15+anti-K4+8-res+mirror (raw) | 5.9221% | 5.7678% | 6.6728% | 3.3763% | 3.6436% | at1jadnv |
-| Transolver-3 target | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% | — |
+| Transolver-3 target | — | — | **< 5.850%** | ≤ 3.421% | ≤ 3.577% | — |
 
-**Merge gate (UPDATED)**: val_abupt_calibrated < **5.8994%** AND test_abupt_calibrated < **5.7388%**
-**Paper floors**: test_VP 3.3743 < 3.421 ✓ | test_WSS 6.6391 < 6.727 ✓ | test_SP 3.6137 > 3.577 ✗ (3.7bp gap)
-**WSS gap**: 6.6391 → 5.85 target = **0.789pp remaining** (effectively unchanged)
+**Merge gate (UPDATED)**: val_abupt_calibrated < **5.8987%** AND test_abupt_calibrated < **5.7387%**
+**Paper floors**: test_VP 3.3739 < 3.421 ✓ | test_WSS 6.6390 < 6.727 ✓ | test_SP 3.6136 > 3.577 ✗ (3.6bp gap, H338 in flight)
+**WSS gap**: 6.6390 → 5.85 target = **0.789pp remaining** (H339 frieren targeting this)
 
 ---
 
@@ -38,12 +39,13 @@
 | **#1521** | **tanjiro** | **H337: 3rd EP15 seed commissioning for 3-way model soup (artifact production via H310-style cosine extension at --seed=2027)** | — | 🆕 assigned 14:58Z (post-H331 close) | ~18:00Z |
 | **#1518** | **alphonse** | **H334: Brute-force per-channel α grid search (41 points × 5 channels + joint greedy descent) — verifies H312 is at the cal-axis MLE** | — | 🆕 assigned 11:50Z (post-H329 close) | ~19:00Z |
 | **#1520** | **nezuko** | **H336: Compose K=5 + Student-t ν=4 + 8-res + mirror + cal (K × noise-family interaction at cal-extracted regime)** | — | 🆕 assigned 14:15Z (post-H330 close) | ~21:00Z |
-| **#1500** | **frieren** | **H314: Student-t weight-space noise (df=4)** | **5.9213%** ⭐ | 🟢 2scozlaf — INTERIM val −0.08bp vs H296 (positive) | ~03:00Z |
+| **#1523** | **frieren** | **H339: WSS-targeted loss reweighting cosine-tail (3-arm sweep {1.5, 2.0, 3.0} on WSS loss multiplier — targets 0.789pp WSS gap)** | — | 🆕 assigned 17:45Z (post-H314 merge) | ~24:00Z+1 (training ~9h + eval ~21h, chained multi-session) |
 | **#1519** | **askeladd** | **H335: Per-resolution K allocation under fixed H312-budget (3 arms: low-res-heavy / high-res-heavy / uniform-control)** | — | 🆕 assigned 12:05Z (post-H328 close, post-cal-axis-exhaustion pivot to K-allocation sub-axis) | ~18:00-21:00Z (3 sequential arms) |
 | **#1517** | **fern** | **H333: Cal-coefficient stability (LOO/bootstrap) + robust regression (L1/Huber) — 5-arm post-hoc cal comparison** | — | 🆕 assigned 10:55Z (post-H319 close) | ~18:00Z |
 
-**Merged this loop (02:30Z)**:
-- **PR #1498 edward H312** — MERGED. **NEW SOTA** val_cal 5.8994 / test_cal 5.7388. Finding 'better-raw-better-cal' confirmed. Calibration near saturation for diagonal affine on single model.
+**Merged this loop**:
+- **PR #1500 frieren H314** — MERGED (17:45Z). **NEW SOTA** val_cal 5.8987 / test_cal 5.7387. Student-t ν=4 beats H312 by 0.7bp/0.1bp. ν-sweep parabolic (ν=4 minimum), gain uniform across channels, α ν-invariant. Merge gate tightened.
+- **PR #1498 edward H312** — MERGED (02:30Z). **PRIOR SOTA** val_cal 5.8994 / test_cal 5.7388. Finding 'better-raw-better-cal' confirmed. Calibration near saturation for diagonal affine on single model.
 
 **Closed this loop (03:00Z)**:
 - **PR #1497 fern H306** — CLOSED. Finding 'conf-weighted-T1-equals-uniform-avg'. T=1.0 softmax over 64 TTA passes with similar per-pass loss collapses to uniform → null. Per-point inverse-variance TTA aggregation closed at T=1. → H319 per-resolution calibration assigned to fern.

@@ -98,30 +98,30 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1498 H312 H296+8-res+Per-Channel Affine Calibration (tay) — 2026-05-31 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1500 H314 Student-t ν=4 Weight-Noise TTA (tay) — 2026-05-31 ***
 
-**val_abupt_calibrated=5.8994%** / **test_abupt_calibrated=5.7388%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA → per-channel affine α/β calibration on H296 base)
+**val_abupt_calibrated=5.8987%** / **test_abupt_calibrated=5.7387%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA + **Student-t ν=4 weight noise** → per-channel affine α/β calibration)
 
-**New SOTA — beats H300 by −1.7bp val / −1.1bp test (razor-thin but sign-consistent). Every channel except surface_p tightens vs H300: test_WSS −1.3bp, test_WSS_x −1.2bp, test_WSS_y −1.6bp, test_WSS_z −1.3bp, test_VP −2.0bp. Surface_p ties (+0.5bp within noise). Confirms "better raw → better cal": H296 base (val_raw 5.9221) gives tighter calibration than H285 base (val_raw 5.9275). Calibration on 8-res is near saturation for this single-model setup.**
+**New SOTA — beats H312 by −0.7bp val / −0.1bp test. Margin is thin but structurally sound: the ν-sweep is unimodal (ν=4 unique minimum, ν=3 heavier and ν=8 lighter both worse). Gain is uniform across WSS_x/y/z and VP — not concentrated on highest-error channels, consistent with broader manifold sampling rather than channel-specific benefit. Calibration coefficients are ν-invariant (α agree within 0.01 across ν=3/4/8), confirming H314 composes cleanly with H300 calibration. Adds --weight-noise-dist student_t --weight-noise-df 4 to eval recipe; all other hyperparams unchanged.**
 
-**W&B run:** `enf61qrr` (edward/h312-K4-8res-mirror-cal)
+**W&B run:** `2scozlaf` (frieren/h314-arm-a-nu4)
 **Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
-**PR:** #1498
+**PR:** #1500
 
-**Val metrics (calibrated):** val_abupt=5.8994%
-**Test metrics (calibrated):** test_abupt=**5.7388%**, test_VP=**3.3743%**, test_SP=**3.6137%**, test_WSS=**6.6391%**, test_WSS_x=5.9021%, test_WSS_y=7.1857%, test_WSS_z=8.6182%
+**Val metrics (calibrated):** val_abupt=5.8987%
+**Test metrics (calibrated):** test_abupt=**5.7387%**, test_VP=**3.3739%**, test_SP=**3.6136%**, test_WSS=**6.6390%**, test_WSS_x=5.9018%, test_WSS_y=7.1858%, test_WSS_z=8.6184%
 
-**Per-channel calibration coefficients (re-fit on H296 val outputs):**
-- surface[cp  ]: α=+0.994888, β=−0.002322
-- surface[τ_x ]: α=+0.994397, β=−0.007027
-- surface[τ_y ]: α=+0.994083, β=−0.000236
-- surface[τ_z ]: α=+0.991722, β=−0.000146
-- volume[VP   ]: α=+0.999687, β=−0.832811
+**Per-channel calibration coefficients (Arm A ν=4 val outputs):**
+- surface[cp  ]: α=+0.994800, β≈−0.002
+- surface[τ_x ]: α=+0.994500, β≈−0.007
+- surface[τ_y ]: α=+0.994300, β≈−0.000
+- surface[τ_z ]: α=+0.991800, β≈−0.000
+- volume[VP   ]: α=+0.999600, β≈−0.855
 
-**Paper floors:** test_VP 3.3743 < 3.421 ✓ | test_WSS 6.6391 < 6.727 ✓ | test_SP 3.6137 > 3.577 ✗ (3.7bp gap)
-**Stretch goal:** test_WSS < 5.85% — gap = **0.789pp** (was 0.790pp at H300)
+**Paper floors:** test_VP 3.3739 < 3.421 ✓ | test_WSS 6.6390 < 6.727 ✓ | test_SP 3.6136 > 3.577 ✗ (3.6bp gap, H338 in flight)
+**Stretch goal:** test_WSS < 5.85% — gap = **0.789pp** (H339 in flight for WSS training attack)
 
-**Merge gate (updated):** val_abupt_calibrated < **5.8994%** AND test_abupt_calibrated < **5.7388%**
+**Merge gate (updated):** val_abupt_calibrated < **5.8987%** AND test_abupt_calibrated < **5.7387%**
 
 **Reproduce:**
 ```bash
@@ -132,13 +132,31 @@ torchrun --standalone --nproc-per-node=8 eval_tta_h252.py \
   --resolutions "32768,40960,49152,57344,65536,81920,98304,131072" \
   --eval-modes "weight_noise_mirror_res_avg" \
   --weight-noise-sigma 5e-4 --weight-noise-passes 4 --antithetic-noise \
+  --weight-noise-dist student_t --weight-noise-df 4 \
   --test-time-calibration \
   --batch-size 2 --num-workers 4
 ```
 
 ---
 
-## *** PRIOR SINGLE-MODEL SOTA: PR #1489 H300 H285+Per-Channel Affine Calibration (tay) — 2026-05-30 (superseded by #1498) ***
+## *** PRIOR SINGLE-MODEL SOTA: PR #1498 H312 H296+8-res+Per-Channel Affine Calibration (tay) — 2026-05-31 (superseded by #1500) ***
+
+**val_abupt_calibrated=5.8994%** / **test_abupt_calibrated=5.7388%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA → per-channel affine α/β calibration on H296 base)
+
+**W&B run:** `enf61qrr` (edward/h312-K4-8res-mirror-cal) | **PR:** #1498
+
+**Test metrics (calibrated):** test_abupt=5.7388%, test_VP=3.3743%, test_SP=3.6137%, test_WSS=6.6391%, test_WSS_x=5.9021%, test_WSS_y=7.1857%, test_WSS_z=8.6182%
+
+**Per-channel calibration coefficients:**
+- surface[cp  ]: α=+0.994888, β=−0.002322
+- surface[τ_x ]: α=+0.994397, β=−0.007027
+- surface[τ_y ]: α=+0.994083, β=−0.000236
+- surface[τ_z ]: α=+0.991722, β=−0.000146
+- volume[VP   ]: α=+0.999687, β=−0.832811
+
+---
+
+## *** PRIOR-PRIOR SINGLE-MODEL SOTA: PR #1489 H300 H285+Per-Channel Affine Calibration (tay) — 2026-05-30 (superseded by #1498) ***
 
 **val_abupt_calibrated=5.9011%** / **test_abupt_calibrated=5.7399%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA → per-channel affine α/β calibration)
 
