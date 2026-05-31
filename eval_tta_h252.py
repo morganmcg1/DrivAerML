@@ -89,6 +89,14 @@ class EvalConfig:
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
 
+    # H314: weight-noise distribution family. "gaussian" (default) preserves the
+    # H274/H300 baseline. "student_t" draws from a scaled Student-t(df) with the
+    # same per-element variance as the Gaussian baseline (so RMS noise magnitude
+    # matches), but heavier tails. Symmetric, so anti-thetic cancellation of the
+    # linear Taylor term still holds.
+    weight_noise_dist: str = "gaussian"
+    weight_noise_df: int = 4
+
     # H300: per-channel affine calibration. Fits alpha_c, beta_c via OLS on val
     # predictions vs val targets (after TTA aggregation), then applies the SAME
     # (alpha, beta) to test predictions before metric computation. Logs both raw
@@ -263,6 +271,46 @@ def restore_clean_params(module: nn.Module, clean: dict[str, torch.Tensor]) -> N
 
 
 @torch.no_grad()
+def _draw_unit_variance_noise(
+    shape: torch.Size,
+    *,
+    gen: torch.Generator,
+    device: torch.device,
+    dtype: torch.dtype,
+    dist: str,
+    df: int,
+) -> torch.Tensor:
+    """Sample noise with mean 0, variance 1 from ``dist``.
+
+    For ``dist="gaussian"`` returns N(0, 1).
+
+    For ``dist="student_t"`` returns scaled Student-t(df) with unit variance:
+    a Student-t(df) variate equals Z / sqrt(V/df) for Z~N(0, 1) and V~chi2(df);
+    its raw variance is df/(df-2), so we scale by sqrt((df-2)/df) to land on
+    unit variance. Requires ``df >= 3`` (integer); ``df=4`` is the recommended
+    starting point (4th moment exists; tails noticeably heavier than Gaussian).
+    """
+    if dist == "gaussian":
+        return torch.randn(shape, generator=gen, device=device, dtype=dtype)
+    if dist == "student_t":
+        if df < 3:
+            raise ValueError(
+                f"student_t weight_noise_df={df!r} not supported "
+                "(df>=3 required for finite variance)"
+            )
+        z = torch.randn(shape, generator=gen, device=device, dtype=dtype)
+        # chi2(df) via sum of df independent N(0,1)^2; same generator so the
+        # full draw is reproducible across DDP ranks and across +ε / −ε pairs.
+        v = torch.randn(shape, generator=gen, device=device, dtype=dtype).pow_(2)
+        for _ in range(int(df) - 1):
+            v.add_(torch.randn(shape, generator=gen, device=device, dtype=dtype).pow_(2))
+        raw_t = z * torch.sqrt(float(df) / v.clamp_min(1e-12))
+        scale = ((df - 2) / df) ** 0.5
+        return raw_t.mul_(scale)
+    raise ValueError(f"Unknown weight_noise_dist {dist!r} (expected gaussian|student_t)")
+
+
+@torch.no_grad()
 def perturb_relative_(
     module: nn.Module,
     clean: dict[str, torch.Tensor],
@@ -270,11 +318,16 @@ def perturb_relative_(
     seed: int,
     device: torch.device,
     sign: float = 1.0,
+    dist: str = "gaussian",
+    df: int = 4,
 ) -> None:
-    """p <- clean_p + sign * randn(seed) * sigma * |clean_p|, identical across DDP ranks.
+    """p <- clean_p + sign * draw(seed) * sigma * |clean_p|, identical across DDP ranks.
 
-    With matched ``seed`` and ``sign=±1.0`` calls, produces an anti-thetic pair
-    whose linear Taylor term cancels in the average (Finding NN / H274).
+    ``draw`` is a unit-variance sample from ``dist`` (gaussian or scaled
+    Student-t(df)). With matched ``seed`` and ``sign=±1.0`` calls, produces an
+    anti-thetic pair whose linear Taylor term cancels in the average (Finding
+    NN / H274). Student-t draws are symmetric around zero, so anti-thetic
+    cancellation still holds; only the marginal tail mass changes.
     """
     gen = torch.Generator(device=device)
     gen.manual_seed(seed)
@@ -282,7 +335,9 @@ def perturb_relative_(
         if not p.dtype.is_floating_point:
             continue
         clean_p = clean[name]
-        noise = torch.randn(p.shape, generator=gen, device=device, dtype=p.dtype)
+        noise = _draw_unit_variance_noise(
+            p.shape, gen=gen, device=device, dtype=p.dtype, dist=dist, df=df
+        )
         noise.mul_(sigma * sign).mul_(clean_p.abs())
         p.data.copy_(clean_p).add_(noise)
 
@@ -306,6 +361,8 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
+    noise_dist: str = "gaussian",
+    noise_df: int = 4,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
@@ -348,7 +405,14 @@ def process_case_stacked(
         if sigma > 0.0:
             seed = (seed_base + k) * 100003
             perturb_relative_(
-                eval_module, clean, sigma=sigma, seed=seed, device=device, sign=sign
+                eval_module,
+                clean,
+                sigma=sigma,
+                seed=seed,
+                device=device,
+                sign=sign,
+                dist=noise_dist,
+                df=noise_df,
             )
         else:
             restore_clean_params(eval_module, clean)
@@ -748,6 +812,8 @@ def evaluate_split_stacked(
     distributed_state,
     antithetic: bool = False,
     collect_calibration: bool = False,
+    noise_dist: str = "gaussian",
+    noise_df: int = 4,
 ) -> tuple[dict[str, float], CalibrationStats | None]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
@@ -780,6 +846,8 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            noise_dist=noise_dist,
+            noise_df=noise_df,
         )
         add_case_to_accumulator(
             acc,
@@ -887,14 +955,29 @@ def main(argv: Iterable[str] | None = None) -> None:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
 
+    if cfg.weight_noise_dist not in ("gaussian", "student_t"):
+        raise ValueError(
+            f"--weight-noise-dist {cfg.weight_noise_dist!r} not supported "
+            "(expected gaussian|student_t)"
+        )
+    if cfg.weight_noise_dist == "student_t" and cfg.weight_noise_df < 3:
+        raise ValueError(
+            f"--weight-noise-df {cfg.weight_noise_df!r} not supported for "
+            "student_t (df>=3 required for finite variance)"
+        )
+
     if state.is_main:
         ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
         print(f"Device: {device}{ddp_suffix}")
         print(f"Resolutions: {resolutions}")
         print(f"Modes: {modes}")
         k_eff_print = cfg.weight_noise_passes * (2 if cfg.antithetic_noise else 1)
+        dist_suffix = (
+            f" df={cfg.weight_noise_df}" if cfg.weight_noise_dist == "student_t" else ""
+        )
         print(
-            f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
+            f"Weight-noise TTA: dist={cfg.weight_noise_dist}{dist_suffix} "
+            f"sigma_rel={cfg.weight_noise_sigma} "
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
             f"seed_base={cfg.weight_noise_seed_base}"
@@ -1035,6 +1118,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
                 collect_calibration=cfg.test_time_calibration,
+                noise_dist=cfg.weight_noise_dist,
+                noise_df=cfg.weight_noise_df,
             )
             dt = time.time() - t0
             if state.is_main:
