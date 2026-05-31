@@ -28,6 +28,19 @@ Modes:
     weight_noise_only:           K passes at a single eval_volume_points
                                  (no mirror). Sanity-reproduces H242 noise_only.
     weight_noise_mirror_res_avg: K x R x 2 = full stacked TTA.
+    weight_noise_mirror_res_conf_avg:
+        H306 — same K x R x 2 forwards as weight_noise_mirror_res_avg, but
+        instead of one uniform per-point mean across all passes we track per-K
+        sub-aggregates (averaged over the inner res x mirror sub-grid). At the
+        end we softmax(-temperature * var_k) across the K noise samples per
+        point, downweighting points whose predictions disagree most between
+        weight-noise draws.
+    weight_noise_mirror_res_dual_avg:
+        H306 dual — same K x R x 2 forwards, but reports BOTH the uniform-mean
+        and confidence-weighted aggregates from the same forward passes. Logs
+        metrics under both `weight_noise_mirror_res_avg/...` and
+        `weight_noise_mirror_res_conf_avg/...` for a perfect side-by-side
+        control (avoids running both modes serially, ~halves runtime).
 """
 
 from __future__ import annotations
@@ -88,6 +101,11 @@ class EvalConfig:
     # number of forward passes per (res, mirror) is 2 * weight_noise_passes.
     # Anti-thetic pairs cancel the linear Taylor term, reducing variance.
     antithetic_noise: bool = False
+
+    # H306: per-point confidence-weighted aggregation across K noise samples.
+    # Only used by mode `weight_noise_mirror_res_conf_avg`. Higher temperature
+    # sharpens the softmax — at T=0 the weighting collapses to uniform mean.
+    conf_weight_temperature: float = 1.0
 
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
@@ -280,6 +298,30 @@ def perturb_relative_(
         p.data.copy_(clean_p).add_(noise)
 
 
+# --- H306: per-point confidence-weighted aggregation ---
+
+
+def confidence_weighted_agg(
+    noise_means: list[torch.Tensor], temperature: float = 1.0
+) -> torch.Tensor:
+    """Softmax(-temperature * per-point deviation) weighted aggregation.
+
+    noise_means: K tensors of shape [N, C]. Each entry is the mean over the
+    inner res x mirror sub-grid for one weight-noise draw (with antithetic
+    sign-pair already collapsed into the same K-index, so each entry already
+    benefits from linear-Taylor cancellation).
+
+    Returns: [N, C] per-point weighted aggregate. Points whose K predictions
+    disagree most (high cross-pass deviation) get the smallest weight, so the
+    least-consistent predictions contribute less to the final per-point value.
+    """
+    stack = torch.stack(noise_means, dim=0)  # [K, N, C]
+    overall_mean = stack.mean(dim=0, keepdim=True)  # [1, N, C]
+    dev = ((stack - overall_mean) ** 2).mean(dim=-1, keepdim=True)  # [K, N, 1]
+    weights = torch.softmax(-dev * temperature, dim=0)  # [K, N, 1]
+    return (stack * weights).sum(dim=0)  # [N, C]
+
+
 # --- per-case stacked TTA ---
 
 
@@ -299,7 +341,18 @@ def process_case_stacked(
     sigma: float,
     seed_base: int,
     antithetic: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, dict]:
+    conf_weight_temperature: float = 0.0,
+    return_unif_too: bool = False,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    int,
+    dict,
+    torch.Tensor | None,
+    torch.Tensor | None,
+]:
     """Run K_eff x R x M (mirror) TTA passes for one case and return per-point
     averaged predictions in real units. The outer K loop perturbs the model
     weights and reuses the perturbed copy across all (res, mirror) inner passes.
@@ -308,15 +361,46 @@ def process_case_stacked(
     ``antithetic=True`` K_eff = ``2 * K_passes``: for each k we sample ε once
     (same seed) and evaluate both f(θ+ε) and f(θ−ε), so the linear Taylor term
     cancels in the per-point average (Finding NN / H274).
+
+    When ``conf_weight_temperature > 0`` and ``K_passes > 1`` we use H306
+    per-K accumulation: each ``k`` index keeps its own (sum, count) accumulator
+    averaging over its inner (sign x R x mirror) sub-grid. At the end we apply
+    a softmax(-temperature * per-point variance) weighting across the K noise
+    sub-means before returning the per-point real-units prediction.
+
+    When ``return_unif_too=True`` and per-K accumulation is active, we also
+    compute and return the uniform-mean aggregate over the K noise sub-means
+    from the SAME forward passes (cheap free side-product — the perfect
+    side-by-side control for the confidence-weighted aggregate).
     """
     counts = store.case_point_counts(case_id)
     n_surf = counts["n_surface"]
     n_vol = counts["n_volume"]
 
-    surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
-    surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
-    vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
-    vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
+    use_per_k_conf = conf_weight_temperature > 0.0 and K_passes > 1 and sigma > 0.0
+
+    if use_per_k_conf:
+        surf_sum_list = [
+            torch.zeros(n_surf, 4, dtype=torch.float32) for _ in range(K_passes)
+        ]
+        surf_cnt_list = [
+            torch.zeros(n_surf, dtype=torch.int32) for _ in range(K_passes)
+        ]
+        vol_sum_list = [
+            torch.zeros(n_vol, 1, dtype=torch.float32) for _ in range(K_passes)
+        ]
+        vol_cnt_list = [
+            torch.zeros(n_vol, dtype=torch.int32) for _ in range(K_passes)
+        ]
+        surf_sum = surf_sum_list[0]
+        surf_cnt = surf_cnt_list[0]
+        vol_sum = vol_sum_list[0]
+        vol_cnt = vol_cnt_list[0]
+    else:
+        surf_sum = torch.zeros(n_surf, 4, dtype=torch.float32)
+        surf_cnt = torch.zeros(n_surf, dtype=torch.int32)
+        vol_sum = torch.zeros(n_vol, 1, dtype=torch.float32)
+        vol_cnt = torch.zeros(n_vol, dtype=torch.int32)
 
     eval_module = unwrap_model(model)
     timing: dict[str, float] = {
@@ -346,6 +430,12 @@ def process_case_stacked(
         else:
             restore_clean_params(eval_module, clean)
         timing["perturb_seconds"] += time.time() - t_p
+
+        if use_per_k_conf:
+            surf_sum = surf_sum_list[k]
+            surf_cnt = surf_cnt_list[k]
+            vol_sum = vol_sum_list[k]
+            vol_cnt = vol_cnt_list[k]
 
         for R in resolutions:
             dataset = DrivAerMLSurfaceDataset(
@@ -430,19 +520,68 @@ def process_case_stacked(
                                 )
                     timing["io_seconds"] += time.time() - t1
 
-    if int(surf_cnt.min()) == 0:
-        raise RuntimeError(
-            f"surface coverage incomplete for case {case_id}: "
-            f"{int((surf_cnt == 0).sum())} points have zero contributing chunks"
-        )
-    if int(vol_cnt.min()) == 0:
-        raise RuntimeError(
-            f"volume coverage incomplete for case {case_id}: "
-            f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
-        )
+    if use_per_k_conf:
+        for k_idx in range(K_passes):
+            if int(surf_cnt_list[k_idx].min()) == 0:
+                raise RuntimeError(
+                    f"surface coverage incomplete for case {case_id} k={k_idx}: "
+                    f"{int((surf_cnt_list[k_idx] == 0).sum())} points have zero "
+                    f"contributing chunks"
+                )
+            if int(vol_cnt_list[k_idx].min()) == 0:
+                raise RuntimeError(
+                    f"volume coverage incomplete for case {case_id} k={k_idx}: "
+                    f"{int((vol_cnt_list[k_idx] == 0).sum())} points have zero "
+                    f"contributing chunks"
+                )
 
-    surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
-    vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
+        noise_means_surf = [
+            s / c.unsqueeze(-1).to(torch.float32)
+            for s, c in zip(surf_sum_list, surf_cnt_list)
+        ]
+        noise_means_vol = [
+            s / c.unsqueeze(-1).to(torch.float32)
+            for s, c in zip(vol_sum_list, vol_cnt_list)
+        ]
+        surf_avg = confidence_weighted_agg(noise_means_surf, conf_weight_temperature)
+        vol_avg = confidence_weighted_agg(noise_means_vol, conf_weight_temperature)
+
+        if return_unif_too:
+            surf_avg_unif = torch.stack(noise_means_surf, dim=0).mean(dim=0)
+            vol_avg_unif = torch.stack(noise_means_vol, dim=0).mean(dim=0)
+        else:
+            surf_avg_unif = None
+            vol_avg_unif = None
+
+        # Diagnostic: per-point deviation magnitude tells us whether T is in a
+        # useful range. With small dev, softmax(-T * dev) collapses to uniform.
+        with torch.no_grad():
+            surf_stack = torch.stack(noise_means_surf, dim=0)
+            surf_dev = ((surf_stack - surf_stack.mean(0, keepdim=True)) ** 2).mean(-1)
+            timing["surf_dev_mean"] = float(surf_dev.mean().item())
+            timing["surf_dev_max"] = float(surf_dev.max().item())
+            # torch.quantile has a ~16M-element cap; surf_dev is [K, N_surf] and
+            # K * N_surf can exceed it on full-resolution cases. Use kthvalue
+            # which has no such limit.
+            flat = surf_dev.flatten()
+            k_p99 = max(1, min(flat.numel(), int(round(0.99 * flat.numel()))))
+            timing["surf_dev_p99"] = float(torch.kthvalue(flat, k_p99).values.item())
+    else:
+        surf_avg_unif = None
+        vol_avg_unif = None
+        if int(surf_cnt.min()) == 0:
+            raise RuntimeError(
+                f"surface coverage incomplete for case {case_id}: "
+                f"{int((surf_cnt == 0).sum())} points have zero contributing chunks"
+            )
+        if int(vol_cnt.min()) == 0:
+            raise RuntimeError(
+                f"volume coverage incomplete for case {case_id}: "
+                f"{int((vol_cnt == 0).sum())} points have zero contributing chunks"
+            )
+
+        surf_avg = surf_sum / surf_cnt.unsqueeze(-1).to(torch.float32)
+        vol_avg = vol_sum / vol_cnt.unsqueeze(-1).to(torch.float32)
 
     case = store.load_case(case_id)
     surf_y = case.surface_y.float()
@@ -450,7 +589,7 @@ def process_case_stacked(
 
     k_eff = K_passes * (2 if (antithetic and sigma > 0.0) else 1)
     n_passes = k_eff * len(resolutions) * (2 if use_mirror else 1)
-    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing
+    return surf_avg, vol_avg, surf_y, vol_y, n_passes, timing, surf_avg_unif, vol_avg_unif
 
 
 def add_case_to_accumulator(
@@ -546,7 +685,14 @@ def evaluate_split_stacked(
     seed_base: int,
     distributed_state,
     antithetic: bool = False,
-) -> dict[str, float]:
+    conf_weight_temperature: float = 0.0,
+    return_unif_too: bool = False,
+) -> dict[str, float] | tuple[dict[str, float], dict[str, float]]:
+    """Evaluate one split. When ``return_unif_too=True`` (H306 dual mode), we
+    maintain TWO accumulators per case — one over the confidence-weighted
+    aggregate, one over the uniform-mean aggregate — and return BOTH metric
+    dicts as a (conf, unif) tuple. The two aggregates share the same forward
+    passes for a perfect side-by-side control."""
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
         distributed_state.world_size
@@ -556,14 +702,27 @@ def evaluate_split_stacked(
     my_cases = case_ids[rank::world_size]
 
     acc = EvalAccumulator()
+    acc_unif = EvalAccumulator() if return_unif_too else None
     total_t0 = time.time()
     total_forward = 0.0
     total_io = 0.0
     total_perturb = 0.0
     total_forwards = 0
+    dev_means: list[float] = []
+    dev_maxes: list[float] = []
+    dev_p99s: list[float] = []
     for case_idx, case_id in enumerate(my_cases):
         t0 = time.time()
-        surf_avg, vol_avg, surf_y, vol_y, n_passes, timing = process_case_stacked(
+        (
+            surf_avg,
+            vol_avg,
+            surf_y,
+            vol_y,
+            n_passes,
+            timing,
+            surf_avg_unif,
+            vol_avg_unif,
+        ) = process_case_stacked(
             case_id=case_id,
             model=model,
             transform=transform,
@@ -577,6 +736,8 @@ def evaluate_split_stacked(
             sigma=sigma,
             seed_base=seed_base,
             antithetic=antithetic,
+            conf_weight_temperature=conf_weight_temperature,
+            return_unif_too=return_unif_too,
         )
         add_case_to_accumulator(
             acc,
@@ -587,17 +748,37 @@ def evaluate_split_stacked(
             volume_y=vol_y,
             transform=transform,
         )
+        if acc_unif is not None and surf_avg_unif is not None:
+            add_case_to_accumulator(
+                acc_unif,
+                case_id=case_id,
+                surface_pred_real=surf_avg_unif,
+                volume_pred_real=vol_avg_unif,
+                surface_y=surf_y,
+                volume_y=vol_y,
+                transform=transform,
+            )
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
         total_perturb += timing["perturb_seconds"]
         total_forwards += timing["n_forwards"]
+        if "surf_dev_mean" in timing:
+            dev_means.append(timing["surf_dev_mean"])
+            dev_maxes.append(timing["surf_dev_max"])
+            dev_p99s.append(timing["surf_dev_p99"])
         dt = time.time() - t0
+        dev_str = ""
+        if "surf_dev_mean" in timing:
+            dev_str = (
+                f" surf_dev[mean={timing['surf_dev_mean']:.3e} "
+                f"p99={timing['surf_dev_p99']:.3e} max={timing['surf_dev_max']:.3e}]"
+            )
         print(
             f"  [rank {rank}] {split_name} {case_id} ({case_idx + 1}/{len(my_cases)}): "
             f"n_passes={n_passes} forwards={timing['n_forwards']} "
             f"forward={timing['forward_seconds']:.1f}s "
             f"perturb={timing['perturb_seconds']:.1f}s "
-            f"io={timing['io_seconds']:.1f}s total={dt:.1f}s",
+            f"io={timing['io_seconds']:.1f}s total={dt:.1f}s{dev_str}",
             flush=True,
         )
 
@@ -612,13 +793,27 @@ def evaluate_split_stacked(
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(world_size)]
         dist.all_gather_object(gathered, acc)
+        if return_unif_too:
+            gathered_unif: list[EvalAccumulator | None] = [
+                None for _ in range(world_size)
+            ]
+            dist.all_gather_object(gathered_unif, acc_unif)
         if not distributed_state.is_main:
-            return {}
+            return ({}, {}) if return_unif_too else {}
         merged = merge_eval_accumulators(g for g in gathered if g is not None)
+        if return_unif_too:
+            merged_unif = merge_eval_accumulators(
+                g for g in gathered_unif if g is not None
+            )
     else:
         merged = acc
+        merged_unif = acc_unif
 
-    return finalize_eval_accumulator(merged)
+    metrics = finalize_eval_accumulator(merged)
+    if return_unif_too:
+        metrics_unif = finalize_eval_accumulator(merged_unif)
+        return metrics, metrics_unif
+    return metrics
 
 
 def resolve_checkpoint_path(cfg: EvalConfig, state) -> tuple[Path, str]:
@@ -660,7 +855,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     # PR-convention alias used by H275 instructions; semantically identical.
     mode_aliases = {"mirror_res_weight_noise_avg": "weight_noise_mirror_res_avg"}
     modes = [mode_aliases.get(m, m) for m in modes]
-    valid_modes = ("weight_noise_only", "weight_noise_mirror_res_avg")
+    valid_modes = (
+        "weight_noise_only",
+        "weight_noise_mirror_res_avg",
+        "weight_noise_mirror_res_conf_avg",
+        "weight_noise_mirror_res_dual_avg",
+    )
     for mode in modes:
         if mode not in valid_modes:
             raise ValueError(f"Unknown eval mode: {mode!r} (valid: {valid_modes})")
@@ -675,7 +875,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"Weight-noise TTA: sigma_rel={cfg.weight_noise_sigma} "
             f"K_passes={cfg.weight_noise_passes} "
             f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-            f"seed_base={cfg.weight_noise_seed_base}"
+            f"seed_base={cfg.weight_noise_seed_base} "
+            f"conf_weight_temperature={cfg.conf_weight_temperature}"
         )
 
     ckpt_path, ckpt_source = resolve_checkpoint_path(cfg, state)
@@ -768,14 +969,30 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         for mode in modes:
+            is_dual = False
             if mode == "weight_noise_only":
                 # K-pass weight-noise average at a single resolution, no mirror.
                 # Used to reproduce the H242 noise_only result.
                 mode_resolutions = [cfg.eval_surface_points]  # single resolution
                 use_mirror = False
+                mode_conf_temp = 0.0
             elif mode == "weight_noise_mirror_res_avg":
                 mode_resolutions = list(resolutions)
                 use_mirror = True
+                mode_conf_temp = 0.0
+            elif mode == "weight_noise_mirror_res_conf_avg":
+                mode_resolutions = list(resolutions)
+                use_mirror = True
+                mode_conf_temp = cfg.conf_weight_temperature
+            elif mode == "weight_noise_mirror_res_dual_avg":
+                # H306 dual mode — single set of forward passes, two aggregates
+                # reported side-by-side (uniform mean vs confidence-weighted).
+                # Logs metrics under BOTH `weight_noise_mirror_res_avg/...` and
+                # `weight_noise_mirror_res_conf_avg/...` for direct comparison.
+                mode_resolutions = list(resolutions)
+                use_mirror = True
+                mode_conf_temp = cfg.conf_weight_temperature
+                is_dual = True
             else:
                 raise ValueError(f"Unknown mode {mode!r}")
 
@@ -787,11 +1004,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"\n=== {split_name} mode={mode} resolutions={mode_resolutions} "
                     f"mirror={use_mirror} K={cfg.weight_noise_passes} "
                     f"antithetic={cfg.antithetic_noise} K_eff={k_eff_print} "
-                    f"sigma={cfg.weight_noise_sigma} ===",
+                    f"sigma={cfg.weight_noise_sigma} dual={is_dual} ===",
                     flush=True,
                 )
             t0 = time.time()
-            metrics = evaluate_split_stacked(
+            result = evaluate_split_stacked(
                 split_name=f"{split_name}/{mode}",
                 case_ids=case_ids,
                 model=model,
@@ -807,19 +1024,48 @@ def main(argv: Iterable[str] | None = None) -> None:
                 seed_base=cfg.weight_noise_seed_base,
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
+                conf_weight_temperature=mode_conf_temp,
+                return_unif_too=is_dual,
             )
             dt = time.time() - t0
             if state.is_main:
-                print(f"  total {split_name}/{mode}: {dt:.1f}s")
-                print_metrics(f"{split_name}/{mode}", metrics)
-                summary[split_name][mode] = metrics
+                if is_dual:
+                    metrics_conf, metrics_unif = result
+                    # Log under BOTH the standalone conf_avg and avg labels so
+                    # downstream dashboards/queries find them at the expected
+                    # paths.
+                    pairs = [
+                        ("weight_noise_mirror_res_conf_avg", metrics_conf),
+                        ("weight_noise_mirror_res_avg", metrics_unif),
+                    ]
+                    for sub_label, sub_metrics in pairs:
+                        print(f"  total {split_name}/{sub_label}: {dt:.1f}s")
+                        print_metrics(f"{split_name}/{sub_label}", sub_metrics)
+                        summary[split_name][sub_label] = sub_metrics
+                        log_obj_sub: dict[str, float] = {}
+                        log_obj_sub.update(
+                            primary_metric_log(
+                                f"{log_prefix}_primary/{sub_label}", sub_metrics
+                            )
+                        )
+                        log_obj_sub[f"{log_prefix}_extra/{sub_label}/loss"] = (
+                            sub_metrics["loss"]
+                        )
+                        log_obj_sub[f"{log_prefix}_extra/{sub_label}/seconds"] = dt
+                        if run is not None:
+                            wandb.log(log_obj_sub)
+                else:
+                    metrics = result
+                    print(f"  total {split_name}/{mode}: {dt:.1f}s")
+                    print_metrics(f"{split_name}/{mode}", metrics)
+                    summary[split_name][mode] = metrics
 
-                log_obj: dict[str, float] = {}
-                log_obj.update(primary_metric_log(f"{log_prefix}_primary/{mode}", metrics))
-                log_obj.update({f"{log_prefix}_extra/{mode}/loss": metrics["loss"]})
-                log_obj[f"{log_prefix}_extra/{mode}/seconds"] = dt
-                if run is not None:
-                    wandb.log(log_obj)
+                    log_obj: dict[str, float] = {}
+                    log_obj.update(primary_metric_log(f"{log_prefix}_primary/{mode}", metrics))
+                    log_obj.update({f"{log_prefix}_extra/{mode}/loss": metrics["loss"]})
+                    log_obj[f"{log_prefix}_extra/{mode}/seconds"] = dt
+                    if run is not None:
+                        wandb.log(log_obj)
 
     # Always restore clean weights at the end.
     restore_clean_params(eval_module, clean)
