@@ -1,3 +1,40 @@
+## 2026-05-31 02:30Z — PR #1498 edward H312 MERGED: NEW SOTA — H296+8-res+Per-Channel Calibration
+
+### PR #1498 edward H312 — MERGED: K=4 anti-thetic + 8-res + mirror + H300 calibration
+
+- **Branch**: edward/h312-K4-8res-mirror-cal
+- **W&B run**: enf61qrr
+- **Hypothesis**: H300 calibration applied to the H296 (K=4+8-res+mirror) raw TTA base should improve test_cal further: the 8-res base has better raw val (5.9221%) vs H285 base (5.9275%), so the affine coefficients should fit more tightly.
+
+### Results (DDP×8, wall 6h48m)
+
+| Metric | H300 (H285 base+cal) | **H312 (H296 base+cal) NEW SOTA** | Δ |
+|---|---:|---:|---:|
+| **val_abupt_calibrated** | 5.9011% | **5.8994%** | **−1.7bp ✓** |
+| **test_abupt_calibrated** | 5.7399% | **5.7388%** | **−1.1bp ✓** |
+| test_VP | 3.3763% | **3.3743%** | −2.0bp ✓ |
+| test_SP | 3.6132% | 3.6137% | +0.5bp (noise) |
+| test_WSS | 6.6404% | **6.6391%** | −1.3bp ✓ |
+| test_WSS_x | 5.9033% | **5.9021%** | −1.2bp ✓ |
+| test_WSS_y | 7.1873% | **7.1857%** | −1.6bp ✓ |
+| test_WSS_z | 8.6195% | **8.6182%** | −1.3bp ✓ |
+
+**Per-channel calibration coefficients**: α∈[0.991722, 0.999687], β_VP=−0.832811 (dominant, slightly less than H300's −0.8554 because H296's better raw predictions have smaller VP residual).
+
+### Analysis
+
+**Finding 'better-raw-better-cal'**: H296 base (val_raw 5.9221%) → calibrated 5.8994% (delta=−2.27bp). H285 base (val_raw 5.9275%) → calibrated 5.9011% (delta=−2.64bp). The raw-to-cal delta is larger for H285 because H285 has a bigger residual to correct. But H296's lower starting point dominates: absolute calibrated value is lower even though relative calibration gain is smaller.
+
+**Calibration saturation signal**: The gain on test from H300→H312 is only 1.1bp (down from H300's initial 28bp gain over H296-raw). We are approaching the calibration ceiling for this single-model, single-stack setup. Extrapolation: further test_abupt improvement from diagonal per-channel affine is likely < 1bp.
+
+**Next axes to explore** (edward's post-experiment suggestions):
+1. Cross-channel WSS affine mixing (τ_x/τ_y/τ_z are a vector — off-diagonal correction may capture rotational error)
+2. Arm B (K=5+6-res+cal, a8uyi3ev) currently running — will show if K=5+6-res base calibrates to < 5.8994
+
+**New merge gate**: val_cal < **5.8994%** AND test_cal < **5.7388%**
+
+---
+
 ## 2026-05-31 00:50Z — PR #1505 thorfinn H310 CLOSED: 2nd EP15 seed commissioning ACCEPTED (H307 unblocked)
 
 ### Finding 'cosine-tail-flat-in-h244-cohort'

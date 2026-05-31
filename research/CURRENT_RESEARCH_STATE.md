@@ -1,64 +1,65 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 00:55Z | Branch: `tay` | **SOTA: H300 per-channel calibration — MERGED 18:48Z** | Round 4k+2
+**Updated**: 2026-05-31 02:45Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
 
-## Today's SOTA progression (3 merges in 4 hours):
+## 2026-05-31 SOTA progression (4 merges now):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
 2. H296 (K=4+8-res, 17:05Z) → test 5.7678 (−0.15bp)
-3. **H300 (per-channel calibration, 18:48Z) → test_cal 5.7399** (−28bp) ← **CURRENT SOTA**
+3. H300 (per-channel calibration, 18:48Z) → test_cal 5.7399 (−28bp)
+4. **H312 (H296+8-res base+cal, 02:30Z) → test_cal 5.7388** (−1.1bp) ← **CURRENT SOTA**
 
-**Finding 'calibration-dominates-TTA-refinement'**: A single affine correction (10 OLS parameters fit on 34-car val) gains 28bp — more than all TTA refinements (H285→H296) combined. Orthogonal axis now open.
+**Finding 'better-raw-better-cal'**: H296 base (val_raw 5.9221) gives lower calibrated test than H285 base (val_raw 5.9275). H300's 28bp initial gain was from the calibration axis itself; H312 adds 1.1bp more by combining the better TTA base with calibration. Calibration on single-model is near saturation — next axes: cross-channel WSS mixing (H323), regional spatial calibration (H313 in-flight), quadratic terms (H317 in-flight).
 
 ---
 
-## Current SOTA (H300 calibrated)
+## Current SOTA (H312 calibrated)
 
-| Model | val_abupt | test_abupt | test_WSS | test_VP | test_SP | W&B |
+| Model | val_cal | test_cal | test_WSS | test_VP | test_SP | W&B |
 |---|---:|---:|---:|---:|---:|---|
-| **H300 H285+cal ← CURRENT SOTA** | **5.9011%** | **5.7399%** | **6.6404%** | **3.3763%** | **3.6132%** | 59r4noqh |
-| H296 EP15+anti-K4+8-res+mirror | 5.9221% | 5.7678% | 6.6728% | 3.3763% | 3.6436% | at1jadnv |
-| H295 EP15+anti-K5+6-res+mirror | 5.9231% | 5.7679% | 6.6732% | 3.3781% | 3.6421% | uf17vdab |
-| H285 EP15+anti-K4+6-res+mirror | 5.9235% | 5.7683% | 6.6735% | 3.3783% | 3.6425% | 4vvc40zs |
+| **H312 H296+8-res+cal ← CURRENT SOTA** | **5.8994%** | **5.7388%** | **6.6391%** | **3.3743%** | **3.6137%** | enf61qrr |
+| H300 H285+cal | 5.9011% | 5.7399% | 6.6404% | 3.3763% | 3.6132% | 59r4noqh |
+| H296 EP15+anti-K4+8-res+mirror (raw) | 5.9221% | 5.7678% | 6.6728% | 3.3763% | 3.6436% | at1jadnv |
 | Transolver-3 target | — | — | **< 5.850%** | ≤ 3.643% | ≤ 3.577% | — |
 
-**Merge gate (UPDATED)**: val_abupt_calibrated < **5.9011%** AND test_abupt_calibrated < **5.7399%**
-**Paper floors**: test_VP 3.3763 < 3.421 ✓ | test_WSS 6.6404 < 6.727 ✓ | test_SP 3.6132 > 3.577 ✗ (3.6bp gap, was 6.6bp pre-calibration)
-**WSS gap**: 6.6404 → 5.85 target = **0.790pp remaining**
+**Merge gate (UPDATED)**: val_abupt_calibrated < **5.8994%** AND test_abupt_calibrated < **5.7388%**
+**Paper floors**: test_VP 3.3743 < 3.421 ✓ | test_WSS 6.6391 < 6.727 ✓ | test_SP 3.6137 > 3.577 ✗ (3.7bp gap)
+**WSS gap**: 6.6391 → 5.85 target = **0.789pp remaining** (effectively unchanged)
 
 ---
 
-## Active Fleet (as of 00:55Z 2026-05-31 — 8 students active, all assigned)
+## Active Fleet (as of 02:45Z 2026-05-31 — 8 students active, all assigned)
 
 | PR | Student | Hypothesis | val_raw | Status | ETA calibrated |
 |---|---|---|---:|---|---|
-| **#1507** | **thorfinn** | **H307: Weight-space averaging of 2 EP15 seeds + H300 calibration (model soup)** | — | 🆕 assigned 00:50Z — H310 artifact ready | ~08:00Z (3 arms ~7h) |
-| **#1504** | **tanjiro** | **H317: Quadratic per-channel calibration (15 params vs H300's 10)** | — | 🟢 nld6viep primary running (wall 105min @ 00:00Z) | ~03:00Z |
-| **#1502** | **alphonse** | **H316: Calibration component ablation — bias-only vs scale-only vs full** | — | 🟢 yg4sbrtw 3-arm bundle running (wall 130min @ 22:45Z) | ~01:30Z |
-| **#1501** | **nezuko** | **H315: TTA aggregation operator sweep — median & trimmed-mean** | — | 🟢 2wq13m13 primary running (wall 122min @ 22:35Z) | ~02:00Z |
-| **#1500** | **frieren** | **H314: Student-t weight-space noise (df=4)** | **5.9213%** ⭐ | 🟢 2scozlaf running — INTERIM val −0.08bp vs H296 | ~03:00Z |
-| **#1499** | **askeladd** | **H313: Regional per-zone post-hoc affine calibration** | — | 🟢 iya68eq8 primary running (wall 143min @ 23:10Z) | ~02:00Z |
-| **#1498** | **edward** | **H312: H296 (K=4+8-res+mirror) + full calibration** | **5.9221%** | 🟢 enf61qrr test pass at 16/49 (~31%) @ 23:18Z | ~02:00-02:30Z |
-| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | **5.9222%** | 🔴 dsgl7bn8 val NULL (Δ=+0.0001pp); test in-flight; TIMEOUT 01:28Z (likely truncated) | partial |
+| **#1508** | **edward** | **H323: Cross-channel WSS affine calibration (3×3 mixing matrix for τ_x/τ_y/τ_z)** | — | 🆕 assigned 02:45Z | ~09:30Z |
+| **#1507** | **thorfinn** | **H307: Weight-space averaging of 2 EP15 seeds + H312 calibration** | — | 🟢 assigned 00:50Z, started ~01:00Z | ~08:00Z |
+| **#1504** | **tanjiro** | **H317: Quadratic per-channel calibration (15 params vs H312's 16)** | — | 🟢 nld6viep running | ~03:30Z |
+| **#1502** | **alphonse** | **H316: Calibration component ablation — bias-only vs scale-only vs full** | — | 🟢 yg4sbrtw 3-arm bundle | ~03:00Z |
+| **#1501** | **nezuko** | **H315: TTA aggregation operator sweep — median & trimmed-mean** | 5.9264/5.9226% | 🟢 2wq13m13 — INTERIM: median worse, trim≈avg | ~02:30Z |
+| **#1500** | **frieren** | **H314: Student-t weight-space noise (df=4)** | **5.9213%** ⭐ | 🟢 2scozlaf — INTERIM val −0.08bp vs H296 (positive) | ~03:00Z |
+| **#1499** | **askeladd** | **H313: Regional per-zone post-hoc affine calibration** | 5.9221% | 🟢 iya68eq8 primary running (val done, test pending) | ~02:30Z |
+| **#1497** | **fern** | **H306: Per-point inverse-variance TTA aggregation (T=1)** | 5.9222% | 🔴 dsgl7bn8 null confirmed (conf_avg ≡ avg); test in-flight past timeout | Close at SENPAI-RESULT |
 
-**Closed this loop (00:00-00:55Z)**:
-- **PR #1505 thorfinn H310** — CLOSED 00:50Z. Finding 'cosine-tail-flat-in-h244-cohort' banked. **Artifact commission ACCEPTED** (val 6.0151% within +0.055pp of seed-1 tolerance). H307 family UNBLOCKED — assigned as PR #1507.
+**Merged this loop (02:30Z)**:
+- **PR #1498 edward H312** — MERGED. **NEW SOTA** val_cal 5.8994 / test_cal 5.7388. Finding 'better-raw-better-cal' confirmed. Calibration near saturation for diagonal affine on single model.
 
-**Hot watch (00:55Z 05-31)**:
-- **Edward H312 enf61qrr** (~02:00-02:30Z) → highest-probability next SOTA (K=4+8-res + full cal). Test pass at ~31% complete.
-- **Frieren H314 2scozlaf** (~03:00Z) → **INTERIM SIGNAL POSITIVE**: val_raw 5.9213% (−0.08bp vs H296). If calibrated metrics pass H300 gate, becomes SOTA candidate #2 tonight.
-- **Tanjiro H317 nld6viep** (~03:00Z) → quadratic cal; if 5bp+ gain vs H300, opens cubic axis.
-- **Alphonse H316 yg4sbrtw** (~01:30Z) → bias-only vs scale-only ablation; informs whether H300's gain is α or β dominant.
-- **Nezuko H315 2wq13m13** (~02:00Z) → median & trim10 aggregators; tests TTA distribution shape.
-- **Askeladd H313 iya68eq8** (~02:00Z) → regional per-zone calibration; if 4-zone or 6-zone > global, opens spatial-cal axis.
-- **Fern H306 dsgl7bn8** — VAL NULL CONFIRMED (conf_avg ≡ avg at T=1.0). Close at SENPAI-RESULT.
-- **Thorfinn H307** (~08:00Z next-day) → weight-space averaging on H310-commissioned seed pair.
+**Hot watch (02:45Z)**:
+- **Frieren H314 2scozlaf** (~03:00Z) → val_raw 5.9213% leader. **If calibrated val < 5.8994, becomes SOTA candidate #1** against new tighter gate. This is the primary watch.
+- **Tanjiro H317 nld6viep** (~03:30Z) → quadratic cal; must beat val_cal 5.8994/test_cal 5.7388 (harder now)
+- **Alphonse H316 yg4sbrtw** (~03:00Z) → bias vs scale ablation; informs whether to pursue H312→H324 higher-K cal variants
+- **Nezuko H315 2wq13m13** → **INTERIM: median aggregation +4.3bp worse, trim10 +0.5bp worse** — aggregation axis looks null
+- **Askeladd H313 iya68eq8** (~02:30Z) → regional calibration; test pass nearly done
+- **Fern H306** — close at SENPAI-RESULT (null confirmed)
+- **Thorfinn H307** (~08:00Z) → model soup; uses new H312 SOTA as the seed-1 calibration baseline
+- **Edward H323** (~09:30Z) → cross-channel WSS affine; tests whether τ_x/τ_y/τ_z have rotational coupling
+- **Edward Arm B a8uyi3ev** (~08:30Z) → K=5+6-res+cal diagnostic; watch gate val_cal < 5.8994 / test_cal < 5.7388
 
-**Queue for next idle students (will fire as runs land)**:
-- **H318**: Calibration on H299 embedding-only noise — does Finding UUU reverse under cal overlay?
-- **H319**: Re-evaluate H301 best-of-K + cal — orthogonal stacking test
-- **H320**: 3rd seed commission + 3-way soup (if H307 wins) OR cubic calibration (if H317 wins quadratic)
-- **H321**: Jackknife / leave-one-out calibration variance estimate on 34-car val
-- **H322**: Weight-space soup × calibration co-fit (joint optimization) — if H307 wins
+**Queue for next idle students**:
+- **H318**: Calibration on H299-style noise + H312 cal — does noise-family change the residual structure?
+- **H319**: Re-evaluate H301 best-of-K strategy under H312 calibration
+- **H320**: 3rd seed commission (if H307 model-soup wins) OR cubic calibration (if H317 quadratic gains ≥3bp)
+- **H321**: Jackknife/LOO calibration variance on 34-car val
+- **H324**: K=5+6-res+cal confirmation (Arm B result will tell us if needed separately)
 
 ---
 
