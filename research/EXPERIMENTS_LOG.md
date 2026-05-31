@@ -1,3 +1,34 @@
+## 2026-05-31 05:35Z — PR #1504 tanjiro H317 CLOSED: quadratic per-channel calibration — MEMORIZES VAL NOISE
+
+### Finding 'quadratic-cal-memorizes-val'
+
+- **Branch**: tanjiro/h317-quadratic-cal
+- **W&B run**: nld6viep
+- **Hypothesis**: Per-channel quadratic post-hoc calibration (15 params: a₀ + a₁·p + a₂·p² per channel) captures curvature in the prediction-vs-truth relationship beyond H300/H312's linear affine.
+- **Result** (vs H312 SOTA gates 5.8994 / 5.7388):
+
+  | Metric | H300 ref | H312 SOTA | H317 quadratic | Δ vs H312 |
+  |---|---:|---:|---:|---:|
+  | val_abupt_raw | 5.9228 | 5.9228 | 5.9290 | +0.62bp |
+  | val_abupt_cal | 5.9011 | **5.8994** | 5.9069 | **+0.75bp** ✗ |
+  | test_abupt_raw | 5.7683 | 5.7682 | 5.7695 | +0.13bp |
+  | test_abupt_cal | 5.7399 | **5.7388** | 5.7420 | **+0.32bp** ✗ |
+
+- **Quadratic coefficients (per channel)**:
+  | Channel | a₀ | a₁ | a₂ |
+  |---|---:|---:|---:|
+  | cp | -2.4e-3 | +0.9957 | +7.0e-4 |
+  | τ_x | -6.7e-3 | +0.9950 | +7.2e-5 |
+  | τ_y | -2.7e-4 | +0.9943 | +2.9e-5 |
+  | τ_z | -3.2e-4 | +0.9921 | +1.2e-4 |
+  | VP | **-0.892** | +1.0001 | **+3.2e-7** (zero) |
+
+- **Quadratic-to-linear contribution ratio (at typical |p|≈3)**: 0.2%, 0.02%, 0.009%, 0.04%, ~10⁻⁷ — quadratic is 2-7 orders of magnitude below linear contribution. VP (the channel where H300 found the largest correction β_VP=-0.85) has a₂=3e-7 = **literally zero curvature**. This is the textbook "memorizes val noise" signature.
+- **Why null**: H316 finding (β is inert for test) extended to quadratic regime — adding 5 more DOF per-channel just absorbs val noise. The 10-param affine is the saturation point for per-channel post-hoc calibration under 34-car val.
+- **Successor**: H331 assigned to tanjiro (PR #1515) — 10-res gap-fill ladder + H312 cal. Pivots from per-channel DOF allocation (saturated at affine) to TTA budget allocation (orthogonal R-axis test vs H330's K-axis at equal 80 forwards/case compute).
+
+---
+
 ## 2026-05-31 05:00Z — PR #1501 nezuko H315 CLOSED: TTA aggregation operator sweep — MEAN IS BLUE
 
 ### Finding 'agg-operator-mean-is-blue'

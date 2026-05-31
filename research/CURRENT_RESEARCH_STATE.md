@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 05:00Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
+**Updated**: 2026-05-31 05:45Z | Branch: `tay` | **SOTA: H312 H296+8-res+cal — MERGED ~02:30Z** | Round 4k+2
 
 ## 2026-05-31 SOTA progression (4 merges now):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
@@ -33,7 +33,7 @@
 |---|---|---|---:|---|---|
 | **#1508** | **edward** | **H323: Cross-channel WSS affine calibration (3×3 mixing matrix for τ_x/τ_y/τ_z)** | — | 🆕 assigned 02:45Z | ~09:30Z |
 | **#1507** | **thorfinn** | **H307: Weight-space averaging of 2 EP15 seeds + H312 calibration** | — | 🟢 assigned 00:50Z, started ~01:00Z | ~08:00Z |
-| **#1504** | **tanjiro** | **H317: Quadratic per-channel calibration (15 params vs H312's 16)** | — | 🟢 nld6viep running | ~03:30Z |
+| **#1515** | **tanjiro** | **H331: K=4 + 10-res gap-fill ladder + H312-cal (resolution density compositional test, 80 forwards/case ≡ H330 budget on R-axis)** | — | 🆕 assigned 05:45Z (post-H317 close) | ~14:30Z |
 | **#1512** | **alphonse** | **H329: Abupt-weighted calibration (align fit objective with eval metric)** | — | 🆕 assigned 04:40Z (post-H316 close) | ~11:30Z |
 | **#1514** | **nezuko** | **H330: K=5 + 8-res + H312-cal compositional test (K-axis at 8-res operating point)** | — | 🆕 assigned 05:00Z (post-H315 close) | ~13:30Z |
 | **#1500** | **frieren** | **H314: Student-t weight-space noise (df=4)** | **5.9213%** ⭐ | 🟢 2scozlaf — INTERIM val −0.08bp vs H296 (positive) | ~03:00Z |
@@ -48,6 +48,7 @@
 - **PR #1499 askeladd H313** — CLOSED (04:15Z). Finding 'regional-cal-overfits-val'. 4z/6z regional affine cal passes val gate (5.8947/5.8938) but fails test by +2.0/+2.2bp. Per-zone α range 0.985–1.005 — real signal (rear zone α>1 vs everywhere else α<1) but too small to survive 34-car val→test gap. → H328 ridge-regularized λ-sweep assigned to askeladd (PR #1511) — rescues spatial signal with shrinkage to H300 global.
 - **PR #1502 alphonse H316** — CLOSED (04:35Z). **Finding 'cal-scale-dominates-bias-null-on-test'**: ablation decomposed H300/H312's gain — α (scale) does 81%, β (bias) is 0% (+0.1bp). The huge β_VP ≈ -0.89 is the OLS intercept absorbing α≠1, not an independent bias correction. Model has WSS scale deficit (predictions over-large by 0.5-0.8% on τ channels). → H329 abupt-weighted OLS objective assigned to alphonse (PR #1512) — better α estimation via aligning fit objective with eval metric.
 - **PR #1501 nezuko H315** — CLOSED (05:00Z). **Finding 'agg-operator-mean-is-blue'**: 3-arm aggregator sweep (mean/median/trim10) — mean wins uniformly. Median +4.0bp val / +6.4bp test, trim10 +0.3bp val / +1.8bp test. Per-channel α/β agree to 1e-5 across arms. TTA noise distribution at σ=5e-4 K=4-anti is approximately Gaussian-symmetric → mean is BLUE. Mean arm reproduces H312 (val 5.8994 / test 5.7388) exactly — confirms H312 SOTA is point-stable, not lucky. → H330 K=5+8-res+H312-cal compositional test assigned to nezuko (PR #1514).
+- **PR #1504 tanjiro H317** — CLOSED (05:35Z). **Finding 'quadratic-cal-memorizes-val'**: 15-param quadratic per-channel cal fails both gates (val_cal 5.9069 vs 5.8994, test_cal 5.7420 vs 5.7388). Fitted a₂ coefficients are 2-7 orders of magnitude smaller than a₁; VP — dominant cal channel — has a₂=+3e-7 (zero curvature). Confirms H316 prediction (val improves, test regresses). Per-channel DOF axis saturated at affine 10-param under 34-car val. → H331 (PR #1515) 10-res gap-fill assigned to tanjiro — pivots from DOF allocation to TTA budget allocation (R-axis vs H330's K-axis at equal 80-forwards/case compute).
 
 **Hot watch (03:00Z)**:
 - **Frieren H314 2scozlaf** (~03:00Z) → val_raw 5.9213% leader. **If calibrated val < 5.8994, becomes SOTA candidate #1** against new tighter gate. This is the primary watch.
