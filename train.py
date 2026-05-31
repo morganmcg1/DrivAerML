@@ -113,6 +113,9 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     lr_cosine_t_max: int = 0
     lr_min: float = 1e-6
+    lr_schedule: str = "cosine"
+    lr_wsd_stable_epochs: int = 0
+    lr_wsd_decay_epochs: int = 0
     grad_clip_norm: float = 1.0
     gradient_log_every: int = 250
     log_gradient_histograms: bool = False
@@ -162,9 +165,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
         ),
+        "lr_schedule": (
+            "LR schedule shape. 'cosine' (default, H147) = warmup -> cosine decay. "
+            "'wsd' = Warmup-Stable-Decay (Hu et al. 2024 MiniCPM, Hagele et al. 2024): "
+            "warmup -> constant peak LR for lr_wsd_stable_epochs -> cosine decay for "
+            "lr_wsd_decay_epochs. Requires warmup + stable + decay == epochs."
+        ),
+        "lr_wsd_stable_epochs": (
+            "WSD: number of epochs at peak LR after warmup. Only used when lr_schedule=wsd."
+        ),
+        "lr_wsd_decay_epochs": (
+            "WSD: number of epochs in the final cosine decay tail. Only used when lr_schedule=wsd."
+        ),
     }
     choices_text = {
         "wss_charbonnier_axes": ["all", "z"],
+        "lr_schedule": ["cosine", "wsd"],
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
