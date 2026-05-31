@@ -1,3 +1,40 @@
+## 2026-05-31 19:58Z — PR #1518 alphonse H334 CLOSED: brute-force per-channel α grid + joint greedy descent — 3 findings banked, NULL on gate
+
+### CLOSED — NULL on H314 strict gate (val_cal < 5.8987 AND test_cal < 5.7387)
+
+- **Branch**: alphonse/h334-alpha-floor-grid-search
+- **W&B run**: alpha-grid post-hoc (single eval pass + 41-point sweep × 5 channels + 5-iteration joint greedy descent)
+- **Hypothesis**: Verify H312 OLS α coefficients are at the global per-channel test-loss minimum within ±0.001 (or surface a per-channel α direction with a real gain). Brute-force grid search across α ∈ H312 ± 0.01 at 0.0005 spacing × 5 channels (cp, τx, τy, τz, VP), followed by 5-iteration joint greedy descent.
+- **Results — joint-greedy converges to H312 OLS within 1e-4 across all 5 channels**:
+
+  | Quantity | H312 OLS | H334 grid optimum | Δ |
+  |---|---:|---:|---:|
+  | α_cp | 0.994888 | 0.994888 | < 1e-4 |
+  | α_τx | 0.994397 | 0.994397 | < 1e-4 |
+  | α_τy | 0.994083 | 0.994083 | < 1e-4 |
+  | α_τz | 0.991722 | 0.991722 | < 1e-4 (saturated, no curvature within ±0.01) |
+  | α_VP | 0.999687 | 0.999687 | < 1e-4 |
+  | β_VP | −0.832811 | −0.832811 (fixed at OLS) | 0 |
+  | val_cal | **5.8994** | **5.9015** (best in grid-floor band) | +0.21bp regress vs H312 gate |
+  | test_cal | **5.7388** | **5.7368** (test-side prefer Δα=−0.0015 uniformly) | −0.20bp improve vs H312 gate |
+
+- **3 findings banked**:
+  - ✅ **'val-mle-is-h312-ols'**: 5-iteration joint-greedy descent on val_cal converges to H312 OLS α within 1e-4 in 2 iterations. Confirms (a) H329 WLS=OLS at val_N=34 directly via grid (zero val-loss curvature in the 0.001 neighborhood of OLS), (b) H312 α sits at the diagonal-affine val-MLE. No alternative diagonal cal point beats H312 on val.
+  - ✅ **'cal-val-test-mismatch-15milli'**: Test set prefers uniformly Δα=−0.0015 across 4/5 channels (cp, τx, τy, VP — wz saturated). Test_cal improves 0.20bp; val_cal regresses 0.21bp; same magnitude as H333 Bootstrap test gain. Two different methods (LOO-bootstrap residual subsampling H333 vs val-grid Δα H334) extract the same val-test asymmetry from different angles — **the asymmetry is the val_N=34 measurement noise floor, not exploitable via val-based fitting**.
+  - ✅ **'tau-z-cal-saturated'**: wz channel α uniquely flat over ±0.01 grid range — zero curvature on both val_cal and test_cal at 4 dp. Confirms H312 H314 channel decomposition (test_WSS_z=8.62% vs WSS_x=5.90%, WSS_y=7.18%): **wz error is structural, not calibratable**. Diagonal affine cannot fix wz; must be attacked at training time. → motivates H341 (fern PR #1525) wz-only WSS reweight cosine-tail.
+- **Structural verdict — diagonal-affine cal axis CLOSED at H312 OLS-MLE on H185 EP15**: 7 independent structural nulls now confirm:
+  - H316 (β-null, scale dominates)
+  - H319 (per-resolution-invariant)
+  - H323 (cross-channel-diagonal)
+  - H328 (regional-cal-irrecoverable, val-test disagree on shrinkage)
+  - H329 (abupt-weighting-irrelevant, WLS=OLS)
+  - H333 (5-fold cal stability, LOO/Bootstrap/L1/Huber tie at val 5.8994)
+  - H334 (brute-force grid, joint-greedy converges to OLS, test-asymmetry below noise floor)
+- **PR**: https://github.com/morganmcg1/DrivAerML/pull/1518
+- **Follow-up**: H342 (alphonse, PR #1526) multi-checkpoint output-averaging TTA — orthogonal output-space ensemble (ep14+ep15+ep16 EMA from H312 SOTA cosine-tail run-enf61qrr), complementary to H307 weight-space across seeds.
+
+---
+
 ## 2026-05-31 19:25Z — PR #1517 fern H333 CLOSED: 5-arm cal stability + robust regression — clean 3-fold finding bank, NULL on gate
 
 ### CLOSED — NULL on H314 strict gate (val_cal < 5.8987 AND test_cal < 5.7387)
