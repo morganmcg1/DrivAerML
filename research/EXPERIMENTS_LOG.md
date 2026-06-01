@@ -13668,3 +13668,44 @@ Sanity bit-identical to faa8ymsy — confirms eval_multi_res.py has no regressio
 **Implication for H243/H255**: wider IS better. Trend is monotone in range width. H255 (7-res {32k-164k}) should add 0.2-0.5bp more.
 
 **Follow-on assigned**: fern H255 — 7-res {32k-164k} extension.
+
+## 2026-06-01 11:45 — PR #1525: H341 fern wz-only WSS loss reweight
+
+- fern/h341-wz-only-wss-reweight
+- **Hypothesis:** Per-axis wz-only WSS loss reweighting (isolating the bottleneck z-channel) is higher-EV than uniform multi-axis reweighting (H339) for closing the WSS_z gap. If wz-only at 2-5× outperforms uniform, then wz IS the gradient lever.
+- W&B runs: Arm A train `o9fwzl8i`, Arm A eval `p2b467wg` (only arm fully evaluated; B `4ltuu14b`/`1w7w16e2` train done, eval killed; C `9u3u43s3` train done, eval never started)
+
+### Results (Arm A wz=2.0×, full H314 TTA+cal eval)
+
+| Metric | Arm A (cal) | H336 SOTA ref | Δ vs H336 |
+|---|---:|---:|---:|
+| val_abupt_cal | 5.9093 | 5.8978 (gate) | +1.15bp ✗ |
+| test_abupt_cal | 5.7504 | 5.7379 (gate) | +1.25bp ✗ |
+| test_WSS_z_cal | 8.6228 | 8.6175 | **+0.53bp REGRESSION** |
+| test_WSS_y_cal | 7.2065 | 7.1841 | +2.3bp |
+| test_WSS_x_cal | 5.9163 | 5.9014 | +1.5bp |
+| test_SP_cal | 3.6252 | 3.6133 | +1.2bp |
+| test_VP_cal | 3.3813 | 3.3735 | +0.7bp |
+
+Training-side monotone-wrong signature across 3 arms:
+| Arm | wz_w | best_ep | val_raw | test_raw | wall_shear_mae |
+|---|---:|---:|---:|---:|---:|
+| A | 2.0× | 16 | 6.0147 | 5.8645 | 0.05765 |
+| B | 3.0× | 16 | 6.0238 | 5.8740 | 0.05777 |
+| C | 5.0× | 14 | 6.0295 | 5.8769 | 0.05782 |
+
+### Analysis and conclusions
+
+**Finding: `wz-reweight-monotone-nogate`** — diagonal training-time per-channel WSS reweighting is a CLOSED axis.
+
+All channels regress uniformly (+0.5–2.3bp) with no channel redistribution. The pre-committed skip rule (test_WSS_z_cal = 8.6228 ≥ 8.6175 → skip B/C) fired correctly, saving ~12h GPU.
+
+Three concurrent mechanistic explanations:
+1. H300's OLS-extracted τ_z=1.67 architecture coefficient already at optimum — further loss reweighting over-tilts gradient on highest-magnitude channel
+2. Cosine-tail extension basin is converged enough that per-channel rebalancing destabilizes rather than concentrates
+3. test_WSS_z=8.62% is the architectural Bayes floor — architectural change required, not loss reweighting
+
+Cal coefficients (OLS on Arm A val): α_cp=0.994976 α_τx=0.994615 α_τy=0.993873 α_τz=0.991615 α_VP=0.999563 β_VP=−0.883573 (within 1-2e-4 of H312 hardcoded — confirms cal-transfer-lossless finding)
+
+**Next steps:** Architecture-tier attack now primary. Closed PRs assigned: H345 PCGrad gradient surgery, H346 focal EMA spatial residual, H347 boundary-layer physics priors, H348 curvature input features (newly assigned). DO NOT run H342/H343-style wz/wy/wx-only variants — Arm A channel decomposition closes the per-axis loss-reweight family conclusively.
+
