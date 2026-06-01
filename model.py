@@ -284,12 +284,33 @@ class TransolverAttention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
+        # H351 NGSB: 3 normal components -> per-(head, slice) additive bias on slice logits.
+        # The advisor's per-head spec (3 -> num_heads) is a no-op because a bias that is
+        # constant along the softmax axis cancels under softmax; the bias must vary along
+        # the slice axis to influence slice assignment. Zero-init keeps identity-at-start.
+        # See PR comment for deviation justification.
+        self.normal_slice_bias = nn.Linear(3, self.num_heads * num_slices, bias=False)
+        nn.init.zeros_(self.normal_slice_bias.weight)
 
-    def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def create_slices(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
+        # H351 NGSB: add per-(head, slice) normal-derived bias to slice logits
+        # before softmax. normals: [B, N, 3] (unit surface normals; zeros for volume
+        # token positions). normal_slice_bias maps 3 -> num_heads * num_slices.
+        if normals is not None:
+            head_bias = self.normal_slice_bias(normals)  # [B, N, num_heads*num_slices]
+            head_bias = head_bias.view(
+                batch_size, num_tokens, self.num_heads, self.num_slices
+            ).permute(0, 2, 1, 3)  # [B, num_heads, N, num_slices]
+            slice_logits = slice_logits + head_bias
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
@@ -300,8 +321,13 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask, normals=normals)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -346,9 +372,14 @@ class TransformerBlock(nn.Module):
         self.drop_path_attn = DropPath(drop_path_prob)
         self.drop_path_mlp = DropPath(drop_path_prob)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path_attn(self.attention(self.norm1(x), attn_mask=attn_mask))
+        x = x + self.drop_path_attn(self.attention(self.norm1(x), attn_mask=attn_mask, normals=normals))
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path_mlp(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
@@ -388,9 +419,14 @@ class Transformer(nn.Module):
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, normals=normals)
         return x
 
 
@@ -634,7 +670,19 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        # H351 NGSB: build a normals tensor padded to the full token sequence.
+        # Surface normals are channels 3:6 of surface_x (unit vectors).
+        # Volume token positions receive zeros so normal_slice_bias is a no-op there.
+        if surface_x is not None:
+            surf_normals = surface_x[:, :surface_tokens, 3:6]  # [B, surface_tokens, 3]
+            if volume_tokens > 0:
+                vol_zeros = surf_normals.new_zeros(surf_normals.shape[0], volume_tokens, 3)
+                backbone_normals = torch.cat([surf_normals, vol_zeros], dim=1)
+            else:
+                backbone_normals = surf_normals
+        else:
+            backbone_normals = None
+        hidden = self.backbone(hidden, attn_mask=attn_mask, normals=backbone_normals)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
