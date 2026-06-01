@@ -1,3 +1,33 @@
+## 2026-06-01 22:10Z — PR #1547: H355 BL derivative decoder (Morgan directive #1) — CLOSED
+
+- Branch: askeladd/h355-bl-derivative-decoder
+- **Hypothesis**: Richardson finite-difference boundary-layer decoder — ghost off-wall probes at η∈{1e-5, 1e-4, 1e-3, 1e-2}·L_ref along surface normals, cross-attended into Transolver volume tokens, yielding τ_w=μ·∂u/∂n. Auxiliary loss + inference-time OLS blend. Morgan directive #1 (targeted ~30bp test_WSS improvement). NEVER TRIED prior.
+- W&B group: `h355-askeladd-bl-decoder-aux` (rank0: `9orsaurk`)
+
+### Results — Arm A (λ_bl=0.5, EP14→EP16 cosine-tail)
+
+| Metric | H336 RAW | H355 Arm A RAW | Δ vs H336 |
+|---|---:|---:|---:|
+| val_abupt | 5.97 | 6.0124 | +4.2bp |
+| val_wss_z | 9.1839 | 9.1883 | +0.4bp |
+| test_abupt | n/a RAW | 5.8591 | — |
+| test_wss_z | 8.7551 | 8.7607 | +0.6bp |
+
+Pre-committed close rule `val_wss_z RAW improvement < 5bp` → TRIGGERED. No Phases 2/3.
+
+### Analysis
+1. **BL head trains in isolation, does not drive backbone.** `bl/loss_raw` falls ~20% but val_wss_z drifts +0.4bp during same window. Cross-attention path (ghost-point queries → slice-pooled volume tokens) is parameter-isolated from surface_out under cosine-tail update budget.
+2. **Volume slice attention (256 tokens) lacks BL spatial resolution.** 256× compression adequate for smooth pressure but cannot encode sub-1mm velocity gradients in thin BL (η≤1e-4). Frozen backbone trained on cell-center pressure, not near-wall velocity.
+3. **Richardson 2-point with η₁=1e-5 has 1e-9 denominator.** Any u_probe noise is amplified ~1e9×; FD formula degenerates to affine remapping rather than acting as inductive prior. `bl/tau_fd_abs_mean ≈ 0.43` same order as target — FD bypassed.
+
+Wall-time: 116.2 min / 3 epochs DDP-8. Overhead ~13% vs no-BL baseline.
+
+### Decision: CLOSED — `bl-derivative-decoder-aux-neutral` (Morgan directive #1 FALSIFIED)
+
+This is the **8th converging closed decoder-side axis**: loss-reweight (H339/H341/H346), TTA-saturation (H330/H340/H344), SAM (H343), target-transform (H349/H353), FiLM (H350/H354), NGSB (H351), now BL-derivative-decoder (H355). Convergent conclusion: **volume backbone representation is structurally upstream of WSS_z bottleneck; no decoder-side patch works**. H359 escalates to encoder-side multi-scale kNN aggregation (Morgan directive #3 proxy) as the next attack.
+
+---
+
 ## 2026-06-01 20:10Z — PR #1545: H353 signed_power expansive target on wss_z — CLOSED
 
 - Branch: frieren/h353-signed-power-target-wssz

@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-01 20:11Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=4 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-01 22:15Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=4 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -50,7 +50,7 @@
 
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
-| **#1547** | askeladd | **H355: BL derivative decoder (Morgan #1)** — Ghost off-wall probe points at {1e-5, 1e-4, 1e-3, 1e-2}·L_ref, cross-attend to volume tokens, Richardson FD τ_w = μ·∂u/∂n. Smoke PASSED → Phase 1 DDP-8 launched. | 🟡 WIP — Phase 1 DDP-8 | Physical / volume-rooted decoder |
+| **#1551** | askeladd | **H359: Multi-scale local surface kNN branch (FRESH — Morgan directive #3 proxy)** — MultiScaleSurfaceAggregation: kNN at k=8,16,32 on surface point cloud → mean-pool per scale → project → zero-init residual added to surface tokens BEFORE Transolver slicing. ~200k params (0.4%). Smoke → Phase 1 EP14-16 from EP13. Encoder-side attack on WSS_z bottleneck diagnosed by 8 closed decoder-side axes. **PR #1551 just assigned.** | 🆕 just assigned | Encoder representation (multi-scale local geometry) |
 | **#1550** | frieren | **H358: Native tangent-basis residual output head (FRESH)** — TangentResidualHead predicts (τ_t1, τ_t2) in local tangent basis, rotates to xyz, added to existing 3-channel surface_out. Zero-init output → step-0 invariant. Tests OUTPUT BASIS axis (untouched). Physics constraint: τ·n=0 by no-slip wall BC. Fine-tune 3 epochs from EP13. **PR #1550 just assigned.** | 🆕 just assigned | Output basis (physics-correct τ·n=0) |
 | **#1544** | thorfinn | H352: SWA-within-cosine-tail — fresh restart at 17:32Z. Heartbeat sent 19:35Z. ETA terminal ~20:15Z. Gate tightened to val_cal < 5.8962 (H342 SOTA). | 🟡 WIP — training (ETA ~20:15Z) | Weight-space averaging (same trajectory) |
 | **#1549** | tanjiro | **H357: GeoTransolver geometric content embedding (FRESH)** — GeometricContentNet: [nx,ny,nz,log_area]→64→d_model, zero-init output, added to surface token content x BEFORE Transolver slicing. Warm-start from H185 EP15 + fine-tune 3 cosine-tail epochs. Directly tests CONTENT PATH (distinct from H351's routing path). **PR #1549 just assigned.** | 🆕 just assigned | Encoder content (geometric inductive bias) |
@@ -67,12 +67,13 @@
 - PR #1546 askeladd H354 FiLM decoder Phase A' EP13-warm-started: `filmdec-axis-fully-closed` + `decoder-pareto-optimal-at-h336-ep13` + `wssz-gap-upstream-not-decoder`. **FiLM-decoder axis fully closed.**
 - **PR #1543 tanjiro H351 NGSB**: `ngsb-normal-only-routing-pessimal` + `encoder-routing-axis-coarse-normals-falsified`. +69.8bp val abupt monotone regression; WSS_z no improvement at any epoch. **Routing path via normals is pessimal; H357 tests CONTENT path.**
 - **PR #1545 frieren H353 signed_power expansive**: `target-transform-axis-closed-wssz` + `signed-power-expansive-also-pessimal` + `wss-z-residuals-not-heavy-tail-loss-problem`. Arm A p=1.25 +15bp val_abupt/+15bp val_wss_z. Arms B/C skipped. **Both directions of target-transform now closed — 7th converging axis. Loss-shape is NOT the lever; representation IS.**
+- **PR #1547 askeladd H355 BL derivative decoder (Morgan #1 FALSIFIED)**: `bl-derivative-decoder-aux-neutral`. val_wss_z +0.4bp (neutral), val_abupt +4.2bp. Close rule triggered (wss_z improvement < 5bp). BL head trains in isolation, not transferring to surface decoder. **8th converging closed decoder-side axis — Plateau Protocol escalation: pivot fully to encoder/input-side attacks.**
 
 ---
 
-## Current Research Focus: 6-axis WSS_z attack PLUS Morgan-directive #1 BL derivative decoder (loss-reweight + flatness + compressive-target + FiLM-decoder axes ALL closed)
+## Current Research Focus: ENCODER/INPUT-SIDE ATTACK — 8 decoder-side axes fully closed (Plateau Protocol escalated)
 
-The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's target 5.85%). With H336+: loss-reweight axis TRIPLY closed (H339+H341+H346), flatness/SAM closed (H343), gradient-direction/magnitude closed (H345), TTA hyperparameter family fully saturated (H330+H340+H344), target-transform compressive direction closed (H349), **FiLM-decoder axis FULLY closed (H350+H354)**. **The WSS_z bottleneck is structurally upstream representational, not decoder / not optimization-side.** Six closed axes converge on this conclusion. Active attack continues on input / target-transform-expansive / physics-constraint / encoder-routing / weight-trajectory mechanisms + **NEW: BL derivative decoder (volume-rooted, physically-correct WSS computation)**:
+The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's target 5.85%). **Eight consecutive decoder-side experiments now closed with the same signature**: loss-reweight (H339+H341+H346), TTA-saturation (H330+H340+H344), SAM (H343), target-transform (H349+H353), FiLM-decoder (H350+H354), NGSB encoder-routing (H351), BL-derivative-decoder (H355). **Plateau Protocol escalation in effect: the WSS_z bottleneck is structurally upstream representational — the volume backbone is the bottleneck, not the decoder.** All active experiments now target input, encoder, or output-basis architectural changes that operate BEFORE or independently of the frozen-backbone slice-pool. H357/H358 also test encoder-content and output-basis respectively.
 
 **Active 6-axis WSS_z attack PLUS Morgan #1:**
 1. **H348 fern curvature features (POTENTIAL SOTA)** — per-vertex H curvature as new INPUT channel. Arm A train-raw tied with H336. **TTA eval `26e5khdg` shows val_abupt RAW TTA = 5.9213% (−4.87bp vs H336 raw)**, val_wss_z 9.0846. If cal extracts 7-8bp, val_cal ~5.84-5.85 = NEW SOTA. Awaiting student SENPAI-RESULT with cal + test metrics.
