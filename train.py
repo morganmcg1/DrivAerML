@@ -146,6 +146,13 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    # H345: gradient surgery (PCGrad, CAGrad) + gradient-conflict diagnostic
+    pcgrad: bool = False
+    pcgrad_direction: str = "symmetric"
+    cagrad: bool = False
+    cagrad_c: float = 0.4
+    diag_grad_conflict: bool = False
+    seed: int = 0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -271,6 +278,45 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "pcgrad": (
+            "H345: enable PCGrad gradient surgery (Yu et al. NeurIPS 2020, "
+            "arxiv:2001.06782) between WSS={tau_x,tau_y,tau_z} and "
+            "Pressure={cp,VP} task groups. Per-step: compute per-task "
+            "gradients via autograd.grad, project the conflicting "
+            "component (when cos < 0), sum, then optimizer.step(). "
+            "Incompatible with --use-gradnorm. Disables torch.compile."
+        ),
+        "pcgrad_direction": (
+            "H345: PCGrad projection direction. 'symmetric' (default) "
+            "projects both g_wss against g_pres and g_pres against g_wss. "
+            "'wss-only' projects only g_wss against g_pres (asymmetric, "
+            "protects pressure from being deflected by WSS)."
+        ),
+        "cagrad": (
+            "H345: enable CAGrad gradient surgery (Liu et al. NeurIPS 2021, "
+            "arxiv:2110.14048) between WSS and Pressure task groups. "
+            "Solves the 2-task closed-form QP per step. Mutually exclusive "
+            "with --pcgrad. Incompatible with --use-gradnorm. Disables "
+            "torch.compile."
+        ),
+        "cagrad_c": (
+            "H345: CAGrad constraint radius c in [0, 1]. c=0 = gradient "
+            "descent on the mean; c=1 = worst-case task gets equal "
+            "improvement vs the mean. Paper default 0.4."
+        ),
+        "diag_grad_conflict": (
+            "H345: enable gradient-conflict diagnostic logging. Computes "
+            "per-step cos(g_wss, g_pres) and per-task norms, logs them to "
+            "W&B under diag/* without modifying the optimization. Auto-"
+            "enabled when --pcgrad or --cagrad is set. Cost: 1 extra "
+            "backward (via autograd.grad) per step on the full param set."
+        ),
+        "seed": (
+            "H345: optional RNG seed for torch/CUDA/numpy/random. 0 (the "
+            "default) leaves the implicit system entropy in place; non-zero "
+            "seeds the three RNGs before model/dataset construction so "
+            "cosine-extension runs are bit-reproducible across arms."
         ),
     }
     for field in fields(Config):
@@ -474,6 +520,305 @@ def train_loss(
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+
+
+# ---------------------------------------------------------------------------
+# H345: PCGrad / CAGrad gradient surgery
+# ---------------------------------------------------------------------------
+
+
+def train_loss_pcgrad(
+    model: nn.Module,
+    batch,
+    transform: TargetTransform,
+    device: torch.device,
+    amp_mode: str,
+    *,
+    surface_loss_weight: float = 1.0,
+    volume_loss_weight: float = 1.0,
+    surface_channel_weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, float]]:
+    """Decompose the joint loss into WSS={tau_x,tau_y,tau_z} and
+    Pressure={cp,VP} task groups on a single shared forward graph.
+
+    Returns (loss_total, loss_wss, loss_pres, batch_loss_metrics).
+
+    loss_total == loss_wss + loss_pres == train_loss() loss to numerical
+    precision: the per-channel WSS+SP contributions divide by
+    (valid_points * 4) like ``weighted_channel_mse``, so the partition is
+    exact. VP keeps its own (valid_points * 1) denominator weighted by
+    volume_loss_weight.
+    """
+    batch = batch.to(device)
+    surface_target = transform.apply_surface(batch.surface_y)
+    volume_target = transform.apply_volume(batch.volume_y)
+    if surface_channel_weights is None:
+        weights = torch.ones(4, device=device, dtype=torch.float32)
+    else:
+        weights = surface_channel_weights.to(device=device, dtype=torch.float32)
+    with autocast_context(device, amp_mode):
+        out = model(
+            surface_x=batch.surface_x,
+            surface_mask=batch.surface_mask,
+            volume_x=batch.volume_x,
+            volume_mask=batch.volume_mask,
+        )
+        surface_pred = out["surface_preds"]
+        volume_pred = out["volume_preds"]
+
+        sq_err = (surface_pred - surface_target).square()
+        weights_dev = weights.to(device=surface_pred.device, dtype=surface_pred.dtype)
+        mask_dev = batch.surface_mask.to(
+            device=surface_pred.device, dtype=surface_pred.dtype
+        ).unsqueeze(-1)
+        weighted = sq_err * weights_dev * mask_dev
+        valid_points = mask_dev.sum()
+        denominator = (valid_points * surface_pred.shape[-1]).clamp_min(1.0)
+        if bool(valid_points.detach().cpu().item() > 0):
+            sp_term = weighted[..., 0:1].sum() / denominator
+            wss_term = weighted[..., 1:4].sum() / denominator
+        else:
+            sp_term = surface_pred.sum() * 0.0
+            wss_term = surface_pred.sum() * 0.0
+        surface_loss = sp_term + wss_term
+        volume_loss = masked_mse(volume_pred, volume_target, batch.volume_mask)
+        weighted_surface_loss = surface_loss_weight * surface_loss
+        weighted_volume_loss = volume_loss_weight * volume_loss
+        loss = weighted_surface_loss + weighted_volume_loss
+        loss_wss = surface_loss_weight * wss_term
+        loss_pres = surface_loss_weight * sp_term + weighted_volume_loss
+        base_mse_loss = surface_loss + volume_loss
+    metrics = {
+        "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
+        "surface_loss": float(surface_loss.detach().cpu().item()),
+        "volume_loss": float(volume_loss.detach().cpu().item()),
+        "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
+        "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "wss_term_unweighted": float(wss_term.detach().cpu().item()),
+        "sp_term_unweighted": float(sp_term.detach().cpu().item()),
+        "loss_wss": float(loss_wss.detach().cpu().item()),
+        "loss_pres": float(loss_pres.detach().cpu().item()),
+    }
+    return loss, loss_wss, loss_pres, metrics
+
+
+def _flat_concat(grads: list[torch.Tensor | None]) -> torch.Tensor | None:
+    """Flatten a list of grad tensors (some may be None) into a single
+    1-D tensor. Returns None if all entries are None or have zero
+    elements."""
+    chunks = [g.reshape(-1) for g in grads if g is not None]
+    if not chunks:
+        return None
+    return torch.cat(chunks)
+
+
+def _flat_cosine(
+    grads_a: list[torch.Tensor | None],
+    grads_b: list[torch.Tensor | None],
+) -> tuple[float, float, float]:
+    """Return (cos_sim, norm_a, norm_b) over the concatenated flat
+    gradient vector restricted to params present in both lists."""
+    chunks_a: list[torch.Tensor] = []
+    chunks_b: list[torch.Tensor] = []
+    for ga, gb in zip(grads_a, grads_b):
+        if ga is None or gb is None:
+            continue
+        chunks_a.append(ga.reshape(-1).float())
+        chunks_b.append(gb.reshape(-1).float())
+    if not chunks_a:
+        return float("nan"), 0.0, 0.0
+    fa = torch.cat(chunks_a)
+    fb = torch.cat(chunks_b)
+    na = float(fa.norm().item())
+    nb = float(fb.norm().item())
+    if na <= 0.0 or nb <= 0.0:
+        return float("nan"), na, nb
+    return float((fa.dot(fb) / (fa.norm() * fb.norm())).item()), na, nb
+
+
+def pcgrad_project_flat(
+    grads_wss: list[torch.Tensor | None],
+    grads_pres: list[torch.Tensor | None],
+    *,
+    direction: str = "symmetric",
+    eps: float = 1e-12,
+) -> tuple[list[torch.Tensor | None], dict[str, float]]:
+    """Apply PCGrad gradient surgery on the FLAT concatenation of all
+    per-param gradients (Yu et al. 2020 — projection is on the full
+    flattened vector, not per-parameter).
+
+    Returns (g_combined, diagnostics).
+    """
+    # Build masks of which entries are not None in both
+    common_idx = [
+        i for i in range(len(grads_wss))
+        if grads_wss[i] is not None and grads_pres[i] is not None
+    ]
+    flat_wss = torch.cat([grads_wss[i].reshape(-1).float() for i in common_idx]) if common_idx else None
+    flat_pres = torch.cat([grads_pres[i].reshape(-1).float() for i in common_idx]) if common_idx else None
+
+    diag = {"pcgrad/projection_fired": 0.0}
+    if flat_wss is None or flat_pres is None or flat_wss.numel() == 0:
+        # No common params: just sum None-safely
+        combined: list[torch.Tensor | None] = []
+        for a, b in zip(grads_wss, grads_pres):
+            if a is None and b is None:
+                combined.append(None)
+            elif a is None:
+                combined.append(b)
+            elif b is None:
+                combined.append(a)
+            else:
+                combined.append(a + b)
+        diag.update({"pcgrad/cos_pre": float("nan"), "pcgrad/norm_wss": 0.0, "pcgrad/norm_pres": 0.0})
+        return combined, diag
+
+    dot = flat_wss.dot(flat_pres)
+    norm_wss = flat_wss.norm()
+    norm_pres = flat_pres.norm()
+    cos_pre = float((dot / (norm_wss * norm_pres + eps)).item())
+    diag.update({
+        "pcgrad/cos_pre": cos_pre,
+        "pcgrad/norm_wss": float(norm_wss.item()),
+        "pcgrad/norm_pres": float(norm_pres.item()),
+    })
+
+    projected_wss = flat_wss
+    projected_pres = flat_pres
+    if dot < 0.0:
+        diag["pcgrad/projection_fired"] = 1.0
+        if direction == "wss-only":
+            # Only project g_wss against g_pres (asymmetric)
+            denom = flat_pres.dot(flat_pres) + eps
+            projected_wss = flat_wss - (dot / denom) * flat_pres
+        else:  # symmetric
+            denom_pres = flat_pres.dot(flat_pres) + eps
+            projected_wss = flat_wss - (dot / denom_pres) * flat_pres
+            denom_wss = flat_wss.dot(flat_wss) + eps
+            projected_pres = flat_pres - (dot / denom_wss) * flat_wss
+
+    flat_combined = projected_wss + projected_pres
+
+    # Unflatten back to original parameter shapes (cast back to grad dtype)
+    combined_full: list[torch.Tensor | None] = [None] * len(grads_wss)
+    offset = 0
+    for i in common_idx:
+        size = grads_wss[i].numel()
+        chunk = flat_combined[offset:offset + size]
+        ref = grads_wss[i]
+        combined_full[i] = chunk.reshape(ref.shape).to(dtype=ref.dtype)
+        offset += size
+    # Single-presence entries: pass through the one that exists
+    for i in range(len(grads_wss)):
+        if combined_full[i] is None:
+            if grads_wss[i] is not None and grads_pres[i] is None:
+                combined_full[i] = grads_wss[i]
+            elif grads_pres[i] is not None and grads_wss[i] is None:
+                combined_full[i] = grads_pres[i]
+    return combined_full, diag
+
+
+def cagrad_project_flat(
+    grads_wss: list[torch.Tensor | None],
+    grads_pres: list[torch.Tensor | None],
+    *,
+    c: float = 0.4,
+    eps: float = 1e-12,
+) -> tuple[list[torch.Tensor | None], dict[str, float]]:
+    """Apply 2-task CAGrad on the flat gradient vector.
+
+    Solves the closed-form 2-task CAGrad direction:
+        d = g_avg + phi * (g_wss - g_avg)
+    with phi chosen to minimise the larger per-task inner product
+    ``-d.dot(g_i)`` subject to ``||d - g_avg|| <= c * ||g_avg||``.
+
+    Reference: Liu et al. NeurIPS 2021 (arxiv:2110.14048), 2-task case
+    used by Cranial-XIX/CAGrad reference implementation.
+    """
+    common_idx = [
+        i for i in range(len(grads_wss))
+        if grads_wss[i] is not None and grads_pres[i] is not None
+    ]
+    if not common_idx:
+        combined: list[torch.Tensor | None] = [
+            a if a is not None else b for a, b in zip(grads_wss, grads_pres)
+        ]
+        return combined, {
+            "cagrad/cos_pre": float("nan"),
+            "cagrad/norm_wss": 0.0,
+            "cagrad/norm_pres": 0.0,
+            "cagrad/phi": 0.0,
+            "cagrad/scale": 1.0,
+        }
+
+    flat_wss = torch.cat([grads_wss[i].reshape(-1).float() for i in common_idx])
+    flat_pres = torch.cat([grads_pres[i].reshape(-1).float() for i in common_idx])
+    g_avg = 0.5 * (flat_wss + flat_pres)
+    g_diff = 0.5 * (flat_wss - flat_pres)  # = (flat_wss - g_avg)
+    norm_g_avg = g_avg.norm()
+    norm_g_diff = g_diff.norm()
+    cos_pre = float(
+        (flat_wss.dot(flat_pres) / (flat_wss.norm() * flat_pres.norm() + eps)).item()
+    )
+
+    # Unconstrained minimiser: phi that equalises -d.dot(g_wss) and -d.dot(g_pres)
+    # In the 2-task case the minimiser of the worst-case improvement is along the
+    # g_diff axis; closed form using the Cauchy-Schwarz bound:
+    #   phi_unc = -(g_avg . g_diff) / (g_diff . g_diff)   if |g_diff| > 0
+    if float(norm_g_diff.item()) > eps:
+        phi_unc = -(g_avg.dot(g_diff)) / (g_diff.dot(g_diff) + eps)
+    else:
+        phi_unc = torch.zeros((), device=flat_wss.device)
+    bound = c * float(norm_g_avg.item()) / (float(norm_g_diff.item()) + eps)
+    phi = float(phi_unc.clamp(-bound, bound).item()) if float(norm_g_diff.item()) > eps else 0.0
+
+    direction = g_avg + phi * g_diff
+    # Rescale to match ||g_avg|| (CAGrad uses scale to preserve optimisation budget):
+    norm_dir = direction.norm() + eps
+    scale = float((norm_g_avg / norm_dir).item())
+    flat_combined = direction * scale
+
+    combined_full: list[torch.Tensor | None] = [None] * len(grads_wss)
+    offset = 0
+    for i in common_idx:
+        size = grads_wss[i].numel()
+        chunk = flat_combined[offset:offset + size]
+        ref = grads_wss[i]
+        combined_full[i] = chunk.reshape(ref.shape).to(dtype=ref.dtype)
+        offset += size
+    for i in range(len(grads_wss)):
+        if combined_full[i] is None:
+            if grads_wss[i] is not None and grads_pres[i] is None:
+                combined_full[i] = grads_wss[i]
+            elif grads_pres[i] is not None and grads_wss[i] is None:
+                combined_full[i] = grads_pres[i]
+
+    return combined_full, {
+        "cagrad/cos_pre": cos_pre,
+        "cagrad/norm_wss": float(flat_wss.norm().item()),
+        "cagrad/norm_pres": float(flat_pres.norm().item()),
+        "cagrad/phi": float(phi),
+        "cagrad/scale": float(scale),
+    }
+
+
+def all_reduce_grads_flat(
+    params: list[nn.Parameter],
+    *,
+    op: dist.ReduceOp = dist.ReduceOp.AVG,
+) -> None:
+    """Manually all-reduce parameter gradients in a single flattened tensor.
+
+    Caller is responsible for skipping this call when DDP is disabled.
+    """
+    valid_grads = [p.grad for p in params if p.grad is not None]
+    if not valid_grads:
+        return
+    flat = torch._utils._flatten_dense_tensors(valid_grads)
+    dist.all_reduce(flat, op=op)
+    unflat = torch._utils._unflatten_dense_tensors(flat, valid_grads)
+    for grad, reduced in zip(valid_grads, unflat):
+        grad.copy_(reduced)
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -831,6 +1176,34 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        # H345: validate gradient-surgery options early so we fail loudly.
+        if config.pcgrad and config.cagrad:
+            raise ValueError("--pcgrad and --cagrad are mutually exclusive")
+        if (config.pcgrad or config.cagrad) and config.use_gradnorm:
+            raise ValueError(
+                "--pcgrad/--cagrad are incompatible with --use-gradnorm "
+                "(both attempt to balance per-task gradients)"
+            )
+        if config.pcgrad and config.pcgrad_direction not in {"symmetric", "wss-only"}:
+            raise ValueError(
+                f"--pcgrad-direction must be 'symmetric' or 'wss-only', got {config.pcgrad_direction!r}"
+            )
+        if (config.pcgrad or config.cagrad) and config.compile_model:
+            raise ValueError(
+                "--pcgrad/--cagrad require --no-compile-model "
+                "(torch.autograd.grad with retain_graph is incompatible with torch.compile)"
+            )
+        use_grad_surgery = bool(config.pcgrad or config.cagrad)
+        diag_grad_conflict = bool(config.diag_grad_conflict or use_grad_surgery)
+        if config.seed != 0:
+            import random as _py_random
+            import numpy as _np
+            _py_random.seed(config.seed)
+            _np.random.seed(config.seed)
+            torch.manual_seed(config.seed)
+            torch.cuda.manual_seed_all(config.seed)
+            if state.is_main:
+                print(f"H345: seeded torch/cuda/numpy/random with seed={config.seed}")
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
         requested_epochs = config.epochs
@@ -1033,6 +1406,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if use_grad_surgery:
+                method = "PCGrad" if config.pcgrad else f"CAGrad(c={config.cagrad_c})"
+                direction_note = (
+                    f" direction={config.pcgrad_direction}" if config.pcgrad else ""
+                )
+                print(
+                    f"H345 gradient surgery: {method}{direction_note} between "
+                    f"WSS={{tau_x,tau_y,tau_z}} and Pressure={{cp,VP}} task groups"
+                )
+            elif diag_grad_conflict:
+                print(
+                    "H345 gradient-conflict diagnostic: logging diag/grad_cos_wss_pres, "
+                    "diag/grad_norm_wss, diag/grad_norm_pres per-step (no optimisation change)"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -1220,6 +1607,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                         )
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
+                elif use_grad_surgery or diag_grad_conflict:
+                    loss, loss_wss_t, loss_pres_t, batch_loss_metrics = train_loss_pcgrad(
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        surface_loss_weight=config.surface_loss_weight,
+                        volume_loss_weight=config.volume_loss_weight,
+                        surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                    )
                 else:
                     loss, batch_loss_metrics = train_loss(
                         model,
@@ -1231,6 +1629,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
                     )
+                    loss_wss_t = None
+                    loss_pres_t = None
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1270,13 +1670,100 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "loss_wss" in batch_loss_metrics:
+                        train_log.update(
+                            {
+                                "train/loss_wss": batch_loss_metrics["loss_wss"],
+                                "train/loss_pres": batch_loss_metrics["loss_pres"],
+                                "train/wss_term_unweighted": batch_loss_metrics["wss_term_unweighted"],
+                                "train/sp_term_unweighted": batch_loss_metrics["sp_term_unweighted"],
+                                "train/pcgrad_enabled": 1.0 if config.pcgrad else 0.0,
+                                "train/cagrad_enabled": 1.0 if config.cagrad else 0.0,
+                            }
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
-                    loss.backward()
+                    if use_grad_surgery:
+                        params_list = [p for p in base_model.parameters() if p.requires_grad]
+                        # Per-task grads via autograd.grad bypass DDP hooks; we manually
+                        # all-reduce the post-projection combined grad below. Casts kept
+                        # in the parameter dtype (fp32) so the projection runs in fp32.
+                        g_wss_tuple = torch.autograd.grad(
+                            loss_wss_t,
+                            params_list,
+                            retain_graph=True,
+                            allow_unused=True,
+                        )
+                        g_pres_tuple = torch.autograd.grad(
+                            loss_pres_t,
+                            params_list,
+                            retain_graph=False,
+                            allow_unused=True,
+                        )
+                        g_wss_list = list(g_wss_tuple)
+                        g_pres_list = list(g_pres_tuple)
+                        # Pre-projection diagnostic on the raw flat per-task grads
+                        cos_pre, norm_wss_pre, norm_pres_pre = _flat_cosine(
+                            g_wss_list, g_pres_list
+                        )
+                        surgery_metrics: dict[str, float] = {
+                            "diag/grad_cos_wss_pres": cos_pre,
+                            "diag/grad_norm_wss": norm_wss_pre,
+                            "diag/grad_norm_pres": norm_pres_pre,
+                        }
+                        if config.pcgrad:
+                            g_combined, proj_metrics = pcgrad_project_flat(
+                                g_wss_list,
+                                g_pres_list,
+                                direction=config.pcgrad_direction,
+                            )
+                        else:  # config.cagrad
+                            g_combined, proj_metrics = cagrad_project_flat(
+                                g_wss_list,
+                                g_pres_list,
+                                c=config.cagrad_c,
+                            )
+                        # proj_metrics keys are already prefixed (pcgrad/* or cagrad/*)
+                        surgery_metrics.update(proj_metrics)
+                        # Assign projected combined grads back to .grad and average
+                        # across DDP ranks manually (autograd.grad bypassed DDP sync).
+                        for p, g in zip(params_list, g_combined):
+                            p.grad = g
+                        if state.enabled:
+                            all_reduce_grads_flat(params_list, op=dist.ReduceOp.AVG)
+                        # Update train_log with diag and projection metrics
+                        train_log.update(surgery_metrics)
+                    elif diag_grad_conflict and loss_wss_t is not None and loss_pres_t is not None:
+                        # Read-only diagnostic: compute per-task grads via autograd.grad
+                        # for cosine logging only, then do the normal joint backward.
+                        params_list = [p for p in base_model.parameters() if p.requires_grad]
+                        g_wss_tuple = torch.autograd.grad(
+                            loss_wss_t,
+                            params_list,
+                            retain_graph=True,
+                            allow_unused=True,
+                        )
+                        g_pres_tuple = torch.autograd.grad(
+                            loss_pres_t,
+                            params_list,
+                            retain_graph=True,
+                            allow_unused=True,
+                        )
+                        cos_pre, norm_wss_pre, norm_pres_pre = _flat_cosine(
+                            list(g_wss_tuple), list(g_pres_tuple)
+                        )
+                        train_log.update({
+                            "diag/grad_cos_wss_pres": cos_pre,
+                            "diag/grad_norm_wss": norm_wss_pre,
+                            "diag/grad_norm_pres": norm_pres_pre,
+                        })
+                        loss.backward()
+                    else:
+                        loss.backward()
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
