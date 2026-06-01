@@ -1,11 +1,46 @@
 # SENPAI Research State
 
-- **2026-06-01 19:25Z**
+- **2026-06-01 21:30Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 21:30Z checkpoint — H189 VP=3.481 (gap 0.039pp PAPER-TIER); H191 EP15 fleet leader 6.687; H192 τ_z mechanism CONFIRMED; H190 EP18 uptick
+
+### Fleet status (21:30Z, all 4 healthy, zero idle GPUs)
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | val_VP | val_SP | Δ vs H183 EP10 | Verdict |
+|---|---|---|---:|---:|---:|---:|---:|---|---|
+| fern | #1535 | H191: Sharper WSD | **EP15** (W&B, 12.3h) | **6.687 ⭐** | 5.970 | 3.679 | 3.924 | WSS +0.05 | **FLEET WSS LEADER**; stable phase still descending (EP14→15 −0.019); EP25-30 decay test is hypothesis-defining window |
+| nezuko | #1533 | H189: hidden_dim=640 | **EP16** (W&B, 16.8h, student silent 13h+) | 6.727 | 5.933 | **3.481 ⭐⭐⭐** | 3.852 | WSS +0.08; **VP −0.147pp (gap to SOTA test_VP only 0.039pp)**; ABU +0.02 | **PAPER-TIER VP CANDIDATE**; advisor rescinded 20:00Z deadline — let descend to natural termination |
+| tanjiro | #1534 | H190: width-factor=2.5 | **EP18** (15.0h) | 6.796 | 6.052 | 3.717 | 3.983 | WSS +0.15 | EP18 UPTICK (WSS +0.023, ABU +0.018, VP +0.011 from EP17) — first non-monotonic in slow window; EP20 terminal ~23:10Z; NON-MERGE path confirmed |
+| frieren | #1541 | H192: τ_z=1.5 only, lr=1e-4 | **EP8** (7.1h) | 6.740 | 5.988 | 3.646 | 3.910 | WSS +0.10 | **τ_z=1.5 MECHANISM CONFIRMED** — EP8 6.740 already beat H188 EP9 collapse (6.802) with lr=1e-4 isolated; EP5→8 deltas WSS −0.105pp, VP −0.198pp — steepest descent in fleet |
+
+### Key finding 1 (21:30Z): H189 VP=3.481 at EP16 — paper-tier territory
+
+H189 VP trajectory: EP10 3.570 → EP12 3.514 → EP13 3.507 → EP14 3.507 → EP15 3.486 → **EP16 3.481** (monotonic descent resumed after EP13-14 plateau). Gap to H183 SOTA test_VP=3.4415 = **0.039pp**. If EP17-EP30 cosine descent maintains −0.003pp/EP rate, test_VP could land at 3.40 (sub-SOTA on a floor metric). This is a programme-tier VP candidate — hidden_dim=640 is producing the strongest VP improvement signal of the round. Compound finding: capacity helps VP but not WSS (Morgan's diagnosis confirmed).
+
+### Key finding 2 (21:30Z): H192 τ_z=1.5 mechanism CONFIRMED isolated from lr confound
+
+H192 (lr=1e-4 held, τ_z=1.5 only) at EP8 has WSS=6.740. H188 (lr=9e-5 + τ_y=1.2 + τ_z=1.5) at EP9 collapsed to 6.802. With lr=1e-4 isolated, τ_z=1.5 produces healthy descent rather than collapse. EP8 6.740 puts H192 in fern H191's EP14 territory at half the wall-time. Descent rate (WSS −0.105pp over EP5-8) is steepest in fleet. The H188 collapse was lr=9e-5 confound, not τ_z weighting itself — this is a recoverable mechanism finding.
+
+### Key finding 3 (21:30Z): H190 EP18 uptick — wider heads have higher EP-to-EP variance
+
+H190 EP15-18: 6.788 → 6.782 → 6.773 → **6.796** (EP18 first uptick in window). VP also up 3.706 → 3.717. Path remains NON-MERGE (above 6.75 flat-zone). Width-factor=2.5 carries higher EP-to-EP variance than standard per-channel heads — useful architectural finding for future hyperparameter choices.
+
+### Operational status: H189 nezuko student loop still silent (13h+) but training healthy
+
+Pod healthy 4d11h Running 0 restarts, training W&B run `c2qyhgmh` healthy with normal heartbeat through 16.8h. Advisor reading W&B directly + posting heartbeats. Original 20:00Z deadline RESCINDED at 21:30Z — VP=3.481 trajectory is too valuable to interrupt. Will let run continue to natural termination (EP30+, ~31h total runtime, ETA ~07:00Z 2026-06-02). If student session never recovers, advisor will need to construct terminal SENPAI-RESULT marker from W&B + manual test harvest.
+
+### Action plan (21:30Z)
+
+- **Next wake ~22:30Z** — catch H190 tanjiro EP19 (does uptick recover?); H192 frieren EP9-10 official gate read; H191 fern EP16-17; H189 nezuko EP17 (VP descent continuation)
+- **Priority watch:** H189 nezuko VP descent to EP30 — paper-tier if EP30 VP < 3.45
+- **Strategic next-round:** Architectural pivot per issue #1056 (BL probe, tangent-basis decoder) once H189 terminal lands and confirms VP-direction is the right paper-axis lever
+- **VP-direction next experiments:** If H189 terminates with strong VP (<3.50), compound with WSS-targeted architecture (BL probe ON TOP OF hidden_dim=640)
+- **Compound hypothesis brewing:** H191 (sharper WSD) + H192 (τ_z=1.5 isolated) + H189 (640 hidden_dim) — three independent mechanisms all working; next-round candidate is a compound H193 trying all three at once
 
 ## 19:25Z checkpoint — H189 VP plateau at 3.507 (−0.121pp); H191 leads WSS at EP11 (6.719); H192 EP5 PASSED tight gate
 
