@@ -139,6 +139,7 @@ class Config:
     wss_charbonnier_axes: str = "all"
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
+    tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
     per_channel_surface_heads: bool = False
@@ -363,6 +364,7 @@ def train_loss(
     wss_charbonnier_axes: str = "all",
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
+    tau_y_loss_weight: float = 1.0,
     tau_z_loss_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
@@ -418,15 +420,18 @@ def train_loss(
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
             ) * surface_loss_weight  # [4]: cp, tau_x, tau_y, tau_z
-            # H36: Asymmetric tau_z boost. Multiply ONLY index 3 (tau_z) by
-            # tau_z_loss_weight. Same pre-GradNorm injection point as H26 —
-            # L0 absorbs the scaling so the lever acts through gradient
-            # magnitudes (c_tau_z / G_bar) and the total backward signal,
-            # without disturbing cp/tau_x/tau_y budgets.
-            tau_z_scale = surface_per_ch.new_tensor(
-                [1.0, 1.0, 1.0, tau_z_loss_weight]
+            # H36: Asymmetric per-channel tau boost. Multiply index 2 (tau_y)
+            # by tau_y_loss_weight and index 3 (tau_z) by tau_z_loss_weight.
+            # Same pre-GradNorm injection point as H26 — L0 absorbs the
+            # scaling so the lever acts through gradient magnitudes
+            # (c_tau_y, c_tau_z / G_bar) and the total backward signal.
+            # H188 (PR #1532): extended from tau_z-only to tau_y+tau_z to
+            # leverage the H183 per-channel decoder's full per-channel
+            # gradient independence.
+            tau_scale = surface_per_ch.new_tensor(
+                [1.0, 1.0, tau_y_loss_weight, tau_z_loss_weight]
             )
-            surface_per_ch = surface_per_ch * tau_z_scale
+            surface_per_ch = surface_per_ch * tau_scale
             if loss_vol_p_charb is not None:
                 # H19 advisor fix: vol_p slot carries the Charbonnier tensor
                 # so GradNorm's L0 anchor and per-task gradient norms reflect
@@ -758,6 +763,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     wss_charbonnier_axes=config.wss_charbonnier_axes,
                     vol_p_charbonnier_weight=config.vol_p_charbonnier_weight,
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
+                    tau_y_loss_weight=config.tau_y_loss_weight,
                     tau_z_loss_weight=config.tau_z_loss_weight,
                 )
                 if (
@@ -808,6 +814,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
