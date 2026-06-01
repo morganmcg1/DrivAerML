@@ -185,3 +185,56 @@ test_primary/abupt_axis_mean_rel_l2_pct = **5.6648%** ✓ (clears 5.844% floor)
 Canonical optimizer: Lion lr=1e-4, β1=0.95, β2=0.98
 
 > **CORRECTION 2026-05-29 (verified by W&B query `k6q4c3on` + cross-check by nezuko in PR #1360):** The prior BASELINE.md update (commit ea99dda, 2026-05-28) listed `test_VP=3.6033%` and `test_SP=3.6498%` for H147. Those values are actually H39's (run `yym5oa8x`), copy-pasted in error. The true H147 test metrics are `test_VP=3.4014%` and `test_SP=3.5634%`. **Material change in interpretation:** H147 actually CLEARS all 4 floors including SP (3.5634% < 3.577%); does NOT miss the SP floor by +0.073pp as previously documented. This corrects analyses banked from H150 (PR #1359 closure) and any other comparisons drawn against the old H147 numbers. New candidates must still beat test_WSS < 6.5409% (primary) and may use the PR #972 floor envelope (test_VP ≤ 3.643%, test_SP ≤ 3.577%, test_ABUPT ≤ 5.844%) as the merge-eligibility floor, but conclusions about whether H150-style β-shifts "improved" pressure heads against H147 must be re-derived from the corrected baseline.
+
+---
+
+## 2026-06-01 — PR #1510: H183 — Per-channel surface decoder heads (split shared MLP 4×1) — **NEW SOTA, ALL 4 FLOORS CLEARED**
+
+- **W&B run:** `guw83mge` (rank0, `dl24-tanjiro/h183-main-30ep`)
+- **Group:** `h183-per-channel-decoder-heads`
+- **Best checkpoint:** EP24 EMA (selection metric: `val_primary/abupt_axis_mean_rel_l2_pct=5.8686`)
+- **Runtime:** ~22.8h (82069s)
+
+| Metric | H183 | H147 SOTA | Δ vs H147 | Floor | Status |
+|---|---:|---:|---:|---:|---|
+| test_WSS | **6.4427%** | 6.5409% | **−0.098pp** | — | ✅ NEW SOTA |
+| test_VP | 3.4415% | 3.4014% | +0.040pp | ≤ 3.643% | ✅ clears |
+| test_SP | **3.5187%** | 3.5634% | **−0.045pp** | ≤ 3.577% | ✅ clears by 0.058pp |
+| test_ABU | **5.6152%** | 5.6648% | **−0.050pp** | ≤ 5.844% | ✅ clears |
+| test_τ_x | 5.6983% | 5.8155% | −0.117pp | — | ✅ improved |
+| test_τ_y | 6.9813% | 7.0556% | −0.074pp | ≤ 3.65% (paper) | improved |
+| test_τ_z | 8.4364% | 8.4882% | −0.052pp | ≤ 3.63% (paper) | improved |
+
+**Key finding — val→test mapping changes with architecture topology:**
+H183's val trajectory looked ~+0.04pp BEHIND H147 on WSS at EP20-30, but test shows −0.098pp IMPROVEMENT. val→test pattern is NOT constant: H147 pattern ≈ 0pp gap; H183 pattern = −0.14pp gap on WSS and −0.32pp on SP. Projections using H147's val→test map must be bracketed for alternative architectures.
+
+Per-channel heads act as a mild generalization regularizer — each independent head (cp, τ_x, τ_y, τ_z) commits to one channel's loss landscape rather than diluting capacity across four targets.
+
+**Delta vs H147 stack:** only one flag added — `--per-channel-surface-heads`
+
+**Reproduce command:**
+```bash
+torchrun --nproc_per_node=8 train.py \
+  --data-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511 \
+  --optimizer lion --lr 1e-4 --weight-decay 0.005 --lion-beta1 0.95 --lion-beta2 0.98 \
+  --batch-size 1 --lr-warmup-epochs 1 --lr-cosine-t-max 30 --epochs 30 \
+  --model-pe string_multisigma --pe-init-sigmas 0.25,0.5,1.0,2.0,4.0 --pe-num-features 16 \
+  --model-layers 6 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --vol-p-charbonnier-weight 0.1 --wss-charbonnier-weight 0.1 --wss-charbonnier-axes z \
+  --use-gradnorm --gradnorm-alpha 0.5 --gradnorm-min-w-vol-p 0.15 \
+  --use-curvature-attention-bias --use-y-symmetry-aug --y-symmetry-aug-prob 0.5 \
+  --surface-out-width-factor 2.0 \
+  --per-channel-surface-heads \
+  --train-surface-points 65000 --train-volume-points 65000 \
+  --eval-surface-points 65536 --eval-volume-points 65536 \
+  --ema-decay 0.999 --ema-start-step 500
+```
+
+### Current single-model best on `drivaerml-long-20260504` (updated 2026-06-01)
+
+**MERGED dl24 SOTA (2026-06-01):** PR #1510 (`guw83mge`) — H183 per-channel surface decoder heads — **NEW WSS SOTA, ALL 4 FLOORS CLEARED**
+test_primary/wall_shear_rel_l2_pct = **6.4427%** ⭐ (beats H147 6.5409% by −0.098pp)
+test_primary/volume_pressure_rel_l2_pct = **3.4415%** ✓ (clears 3.643% floor)
+test_primary/surface_pressure_rel_l2_pct = **3.5187%** ✓ (clears 3.577% floor by 0.058pp)
+test_primary/abupt_axis_mean_rel_l2_pct = **5.6152%** ✓ (clears 5.844% floor)
+Per-axis WSS: wss_x=5.6983%, wss_y=6.9813%, wss_z=8.4364%
