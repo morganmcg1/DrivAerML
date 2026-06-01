@@ -146,6 +146,13 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    smoke_steps: int = 0
+    # H357: local-checkpoint warm-start with relaxed key-matching.
+    checkpoint: str = ""
+    checkpoint_strict_load: bool = True
+    # H357: geometric content embedding (normals + log-area -> additive content).
+    use_geo_content: bool = False
+    geo_content_hidden: int = 64
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -429,6 +436,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_geo_content=config.use_geo_content,
+        geo_content_hidden=config.geo_content_hidden,
     )
 
 
@@ -917,6 +926,36 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"missing={len(missing)} unexpected={len(unexpected)}"
                 )
 
+        # H357: local-checkpoint warm-start. Mirrors the W&B path above but
+        # loads from a filesystem checkpoint. With --no-checkpoint-strict-load,
+        # only `geo_net.*` keys may be missing (e.g. fine-tuning a SOTA
+        # checkpoint that did not have the geometric content head).
+        if config.checkpoint:
+            ck = torch.load(config.checkpoint, map_location="cpu", weights_only=False)
+            state_dict = ck["model"]
+            state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+            strict = config.checkpoint_strict_load
+            missing, unexpected = model.load_state_dict(state_dict, strict=strict)
+            if not strict:
+                non_geo_missing = [k for k in missing if "geo_net" not in k]
+                assert not non_geo_missing, (
+                    f"Unexpected missing checkpoint keys (not geo_net.*): {non_geo_missing}"
+                )
+            resume_epoch_info = {
+                "resume_epoch": ck.get("epoch"),
+                "resume_checkpoint_source": ck.get("checkpoint_source"),
+                "resume_checkpoint_path": config.checkpoint,
+                "resume_strict_load": strict,
+                "resume_missing": len(missing),
+                "resume_unexpected": len(unexpected),
+            }
+            if state.is_main:
+                print(
+                    f"Resumed from local checkpoint {config.checkpoint} "
+                    f"epoch={ck.get('epoch')} source={ck.get('checkpoint_source')} "
+                    f"strict={strict} missing={len(missing)} unexpected={len(unexpected)}"
+                )
+
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.
         surface_channel_weights = torch.tensor(
@@ -1362,6 +1401,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             f"Train timeout ({train_timeout_minutes:.1f} min) mid-epoch "
                             f"at step {global_step}. Forcing validation and stopping."
                         )
+                    break
+                if config.smoke_steps > 0 and global_step >= config.smoke_steps:
+                    if state.is_main:
+                        print(
+                            f"Smoke-steps cap reached at step {global_step}; exiting "
+                            "training loop (smoke test, no validation/checkpoint)."
+                        )
+                    early_stop_reason = "smoke-steps cap"
                     break
 
             scheduler.step()

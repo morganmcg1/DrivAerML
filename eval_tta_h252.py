@@ -140,6 +140,9 @@ class EvalConfig:
     use_qk_norm: bool = True
     use_surf_to_vol_xattn: bool = True
     drop_path_max: float = 0.1
+    # H357: geometric content embedding (normals + log-area -> additive content).
+    use_geo_content: bool = False
+    geo_content_hidden: int = 64
 
     amp_mode: str = "bf16"
     debug: bool = False  # 2 val + 2 test cases
@@ -195,6 +198,8 @@ def build_model(cfg: EvalConfig) -> SurfaceTransolver:
         use_qk_norm=cfg.use_qk_norm,
         use_surf_to_vol_xattn=cfg.use_surf_to_vol_xattn,
         drop_path_max=cfg.drop_path_max,
+        use_geo_content=cfg.use_geo_content,
+        geo_content_hidden=cfg.geo_content_hidden,
     )
 
 

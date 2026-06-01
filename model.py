@@ -394,6 +394,34 @@ class Transformer(nn.Module):
         return x
 
 
+class GeometricContentNet(nn.Module):
+    """Dedicated geometric content MLP: normals + log-area -> additive content embedding.
+
+    H357 (GeoTransolver, arxiv:2512.20399 §3.2): inject geometry (surface normals
+    + log1p(area)) through a SiLU MLP additively into the token content space
+    BEFORE the Transolver backbone, instead of routing or raw feature concat.
+    Zero-init on the output layer keeps the model identical to a SOTA warm-start
+    checkpoint at step 0; the geometric content signal is learned during the
+    fine-tune.
+    """
+
+    def __init__(self, d_model: int, hidden: int = 64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(4, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, d_model),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, normals: torch.Tensor, log_area: torch.Tensor) -> torch.Tensor:
+        geo = torch.cat([normals, log_area], dim=-1)
+        return self.net(geo)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -419,6 +447,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_geo_content: bool = False,
+        geo_content_hidden: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +464,8 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_geo_content = use_geo_content
+        self.geo_content_hidden = geo_content_hidden
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -558,6 +590,16 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H357: dedicated geometric content embedding for the surface path.
+        # Surface inputs are [x, y, z, nx, ny, nz, area]; normals = [..., 3:6],
+        # area = [..., 6:7]. log1p(area) makes the curvature proxy scale-stable
+        # for both small and large facets. Zero-init in GeometricContentNet keeps
+        # the model identical to the SOTA warm-start at step 0.
+        if use_geo_content:
+            self.geo_net = GeometricContentNet(d_model=n_hidden, hidden=geo_content_hidden)
+        else:
+            self.geo_net = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -567,6 +609,7 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        geo_net: GeometricContentNet | None = None,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
@@ -582,7 +625,15 @@ class SurfaceTransolver(nn.Module):
                 feature_parts[0] if len(feature_parts) == 1 else torch.cat(feature_parts, dim=-1)
             )
             hidden = hidden + project_features(features)
-        return bias(hidden) + placeholder
+        hidden = bias(hidden) + placeholder
+        if geo_net is not None:
+            # Surface inputs are [x, y, z, nx, ny, nz, area]; the geometric
+            # content pathway sees normals + log1p(area) only and is additive.
+            normals = x[:, :, self.space_dim : self.space_dim + 3]
+            area = x[:, :, self.space_dim + 3 : self.space_dim + 4]
+            log_area = torch.log1p(area.clamp(min=0))
+            hidden = hidden + geo_net(normals, log_area)
+        return hidden
 
     def forward(
         self,
@@ -614,6 +665,7 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
+                    geo_net=self.geo_net,
                 )
             )
             masks.append(surface_mask)
