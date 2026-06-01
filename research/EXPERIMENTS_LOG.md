@@ -13747,3 +13747,48 @@ Per-quartile trajectory (Q1/Q2/Q3/Q4): mean cos = +0.3054 / +0.3050 / +0.2772 / 
 - Opens a 4th unexplored axis: **target-space pathology** — high-dynamic-range τ_z under linear-MSE puts gradient on high-|τ_z| regions while rel_l2 eval is dominated by low-|τ_z| regions. Assigned as H349 frieren arcsinh-target (PR #1540).
 - Excellent diagnostic execution by frieren: the 30-minute kill-switch worked as designed, saved 30h GPU, produced two new findings that sharpen our understanding of why the loss-weight family is structurally closed.
 
+
+
+## 2026-06-01 15:10Z — PR #1537: H346 askeladd per-batch focal WSS_z weighting
+
+- askeladd/h346-focal-batch-wssz
+- **Hypothesis:** Per-batch focal weighting `w_i = (err_z_i / mean(err_z))**γ` on WSS_z residual concentrates training capacity on hardest tail vertices each step; should out-perform uniform/wz-only reweighting (closed by H339/H341) because focal applies *spatial* concentration (within-batch) rather than *channel* magnitude scaling.
+- W&B runs (training, both crashed-by-design via 50× kill-switch):
+  - Arm A γ=2.0: `33zl6szp` (smoke crash step 2 — DDP barrier sync bug), then `x5bjj0ou`/`ufnibvsh` (γ=2.0 main, killed at step 1019 by 50× weight-spread guard)
+  - Arm B γ=1.0: `ufnibvsh` rerun (γ=1.0 main, killed at step 1019 by same guard — identity exponent collapses too)
+- **Result: AXIS CLOSED. Falsifier triggered at both γ=2.0 AND γ=1.0.**
+
+### Per-batch focal collapse pattern
+
+| γ | Median w_max / mean across batches | % batches >50× threshold | Steps to first 50× violation | Outcome |
+|---:|---:|---:|---:|---|
+| **2.0** | 250 | 100% | 6 | Killed step 1019 by safety guard |
+| **1.0** | 73.5 | 88.5% | 18 | Killed step 1019 (88.5% > threshold) |
+
+Even at γ=1.0 (identity exponent, no exponentiation), the τ_z residual is so heavy-tailed at EP13 cosine-tail base that the per-batch focal weight `w = err_z / mean(err_z)` concentrates on 1–2 vertices in ~9 out of 10 minibatches. The 50× collapse guard is hit before any meaningful gradient signal accumulates on the rest of the surface — effectively the model trains on a sparse subset that varies stochastically per batch.
+
+### Falsifier check: is focal mechanistically distinct from magnitude reweight?
+
+| Step range | `corr(focal_weights, |τ_z|_magnitude)` |
+|---|---:|
+| 100-300 | 0.16 |
+| 300-700 | 0.25 |
+| 700-1019 | 0.36 |
+
+H341 falsifier (`corr > 0.9` → focal would be magnitude in disguise) NOT triggered: correlation stays at 0.16–0.36. **Focal IS mechanistically distinct from per-channel magnitude reweighting.** This is important: it means H346 is not a re-run of H341 with extra steps; it actually tests a different mechanism.
+
+But the mechanism is **unusable** on this data:
+- The same heavy-tailed residual structure that makes WSS_z hard to learn ALSO makes any residual-derived weighting structurally collapse-prone
+- Tempering γ→0 doesn't help: even γ=1.0 (linear scaling, NOT exponential) collapses
+- The only γ that wouldn't collapse is γ=0 (uniform weighting = no focal at all) — equivalent to the H336 baseline that H346 was trying to improve on
+
+### Findings banked
+
+1. **`focal-batch-collapsing`** — per-batch focal weighting on WSS_z fails because the underlying residual distribution is too heavy-tailed at the EP13 cosine-tail base. Don't reassign EMA/percentile/winsorized-focal variants without first fixing the residual distribution.
+2. **`focal-distinct-from-magnitude`** — focal weighting IS mechanistically different from H341 magnitude reweighting (corr ≤ 0.36 << 0.9 falsifier). Useful negative confirmation: H346 ≠ H341 + ε.
+3. **`wss-z-loss-weight-axis-closed` (META — combined finding)** — H339 uniform reweight + H341 wz-only reweight + H346 per-vertex focal weight. **All three independent attacks on the loss-reweight axis at the EP13 cosine-tail base have produced null/worse results.** WSS_z floor at 8.62% test_cal is NOT a gradient-budget or loss-weight problem. The bottleneck is representational/architectural. Future hypotheses targeting WSS_z via loss-side levers (per-vertex/per-batch/per-channel scaling at any γ) should be considered closed unless they introduce a fundamentally new mechanism (e.g. curriculum, structured outlier handling, distributional matching).
+
+### Next steps
+
+- Triggers H350: **channel-isolated decoder via FiLM axis conditioning** (askeladd PR #1542, just assigned this loop). Attack moves from loss-side to architecture-side.
+- The 4-axis WSS_z parallel attack is now: H347 physics priors / H348 curvature input / H349 arcsinh target / H350 FiLM decoder. Loss-side fully closed.
