@@ -141,6 +141,7 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     tau_z_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
+    per_channel_surface_heads: bool = False
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -161,6 +162,11 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         "surface_out_width_factor": (
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
+        ),
+        "per_channel_surface_heads": (
+            "H183 (PR #1510): split shared surface MLP decoder into "
+            "4 independent per-channel heads (cp, tau_x, tau_y, tau_z), "
+            "each Linear(h, h*width_factor)->GELU->Linear(.., 1)."
         ),
     }
     choices_text = {
@@ -285,6 +291,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
         use_curvature_attention_bias=config.use_curvature_attention_bias,
         surface_out_width_factor=config.surface_out_width_factor,
+        per_channel_surface_heads=config.per_channel_surface_heads,
     )
 
 
