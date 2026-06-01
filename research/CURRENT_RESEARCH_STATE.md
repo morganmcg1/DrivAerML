@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-01 16:10Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — val_cal 5.8978 / test_cal 5.7379**
+**Updated**: 2026-06-01 16:20Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — val_cal 5.8978 / test_cal 5.7379**
 
 ---
 
@@ -41,18 +41,18 @@
 
 ---
 
-## Active Fleet (2026-06-01 16:10Z — 6 students with open PRs, 2 idle pending H351/H352 assignment)
+## Active Fleet (2026-06-01 16:20Z — 8 students with open PRs)
 
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
+| **#1544** | thorfinn | H352: SWA-within-cosine-tail — weight-space averaging of ~30 fine-grained snapshots along H336 cosine-tail; distinct from H307 cross-seed soup and H342 output-avg. Zero param overhead. — NEW | 🆕 just assigned | Weight-space averaging (same trajectory) |
+| **#1543** | tanjiro | H351: NGSB (Normal-Relative Geometric Slice Bias) — 24-param zero-init `nn.Linear(3 → num_heads)` bias on Transolver slice_logits via surface normals; attacks encoder-resident attention-slice-routing axis. References GeoTransolver Adams et al. Dec 2025. — NEW | 🆕 just assigned | Encoder slice-routing |
 | **#1542** | askeladd | H350: Channel-isolated FiLM-conditioned decoder (Phase A frozen-backbone diagnostic gate, then Phase B full finetune) | 🟡 WIP — implementing | Architecture / per-channel decoder capacity |
 | **#1540** | frieren | H349: arcsinh target transform on WSS_z (3 arms: wss_z, wss, all) | 🟡 WIP — TTA eval pending; **train-raw catastrophic +100bp on val_WSS_z, likely close** | Target-space geometry |
 | **#1539** | fern | H348: Surface curvature input features (H, K, k1k2) — Arm A H-only train-end raw val_abupt 6.0088 (+9bp), awaits TTA eval | 🟡 WIP — TTA eval pending | Input geometry |
 | **#1538** | nezuko | H347: Boundary-layer physics priors (τ⊥n normals + kNN smoothness) — running 1.5h, ETA ~17:30Z | 🟡 WIP — training | Physical constraint |
 | **#1526** | alphonse | H342: Multi-checkpoint output averaging (ep13+ep14+ep15 TTA) | 🟡 WIP | Output-space averaging |
 | **#1522** | edward | H338: Arm D compositional eval (Arm C SP-reweight EP15 × H336 K=5+ν=4+8-res+mirror TTA recipe) `9t27gag4`, ETA ~21:30Z | 🟡 WIP — eval | SP floor gap 3.6bp via composition |
-| **PENDING** | tanjiro | **H351: NGSB (Normal-Relative Geometric Slice Bias)** — 24-param zero-init bias on Transolver slice_logits via surface normals; encoder-resident attention-routing attack | 🟢 about to assign | Encoder slice-routing |
-| **PENDING** | thorfinn | **H352: SWA-within-cosine-tail** — weight-space averaging of ~30 fine-grained snapshots along H336 cosine-tail trajectory; distinct from H307 (cross-seed) and H342 (output-space) | 🟢 about to assign | Weight-space averaging (same trajectory) |
 
 **Closed this loop**:
 - PR #1524 tanjiro H340 σ-sweep at ν=4: `sigma-axis-closed-nu4` + `per-channel-alpha-sigma-drift`. TTA hyperparameter family fully saturated.
