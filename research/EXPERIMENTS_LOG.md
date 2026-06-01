@@ -1,5 +1,50 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-06-01 05:35Z — PR #1513: H184 WSD LR schedule (fern) CLOSED NON-MERGE
+
+- dl24-fern/h184-wsd-lr-schedule
+- W&B rank0 run: `usc1tpni` — 30 EP DDP8, 22.42h runtime, EMA best checkpoint EP19
+- **Hypothesis**: Warmup-Stable-Decay (WSD) schedule — peak LR plateau for 21 EPs then 8 EP cosine to lr_min=1e-6 — would deliver 4-5× decay-phase descent acceleration vs default cosine, per MiniCPM/Hägele 2024 claim. Tested on **pre-H183** stack (NO per-channel heads, since H183 had not yet been validated when smoke launched).
+
+### Terminal test metrics (full-fidelity rank-0 eval, 50 cases)
+
+| metric | H184 | H183 SOTA | H147 SOTA | floor | floor status |
+|---|---:|---:|---:|---:|---|
+| **test_WSS** | **6.5982** | 6.4427 | 6.5409 | (primary) | **+0.057 BEHIND H147** ❌ |
+| test_VP | 3.6087 | 3.4415 | 3.4014 | ≤3.643 | passes (−0.034) but behind |
+| test_SP | **3.7064** | 3.5187 | 3.5634 | ≤3.577 | **BREACH +0.129pp** ❌ |
+| test_ABU | 5.7841 | 5.6648 | 5.6648 | ≤5.844 | passes (−0.060) but behind |
+
+### Per-phase descent rates
+
+| phase | EPs | val_WSS Δ | rate (pp/EP) |
+|---|---:|---:|---:|
+| early stable | EP2 → EP11 | 7.3219 → 6.8454 = −0.477 | −0.053 |
+| late stable  | EP11 → EP22 | 6.8454 → 6.8595 = +0.014 | +0.001 (plateau) |
+| **decay**    | **EP22 → EP30** | **6.8595 → 6.8382 = −0.021** | **−0.003** |
+
+**Decay phase delivered −0.003 pp/EP — essentially identical to the late-stable plateau rate.** The hypothesized 4-5× decay-phase descent acceleration **did not materialize**.
+
+### Key findings
+
+1. **WSD mechanism FALSIFIED on H147 stack.** Schedule shape verified correct end-to-end (warmup → 21 EP plateau → 8 EP cosine to eta_min=1e-6, LR trajectory matches dry-run). Decay tail produced no meaningful descent. The literature claim that holding peak LR longer + concentrating decay into a final tail discovers deeper minima is **stack-dependent**, not universal.
+
+2. **Mechanism reading:** H147 stack converges to a deep peak-LR basin by EP10-EP11 (val_WSS saturates at ~6.84 by EP11 and plateaus through EP22). Once that basin is found, an LR decay tail doesn't UNCOVER a deeper minimum — there's nothing left to descend toward at the loss-surface geometry the model is at. The literature claim assumes the model is NOT at a local optimum when decay begins; ours apparently is.
+
+3. **Cosine wins, mechanistically, on this stack** because its earlier-onset decay (lr<50% peak by EP10) couples the LR drop *with* the early-phase descent, so the model finds a tighter sub-basin during the descent rather than after saturating a peak-LR basin.
+
+4. **SP plateau confirmed structural, not training-duration.** val_SP plateaued at ~4.05 from EP5 onward across both stable and decay phases. test_SP=3.7064 = +0.129pp BREACH of floor 3.577. Even with more EPs at peak-LR, SP would not have recovered. SP-specific interventions (per-channel SP head tuning, SP-dedicated Charbonnier scaling) are higher-priority than schedule tweaks for floor recovery.
+
+5. **val→test mapping on pre-H183 stack:** val_WSS=6.8382 → test_WSS=6.5982 (−0.24pp). H147 val→test for WSS was ~+0.06pp; pre-H183 stack here gives much wider gap.
+
+### Conclusions
+
+- **Closes WSD direction on H147 stack.** Schedule-shape research on this benchmark should favor schedules that *couple* LR drop with active descent (default cosine, earlier-onset cosine with T_max<epochs), not those that delay decay.
+- **Re-opens WSD on H183 stack (H191)** with corrected configuration: true 100× LR drop (1e-4 → 1e-6, vs H184's effective 0.32× at terminal) + longer stable phase (24 EP) + sharp decay (6 EP). Prior is now lower than at H184 launch, but the H183 stack has different convergence geometry (per-channel heads, GradNorm), so non-zero chance the decay-phase boost materializes.
+- **SP-floor recovery escalates in priority.** WSS gap to Transolver-3 SOTA is now 5 cycles deep with no break; SP floor breach repeats across H184/H169/H173/H180. Structural SP interventions queue ahead of further WSS-axis hypothesis tweaks.
+
+---
+
 ## 2026-05-31 22:43Z — PR #1506: H182 lr=1.3e-4 + ema=0.9999 compound (nezuko) CLOSED NON-MERGE
 
 - dl24-nezuko/h182-ema-lr-13x-compound

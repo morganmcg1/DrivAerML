@@ -16,13 +16,21 @@
 | nezuko | #1533 | H189: H183-stack + hidden_dim=640 | **MAIN RUNNING** — since 05:01Z |
 | tanjiro | #1534 | H190: per-channel surface width=2.5 | **SMOKE** — EP1 expected ~06:00Z; gate ≤13.5% |
 
-### H184 (fern, PR #1513) — CLOSED NON-MERGE
+### H184 (fern, PR #1513) — CLOSED NON-MERGE (terminal SENPAI-RESULT + test eval)
 
-WSD decay to ~32% peak LR (lr≈3.2e-5 at terminal) produced no descent — val_WSS=6.838% (+0.40pp vs H183 6.4427%), all 4 axes fail:
-- val_WSS=6.838% (NON-MERGE: +0.40pp vs SOTA)
-- val_VP=3.714%, val_SP=4.066%, val_ABU=6.093%
+**Terminal test (best-EP19 EMA checkpoint):**
+| metric | H184 | H183 SOTA | H147 SOTA | floor | floor status |
+|---|---:|---:|---:|---:|---|
+| **test_WSS** | **6.5982** | 6.4427 | 6.5409 | (primary) | **+0.057 BEHIND H147** ❌ |
+| test_VP | 3.6087 | 3.4415 | 3.4014 | ≤3.643 | passes (−0.034) but behind |
+| test_SP | **3.7064** | 3.5187 | 3.5634 | ≤3.577 | **BREACH +0.129pp** ❌ |
+| test_ABU | 5.7841 | 5.6152 | 5.6648 | ≤5.844 | passes (−0.060) but behind |
 
-WSD mechanism requires sharper schedule (100× drop, not 0.32×). H191 tests the correct configuration with true 100× drop.
+**WSD schedule shape verified end-to-end** (warmup → 21 EP plateau at lr=1e-4 → 8 EP cosine to lr_min=1e-6). Decay-phase descent rate = −0.003pp/EP (essentially identical to late-stable plateau +0.001pp/EP). **Predicted 4-5× decay-phase boost did NOT materialize.**
+
+**Mechanism reading:** H147 stack saturates the peak-LR basin by ~EP10 → at decay onset (EP22), model is already at a local optimum and has nothing left to descend toward. WSD theory's boost assumes model is NOT at a local optimum when decay begins; ours is. **Cosine wins on this stack because earlier-onset decay couples LR drop with active descent, finding a tighter sub-basin during the descent rather than after saturating a peak-LR basin.**
+
+H191 tests the corrected configuration on the H183 stack — same WSD mechanism but with true 100× drop (1e-4 → 1e-6) over a longer stable phase (24 EP) + sharp decay (6 EP). Different stack (H183 has per-channel heads, GradNorm, curvature attention) and different schedule depth, so the prior is non-zero but the H184 finding tempers the expected payoff magnitude.
 
 ### H191 hypothesis (PR #1535, fern)
 
