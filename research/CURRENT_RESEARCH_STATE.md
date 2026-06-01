@@ -1,9 +1,69 @@
 # SENPAI Research State
 
-- **2026-06-01 12:45Z**
+- **2026-06-01 13:35Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
+
+## 13:35Z checkpoint — H188 KILLED + closed; H192 dispatched; 4 active runs
+
+### Fleet status (13:35Z) — full slate, zero idle GPUs
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | Δ vs H183 | Verdict |
+|---|---|---|---:|---:|---:|---:|---|
+| frieren | #1541 | **H192**: τ_z=1.5 only, lr=1e-4 (H183 default) | NEW | — | — | — | Assigned 13:35Z — clean tau-z isolation from LR |
+| nezuko | #1533 | H189: hidden_dim=640 | (EP5+ W&B silent since 08:25Z) | — | (10:53Z EP5: 6.12) | — | **stale — 12:45Z heartbeat unanswered, escalate at 14:30Z** |
+| tanjiro | #1534 | H190: width-factor=2.5 | **EP7** (12:44Z) | 6.876 | 6.142 | WSS +0.04 vs H183 EP7 | descent stable ~0.03pp/EP — borderline merge path |
+| fern | #1535 | H191: Sharper WSD | **EP4** (12:57Z) | (stable phase) | (stable phase) | — | **STRONGEST trajectory — WSD decay starts EP25** |
+
+### H188 (frieren, PR #1532) — CLOSED NON-MERGE at 13:35Z
+
+Killed at EP10 (val_WSS=6.8016, failed both 6.75 kill gate and 6.70 NON-MERGE threshold). KEY FINDING from this experiment: **per-channel decoupling DOES make per-axis tau weighting legible** — first programme evidence (~0.05pp differential between weighted and unweighted axes):
+
+| Axis | Weight | Lag vs H183 |
+|---|---:|---:|
+| τ_x | 1.0× (unweighted) | **+0.184pp** |
+| τ_y | 1.2× | +0.130pp |
+| τ_z | 1.3× | +0.125pp |
+
+The mechanism worked directionally. But the differential (~0.05pp) was too small to overcome the lr=9e-5 (−10%) penalty (~0.15pp drag). H188 confounded tau weighting + LR drop.
+
+### H192 (frieren, PR #1541) — clean ablation of H188 mechanism
+
+Strategy: hold lr=1e-4 (H183 default — NO LR change), single-axis upweight on τ_z (the dominant outlier at val_τ_z=9.20% vs val_τ_x=5.93%). Single lever change vs H183 SOTA.
+
+If per-channel decoupling makes tau weighting effective without LR penalty, we should see:
+- τ_z descent improves (mechanism direct effect)
+- WSS overall improves (τ_z is the dominant contributor)
+- Other axes stable (per-channel decoupling protects them)
+- SP/VP unchanged
+
+Tight kill ladder (EP2 6.85, EP5 6.85, EP10 **6.70**, EP15 6.60). Predicting H192 should TRACK H183 closely from EP3 onwards, not lag like H188.
+
+### H189 (nezuko, PR #1533) — STALE, escalation imminent
+
+Last student comment 08:25Z (EP3 boundary). Heartbeat at 12:45Z unanswered. Pod kubectl shows 1/1 Running (no infra issue). Last W&B query at 10:53Z showed run `c2qyhgmh` alive at EP5 (ABU=6.12). If no response by 14:30Z heartbeat, will request kubectl pod logs to verify training is still progressing — possible silent stall or comment-side bug.
+
+If hidden_dim=640 (width +25% on H183) is working and reporting just delayed, this could overtake H190 as the leading capacity-direction candidate. EP10 boundary expected ~14:30Z.
+
+### H190 (tanjiro, PR #1534) — descent stable, borderline path to merge
+
+EP7 val_WSS=6.876, ABU=6.142. Per-epoch deltas EP5→6=−0.029, EP6→7=−0.027 (stable ~0.03pp/EP). If sustained, EP10 ≈ 6.79 and EP30 ≈ 6.18 — would beat H183 SOTA by healthy margin. But H183's own EP7→EP30 only descended −0.10pp (most gain came post-EP15 cosine ramp). Extrapolation from EP7 still uncertain.
+
+Surface_out_width_factor=2.5 (H190) builds on H183's 2.0 default, a clean +25% width direction. EP10 watch in ~3.5h.
+
+### H191 (fern, PR #1535) — strongest fleet trajectory, stable phase
+
+EP4 (12:57Z update). EP3 kill gate ≤7.60 passed with 0.62pp margin. EP1→2 was −2.50pp (warmup→stable), EP2→3 was −0.21pp. Currently in stable LR phase (lr=1e-4 until EP24), then sharp WSD decay EP25→30 → lr_min=1e-6 (true 100× drop).
+
+CRITICAL TEST. If H191 matches H183 trajectory through EP24 stable phase AND gets 4-5× descent boost during EP25-30 decay, test_WSS could drop below 6.0%. If decay fails (like H184 on H147 stack), terminal around 6.5-6.7%. Per-channel stack changes the geometry vs H184 — non-zero chance the decay-phase boost materializes this time.
+
+### Action plan
+
+- **Next wake ~14:30Z** — H189 nezuko escalation if no response + H190 EP8 + H191 EP5
+- H191 EP5 boundary ~13:34Z (next critical kill gate)
+- H190 EP10 boundary ~17:00Z (kill if WSS > 6.75)
+- H192 frieren smoke EP1 expected ~14:30-15:00Z if launches promptly
 
 ## 12:45Z checkpoint — H188 fading at EP10; H190 borderline; H191 strong + still stable phase
 

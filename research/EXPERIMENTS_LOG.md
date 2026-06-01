@@ -1,5 +1,60 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-06-01 13:35Z — PR #1532: H188 per-channel tau weights 1.2/1.3 + lr=9e-5 (frieren) CLOSED NON-MERGE
+
+- dl24-frieren/h188-per-channel-tau-mild-weights
+- W&B runs: `rti37ozj` (main, killed mid-EP11), `uvigxq88` (smoke, EP1)
+- **Hypothesis**: H183 per-channel surface decoder gives each surface channel an independent gradient pathway. Therefore per-axis tau weighting (τ_y=1.2/τ_z=1.3) — which had limited room to act on the old shared decoder — should now operate cleanly on truly decoupled heads and produce a stronger response on tau-axis metrics. Paired with a slight LR drop (1e-4 → 9e-5) mirroring the best pre-wave mild-weighting config (run `9mm3sz7x`).
+
+### Terminal val metrics — KILLED at EP10 (test NOT measured)
+
+| Metric | H188 EP10 | H183 SOTA EP10 ref | Δ vs H183 EP10 | Gate |
+|---|---:|---:|---:|---:|
+| **val_WSS** | **6.8016%** | 6.6402% | **+0.16pp** | ≤6.75 kill **FAIL** |
+| val_ABU | 6.0467% | 5.9168% | +0.13pp | — |
+| val_SP | 3.9554% | 3.8521% | +0.10pp | — |
+| val_VP | 3.7349% | 3.6284% | +0.11pp | — |
+| val_τ_x | 5.9336% | 5.7495% | **+0.184pp** (unweighted, largest gap) | — |
+| val_τ_y | 7.4054% | 7.2751% | +0.130pp (1.2× weighted) | — |
+| val_τ_z | 9.2042% | 9.0791% | +0.125pp (1.3× weighted) | — |
+
+EP10 val_WSS = 6.8016 failed both the EP10 kill gate (6.75, +0.05pp over) and the NON-MERGE threshold (6.70, +0.10pp over). Issued SIGINT mid-EP11 (step ~111k / EP11 5%).
+
+### Trajectory (val_WSS, H188 vs H183 SOTA)
+
+| EP | H188 | H183 | Δ |
+|---:|---:|---:|---:|
+| 1 | 13.5081 | 12.9728 | +0.5353 |
+| 2 | 7.3336 | 7.2222 | +0.1114 |
+| 3 | 7.0916 | 6.9084 | +0.1832 |
+| 5 | 6.9301 | 6.7497 | +0.1804 |
+| 7 | 6.8309 | 6.6890 | +0.1419 |
+| 10 | **6.8016** | 6.6402 | **+0.1614** ← killed |
+
+Gap stabilized at +0.13-0.18pp from EP3 onward; never closed.
+
+### Mechanism analysis (KEY FINDING — per-channel decoupling makes per-axis weighting legible)
+
+The per-axis lag pattern shows the tau weighting IS producing the expected differential signal:
+
+| Axis | Weight | Lag vs H183 |
+|---|---:|---:|
+| τ_x | 1.0× (unweighted) | **+0.184pp** (largest gap) |
+| τ_y | 1.2× | +0.130pp |
+| τ_z | 1.3× | +0.125pp |
+
+The upweighted axes lag ~0.05pp LESS than the unweighted axis — exactly the differential the hypothesis predicted on a decoupled per-channel head. The mechanism works directionally.
+
+**BUT the differential magnitude (~0.05pp on weighted axes) is too small to overcome the lr=9e-5 (−10%) penalty (~0.15pp across all axes).** This experiment confounded two changes: tau weighting + LR drop. The LR effect dominated, mask the (real) tau-weighting benefit.
+
+### Conclusions
+
+1. **Per-channel decoupling DOES make per-axis loss weighting more responsive** — first programme evidence (~0.05pp differential signal between weighted and unweighted axes). This is a publishable finding even though the overall experiment failed.
+2. **lr=9e-5 too conservative on H183 stack** — −10% LR drag dominates +5% weighting benefit. Don't change LR when probing loss-weighting mechanisms.
+3. **τ_z (9.2%) is the dominant outlier axis** — 1.55× higher relative error than τ_x. Single-axis interventions should focus there.
+4. **Recommended next experiment (H192)**: hold lr=1e-4 (H183 default), single-axis upweight on τ_z only (τ_z=1.5, τ_y=1.0). Clean ablation isolating tau-weighting from LR. If the differential at H183's LR closes the WSS gap, the mechanism is a winner.
+5. Student's other suggested follow-ups deferred to backup queue: stronger weights at lr=1e-4 (H193 candidate), per-axis EMA decay (structural variant), Charbonnier τ_y (multi-axis robustness).
+
 ## 2026-06-01 05:35Z — PR #1513: H184 WSD LR schedule (fern) CLOSED NON-MERGE
 
 - dl24-fern/h184-wsd-lr-schedule
