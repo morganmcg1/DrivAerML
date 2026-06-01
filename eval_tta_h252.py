@@ -104,6 +104,13 @@ class EvalConfig:
     # under affine + sufficient stats and is reported only on the raw output.
     test_time_calibration: bool = False
 
+    # H342: dump per-case averaged predictions (real units, shape (n_pts, ch))
+    # plus targets to this .npz path, for post-hoc multi-checkpoint output
+    # averaging. Cross-ckpt mean of per-ckpt per-case averages equals the mean
+    # across all (ckpt, k, R, mirror) passes (uniform per-point contributions),
+    # so the per-case averaged form is sufficient for H342's hypothesis.
+    save_raw_predictions: str = ""
+
     manifest: str = "data/split_manifest.json"
     data_root: str = "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
     output_dir: str = "outputs/h252_eval"
@@ -598,6 +605,26 @@ def merge_calibration_stats(parts: Iterable[CalibrationStats]) -> CalibrationSta
     return merged
 
 
+@dataclass
+class RawPredictions:
+    """Per-case TTA-averaged predictions in real units (H342 plumbing)."""
+
+    surface_preds: dict[str, torch.Tensor] = field(default_factory=dict)
+    volume_preds: dict[str, torch.Tensor] = field(default_factory=dict)
+    surface_targets: dict[str, torch.Tensor] = field(default_factory=dict)
+    volume_targets: dict[str, torch.Tensor] = field(default_factory=dict)
+
+
+def merge_raw_predictions(parts: Iterable[RawPredictions]) -> RawPredictions:
+    merged = RawPredictions()
+    for part in parts:
+        merged.surface_preds.update(part.surface_preds)
+        merged.volume_preds.update(part.volume_preds)
+        merged.surface_targets.update(part.surface_targets)
+        merged.volume_targets.update(part.volume_targets)
+    return merged
+
+
 def fit_affine_per_channel(
     global_stats: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -812,9 +839,10 @@ def evaluate_split_stacked(
     distributed_state,
     antithetic: bool = False,
     collect_calibration: bool = False,
+    collect_raw_predictions: bool = False,
     noise_dist: str = "gaussian",
     noise_df: int = 4,
-) -> tuple[dict[str, float], CalibrationStats | None]:
+) -> tuple[dict[str, float], CalibrationStats | None, RawPredictions | None]:
     rank = distributed_state.rank if distributed_state and distributed_state.enabled else 0
     world_size = (
         distributed_state.world_size
@@ -825,6 +853,7 @@ def evaluate_split_stacked(
 
     acc = EvalAccumulator()
     cal = CalibrationStats() if collect_calibration else None
+    raw = RawPredictions() if collect_raw_predictions else None
     total_t0 = time.time()
     total_forward = 0.0
     total_io = 0.0
@@ -867,6 +896,11 @@ def evaluate_split_stacked(
                 surface_y=surf_y,
                 volume_y=vol_y,
             )
+        if raw is not None:
+            raw.surface_preds[case_id] = surf_avg.detach().cpu().to(torch.float32)
+            raw.volume_preds[case_id] = vol_avg.detach().cpu().to(torch.float32)
+            raw.surface_targets[case_id] = surf_y.detach().cpu().to(torch.float32)
+            raw.volume_targets[case_id] = vol_y.detach().cpu().to(torch.float32)
         total_forward += timing["forward_seconds"]
         total_io += timing["io_seconds"]
         total_perturb += timing["perturb_seconds"]
@@ -896,19 +930,29 @@ def evaluate_split_stacked(
         if cal is not None:
             gathered_cal = [None for _ in range(world_size)]
             dist.all_gather_object(gathered_cal, cal)
+        gathered_raw: list[RawPredictions | None] | None = None
+        if raw is not None:
+            gathered_raw = [None for _ in range(world_size)]
+            dist.all_gather_object(gathered_raw, raw)
         if not distributed_state.is_main:
-            return {}, None
+            return {}, None, None
         merged = merge_eval_accumulators(g for g in gathered if g is not None)
         merged_cal = (
             merge_calibration_stats(c for c in gathered_cal if c is not None)
             if gathered_cal is not None
             else None
         )
+        merged_raw = (
+            merge_raw_predictions(r for r in gathered_raw if r is not None)
+            if gathered_raw is not None
+            else None
+        )
     else:
         merged = acc
         merged_cal = cal
+        merged_raw = raw
 
-    return finalize_eval_accumulator(merged), merged_cal
+    return finalize_eval_accumulator(merged), merged_cal, merged_raw
 
 
 def resolve_checkpoint_path(cfg: EvalConfig, state) -> tuple[Path, str]:
@@ -1071,10 +1115,12 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     summary: dict[str, dict[str, dict[str, float]]] = {}
     cal_summary: dict[str, dict[str, CalibrationStats | None]] = {}
+    raw_summary: dict[str, dict[str, RawPredictions | None]] = {}
     log_prefix_by_split: dict[str, str] = {}
     for split_name, case_ids, log_prefix in splits:
         summary[split_name] = {}
         cal_summary[split_name] = {}
+        raw_summary[split_name] = {}
         log_prefix_by_split[split_name] = log_prefix
         for mode in modes:
             if mode == "weight_noise_only":
@@ -1101,7 +1147,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     flush=True,
                 )
             t0 = time.time()
-            metrics, cal_stats = evaluate_split_stacked(
+            metrics, cal_stats, raw_preds = evaluate_split_stacked(
                 split_name=f"{split_name}/{mode}",
                 case_ids=case_ids,
                 model=model,
@@ -1118,6 +1164,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 distributed_state=state,
                 antithetic=cfg.antithetic_noise,
                 collect_calibration=cfg.test_time_calibration,
+                collect_raw_predictions=bool(cfg.save_raw_predictions),
                 noise_dist=cfg.weight_noise_dist,
                 noise_df=cfg.weight_noise_df,
             )
@@ -1127,6 +1174,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print_metrics(f"{split_name}/{mode}", metrics)
                 summary[split_name][mode] = metrics
                 cal_summary[split_name][mode] = cal_stats
+                raw_summary[split_name][mode] = raw_preds
 
                 log_obj: dict[str, float] = {}
                 log_obj.update(primary_metric_log(f"{log_prefix}_primary/{mode}", metrics))
@@ -1137,6 +1185,49 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     # Always restore clean weights at the end.
     restore_clean_params(eval_module, clean)
+
+    # H342: dump per-case TTA-averaged predictions for post-hoc multi-checkpoint
+    # output averaging. One mode per checkpoint expected; if more than one mode
+    # runs the first non-empty mode wins (per H342 we only use a single mode).
+    if cfg.save_raw_predictions and state.is_main:
+        import json  # noqa: PLC0415 — local import
+        import numpy as np  # noqa: PLC0415 — local import
+
+        out_path = Path(cfg.save_raw_predictions)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        arrays: dict[str, np.ndarray] = {}
+        modes_dumped: list[str] = []
+        for split, mode_dict in raw_summary.items():
+            for mode, rp in mode_dict.items():
+                if rp is None:
+                    continue
+                modes_dumped.append(f"{split}/{mode}")
+                for cid, t in rp.surface_preds.items():
+                    arrays[f"surf_pred__{split}__{mode}__{cid}"] = t.numpy()
+                for cid, t in rp.volume_preds.items():
+                    arrays[f"vol_pred__{split}__{mode}__{cid}"] = t.numpy()
+                for cid, t in rp.surface_targets.items():
+                    arrays[f"surf_y__{split}__{mode}__{cid}"] = t.numpy()
+                for cid, t in rp.volume_targets.items():
+                    arrays[f"vol_y__{split}__{mode}__{cid}"] = t.numpy()
+        metadata = {
+            "checkpoint": str(ckpt_path),
+            "checkpoint_source": ckpt_source,
+            "checkpoint_epoch": ck.get("epoch"),
+            "checkpoint_source_field": ck.get("checkpoint_source"),
+            "resolutions": resolutions,
+            "modes": modes,
+            "modes_dumped": modes_dumped,
+            "weight_noise_sigma": cfg.weight_noise_sigma,
+            "weight_noise_passes": cfg.weight_noise_passes,
+            "antithetic_noise": cfg.antithetic_noise,
+            "weight_noise_dist": cfg.weight_noise_dist,
+            "weight_noise_df": cfg.weight_noise_df,
+            "wandb_name": cfg.wandb_name,
+        }
+        arrays["__metadata__"] = np.array(json.dumps(metadata))
+        np.savez_compressed(out_path, **arrays)
+        print(f"[H342] saved {len(arrays) - 1} raw arrays to {out_path}", flush=True)
 
     # H300: per-channel affine calibration applied on val, transferred to test.
     cal_metrics_by_split_mode: dict[str, dict[str, dict[str, float]]] = {}
