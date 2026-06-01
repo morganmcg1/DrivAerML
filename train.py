@@ -145,6 +145,9 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H346: per-batch focal loss on WSS_z residual (Option A — no EMA, no DDP sync)
+    focal_batch: bool = False
+    focal_gamma: float = 2.0
     debug: bool = False
 
 
@@ -271,6 +274,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "focal_batch": (
+            "H346 Option A: enable per-batch focal weighting on the WSS_z "
+            "surface channel. For each batch, compute per-element |tau_z error|, "
+            "normalise to mean=1 over valid positions, raise to focal_gamma, "
+            "renormalise to mean=1, and use as weights on the WSS_z squared "
+            "error. No cross-step EMA, no DDP all-reduce (each rank computes "
+            "its own per-batch weights; DDP gradient averaging suffices). "
+            "Other channels (cp, tau_x, tau_y) and volume_pressure are "
+            "unweighted. Mutually exclusive with --use-gradnorm; channel-level "
+            "--tau-z-loss-weight is still applied as a final multiplier."
+        ),
+        "focal_gamma": (
+            "H346: focal exponent applied to the per-batch per-position "
+            "weights. 2.0 = canonical focal default; 1.0 = linear; "
+            "3.0 = aggressive. Higher gamma concentrates more loss on the "
+            "highest-residual points within each batch."
         ),
     }
     for field in fields(Config):
@@ -474,6 +494,135 @@ def train_loss(
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+
+
+def focal_batch_train_loss(
+    model: nn.Module,
+    batch,
+    transform: TargetTransform,
+    device: torch.device,
+    amp_mode: str,
+    *,
+    surface_loss_weight: float,
+    volume_loss_weight: float,
+    surface_channel_weights: torch.Tensor | None,
+    focal_gamma: float,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, float]]:
+    """H346 Option A: per-batch focal weighting on the WSS_z surface channel.
+
+    Within each batch, compute per-element |tau_z error|, normalise to
+    mean = 1 over valid positions, raise to focal_gamma, renormalise to
+    mean = 1, and use as a per-element weight on the WSS_z squared error.
+    No cross-step EMA and no DDP all-reduce: each rank computes its own
+    per-batch weights; DDP gradient averaging gives the correct expected
+    update. Other surface channels (cp, tau_x, tau_y) and the volume loss
+    are unchanged.
+
+    Returns (loss, batch_loss_metrics, focal_diagnostics).
+    """
+    batch = batch.to(device)
+    surface_target = transform.apply_surface(batch.surface_y)
+    volume_target = transform.apply_volume(batch.volume_y)
+    with autocast_context(device, amp_mode):
+        out = model(
+            surface_x=batch.surface_x,
+            surface_mask=batch.surface_mask,
+            volume_x=batch.volume_x,
+            volume_mask=batch.volume_mask,
+        )
+        surface_pred = out["surface_preds"]
+        volume_pred = out["volume_preds"]
+
+        # Per-element |tau_z error| in fp32 for stable weight statistics
+        # under bf16 autocast.
+        mask_f = batch.surface_mask.to(device=surface_pred.device, dtype=torch.float32)
+        abs_err_z = (surface_pred[..., 3].float() - surface_target[..., 3].float()).abs()
+        masked_abs_err_z = abs_err_z * mask_f
+
+        valid_pts = mask_f.sum().clamp_min(1.0)
+        err_z_mean = (masked_abs_err_z.sum() / valid_pts).clamp_min(1e-12)
+        # Per-(b, n) focal weight: (|err_z| / mean(|err_z|))**gamma, mean = 1.
+        w = (masked_abs_err_z / err_z_mean).pow(focal_gamma)
+        # Renormalise to mean = 1 over valid positions so the WSS_z loss
+        # magnitude stays comparable to the baseline.
+        w_mean = ((w * mask_f).sum() / valid_pts).clamp_min(1e-12)
+        w = (w / w_mean).detach()
+        weights_loss = w.to(dtype=surface_pred.dtype)
+
+        # Build per-element channel weight tensor [B, N, C]: tau_z (idx 3)
+        # carries the focal weights, other channels are 1.0.
+        n_ch = surface_pred.shape[-1]
+        focal_ch_weights = torch.ones_like(surface_pred)
+        focal_ch_weights[..., 3] = weights_loss
+
+        # External per-channel scaling (tau_y_loss_weight, tau_z_loss_weight)
+        # stacks as a final multiplier so the existing tau-z scaling carries
+        # through.
+        if surface_channel_weights is not None:
+            ext_w = surface_channel_weights.to(
+                device=surface_pred.device, dtype=surface_pred.dtype
+            )
+            focal_ch_weights = focal_ch_weights * ext_w
+
+        # Weighted masked MSE over (B, N, C). Matches weighted_channel_mse
+        # normalisation: denominator = valid_pts * n_channels.
+        sq_err = (surface_pred - surface_target).square()
+        mask_3d = mask_f.to(surface_pred.dtype).unsqueeze(-1)
+        weighted_sq = sq_err * focal_ch_weights * mask_3d
+        denom = (valid_pts * float(n_ch)).clamp_min(1.0)
+        surface_loss = weighted_sq.sum() / denom
+
+        surface_loss_unweighted = masked_mse(surface_pred, surface_target, batch.surface_mask)
+        volume_loss = masked_mse(volume_pred, volume_target, batch.volume_mask)
+        weighted_surface = surface_loss_weight * surface_loss
+        weighted_volume = volume_loss_weight * volume_loss
+        loss = weighted_surface + weighted_volume
+        base_mse_loss = surface_loss_unweighted + volume_loss
+
+    batch_loss_metrics = {
+        "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
+        "surface_loss": float(surface_loss_unweighted.detach().cpu().item()),
+        "volume_loss": float(volume_loss.detach().cpu().item()),
+        "surface_loss_weighted": float(weighted_surface.detach().cpu().item()),
+        "volume_loss_weighted": float(weighted_volume.detach().cpu().item()),
+    }
+
+    # Diagnostics: only over valid (masked) positions. fp32 for stability.
+    # Skip the per-element stats when a batch has zero valid surface points
+    # (rare, e.g. all-volume views) — otherwise torch.quantile crashes and
+    # one rank's exception turns into an NCCL all-reduce timeout for the
+    # rest of the world.
+    mask_bool = batch.surface_mask.to(device=surface_pred.device).bool()
+    n_valid_diag = int(mask_bool.sum().item())
+    if n_valid_diag > 0:
+        w_valid = w[mask_bool]
+        err_z_valid = masked_abs_err_z[mask_bool]
+        tauz_truth_valid = surface_target[..., 3].float().abs()[mask_bool]
+        w_mean_v = w_valid.mean().clamp_min(1e-12)
+        err_p95 = torch.quantile(err_z_valid, 0.95)
+        err_p5 = torch.quantile(err_z_valid, 0.05)
+        # Pearson r between per-element focal weight and |tau_z_truth|.
+        w_centered = w_valid - w_valid.mean()
+        t_centered = tauz_truth_valid - tauz_truth_valid.mean()
+        denom_corr = (w_centered.norm() * t_centered.norm()).clamp_min(1e-12)
+        corr_w_tauz = (w_centered * t_centered).sum() / denom_corr
+        focal_diagnostics = {
+            "focal/w_min": float(w_valid.min().detach().cpu().item()),
+            "focal/w_max": float(w_valid.max().detach().cpu().item()),
+            "focal/w_mean": float(w_valid.mean().detach().cpu().item()),
+            "focal/w_std": float(w_valid.std().detach().cpu().item()),
+            "focal/w_max_over_mean": float((w_valid.max() / w_mean_v).detach().cpu().item()),
+            "focal/w_std_over_mean": float((w_valid.std() / w_mean_v).detach().cpu().item()),
+            "focal/corr_w_vs_tauz_magnitude": float(corr_w_tauz.detach().cpu().item()),
+            "focal/err_z_p95": float(err_p95.detach().cpu().item()),
+            "focal/err_z_p5": float(err_p5.detach().cpu().item()),
+            "focal/err_z_p95_minus_p5": float((err_p95 - err_p5).detach().cpu().item()),
+            "focal/err_z_mean": float(err_z_mean.detach().cpu().item()),
+            "focal/valid_pts": float(n_valid_diag),
+        }
+    else:
+        focal_diagnostics = {"focal/valid_pts": 0.0}
+    return loss, batch_loss_metrics, focal_diagnostics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -965,6 +1114,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
+        # H346 Option A: per-batch focal weighting on WSS_z residual.
+        # No persistent EMA state and no DDP all-reduce — each rank computes
+        # its own per-batch weights and DDP gradient averaging handles the
+        # rest.
+        if config.focal_batch and config.use_gradnorm:
+            raise ValueError(
+                "--focal-batch cannot be combined with --use-gradnorm: both rewrite "
+                "the surface loss objective. Choose one."
+            )
+        if config.focal_batch and state.is_main:
+            print(
+                f"Focal-batch enabled (H346 Option A): gamma={config.focal_gamma}, "
+                f"channel=tau_z (idx 3); per-batch weights, no EMA, no DDP sync"
+            )
+
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
         if config.use_gradnorm:
@@ -1081,6 +1245,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["mirror_augmentation"] = config.mirror_augmentation
             wandb.summary["epochs_already_done"] = config.epochs_already_done
             wandb.summary["save_every_epoch"] = config.save_every_epoch
+            wandb.summary["focal/enabled"] = config.focal_batch
+            if config.focal_batch:
+                wandb.summary["focal/gamma"] = config.focal_gamma
+                wandb.summary["focal/mode"] = "per_batch"
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1137,6 +1305,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if config.mirror_augmentation:
                     batch = mirror_augment_batch(batch.to(device), p=0.5)
                 gradnorm_metrics: dict[str, float] = {}
+                focal_diagnostics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
                         model, batch, transform, device, config.amp_mode
@@ -1220,6 +1389,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                         )
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
+                elif config.focal_batch:
+                    loss, batch_loss_metrics, focal_diagnostics = (
+                        focal_batch_train_loss(
+                            model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            surface_channel_weights=(
+                                surface_channel_weights if use_channel_weights else None
+                            ),
+                            focal_gamma=config.focal_gamma,
+                        )
+                    )
                 else:
                     loss, batch_loss_metrics = train_loss(
                         model,
@@ -1272,6 +1457,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if focal_diagnostics:
+                    train_log.update(focal_diagnostics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
