@@ -13888,3 +13888,47 @@ The hypothesis got the direction wrong: arcsinh is the COMPRESSIVE direction, bu
 - H353 (next frieren assignment) directly tests the converse hypothesis: expansive signed_power transform with p ∈ {1.25, 1.5, 2.0}. If expansion helps wss_z, the direction-of-effect finding is confirmed. If expansion ALSO hurts, the target-transform axis is broadly closed on wss_z (the basin is fragile to any nonlinearity).
 - Arms B (`wss`) and C (`all`) of H349 were not warranted — Arm A was the most surgical and cheapest, and the direction-of-effect finding generalizes; extending compression to more channels would only make things worse.
 - Frieren's skip-rule design (Arm A wss_z first, gate on test_wss_z < 8.62 before B/C) was correct methodology — the chain auto-closed at Arm A as designed.
+
+## 2026-06-01 17:00Z — PR #1542: H350 askeladd FiLM channel-isolated decoder Phase A frozen-backbone [CLOSED]
+
+**Branch**: `askeladd/h350-axis-conditioned-decoder`
+
+**Hypothesis**: Replace EP13's shared `surface_out` 2-layer MLP with a FiLM-conditioned per-channel decoder: 4-way `axis_embed` × `film_proj` γβ × shared `head_mlp`. Phase A = 3-epoch frozen-backbone diagnostic gate to validate the new decoder can at least match (within 5bp) the original heads' val_wss_z before committing to Phase B's 16-24h full finetune. Hypothesis was: channel-isolated decoder capacity for τ_z is the bottleneck (representational).
+
+**Implementation deviation**: student correctly identified the PR's original `--epochs 16 --lr-cosine-t-max 16` from EP13 would put start-LR at ~2.6e-5 (too low for randomly-init heads) and used `--epochs 3 --lr-cosine-t-max 3` fresh cosine at lr=3e-4 instead. Also reduced `axis_embed` dim from d_model=512 to 32 to satisfy the ≤+1% param-overhead constraint (net −0.57%). Switched to per-channel loop forward (4× sequential cost, no `(B,N,4,D)` broadcast OOM risk). film_proj zero-init γ=β=0, head_mlp trunc_normal random init. **Crucially: EP13's `surface_out.{0,2}.{weight,bias}` were DISCARDED** (`unexpected=4`), so head_mlp started from random init.
+
+**Results (W&B `fq2m1g8c`, EP3 EMA):**
+
+| Metric | Phase A actual | H336 raw baseline | Δ vs H336 raw |
+|---|---:|---:|---:|
+| val_abupt | **8.9393** | 5.97 | **+297bp catastrophic** |
+| val_wss_z | **12.3415** | 9.1839 | **+316bp catastrophic** |
+| val_wss_y | 12.2302 | 7.18 | +505bp |
+| val_wss_x | 9.4354 | 5.93 | +351bp |
+| val_SP | 7.1494 | 3.94 | +321bp |
+| val_VP | **3.5398** | 3.40 | **+14bp (volume head preserved)** |
+| best_epoch | 3 (terminal) | — | — |
+
+Student's pre-committed gate: `val_primary/wall_shear_z_rel_l2_pct < 9.1339%` (5bp improvement over H336 raw). Actual: 12.34% = +316bp WORSE. **Gate HARD FAIL.**
+
+### Mechanism: random-init head_mlp can't recover EP13 surface heads in 3 epochs frozen-backbone
+
+The +14bp val_VP regression (volume head was preserved/copied from EP13) vs the +297-505bp surface-head regressions tells us decisively: the catastrophic failure is *isolated to the new randomly-initialized surface decoder*. The H336 backbone (frozen) still produces good features — they're just being mapped to garbage by a 329k-param head_mlp that started from trunc_normal init and can't recover EP13's learned mapping in 3 epochs even with a frozen good backbone.
+
+The training-time was perfectly fine — 3 epochs at lr=3e-4 cosine, train/loss reached 0.016 (reasonable convergence for the new heads' loss surface). But the new heads converged to *their own* output distribution, which lost the per-channel sensitivity that EP13's `surface_out` had developed across ~13 epochs of full-training and 3 epochs of cosine-tail.
+
+### Banked findings
+
+- **`filmdec-random-init-too-slow-for-frozen-backbone`** — Randomly initializing the new surface decoder heads (head_mlp 329k params) cannot recover EP13's val_wss_z in 3 epochs at frozen backbone, even with lr scheduled appropriately for fresh init. Surface heads MUST be warm-started from a trained baseline, not from scratch. **Fast-path close criterion** for any future "replace heads from scratch" experiment.
+
+- **`volume-head-preserved-when-untouched`** — Preserving the EP13 volume head verbatim (loaded from checkpoint, not re-initialized) kept val_VP regression within +14bp. This isolates the diagnosis cleanly: any catastrophic regression in a frozen-backbone diagnostic is heads-only when the volume head is preserved.
+
+- **NOT a FiLM-direction falsification**: the mechanism direction (per-channel FiLM modulation for decoder specialization) is NOT closed by H350. What's closed is the specific "random-init head_mlp + frozen-backbone short-cosine" approach. **H354 corrected version (EP13-warm-started head_mlp) re-tests the FiLM-direction with the correct diagnostic**: step-0 prediction == EP13 (sanity check), then 3 epochs at frozen backbone to test whether learnable FiLM γβ can improve val_wss_z beyond EP13's static heads.
+
+### Implications
+
+- For any future experiment that replaces an EP13 module: **warm-start from the original EP13 weights** unless you specifically want to test "can a fresh head recover from scratch" (which is generally a no, per H350).
+- The 3-epoch frozen-backbone schedule is fine for diagnostic gates IF the heads are warm-started — Phase A' (H354) keeps this schedule with EP13 warm-start as the only delta.
+- The +14bp val_VP regression with preserved volume head is unexpectedly large. May reflect either (a) some interaction between encoder features and head channel-projection that's slightly different in the new architecture's data flow, or (b) numerical precision in the freeze-graph that DDP `find_unused_parameters=True` introduces. Worth flagging but not a blocker.
+
+---

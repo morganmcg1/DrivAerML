@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-01 16:35Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — val_cal 5.8978 / test_cal 5.7379**
+**Updated**: 2026-06-01 17:00Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — val_cal 5.8978 / test_cal 5.7379**
 
 ---
 
@@ -38,48 +38,50 @@
 | WSS_z per-batch focal weighting | `focal-batch-collapsing` — γ∈{2.0, 1.0} both trip 50× collapse rule; even identity exponent collapses to 1-2 vertices on 88.5% of batches | H346 closed |
 | **WSS_z loss-reweight axis (combined)** | `wss-z-loss-weight-axis-closed` — H339 uniform + H341 wz-only + H346 per-vertex focal all fail. **TRIPLY CLOSED.** WSS_z floor at 8.62% test_cal is NOT addressable by any loss-reweight scheme at the EP13 cosine-tail base — bottleneck is representational, not gradient-budget | H346 closed |
 | **SAM cosine-tail at any ρ** | `sam-flatness-pessimal-wssz` + `sam-monotone-regression-rho` — ρ∈{0.05, 0.02, 0.002} all regress; WSS_z pessimal (+50bp@ρ=0.002). H336 basin is already flat enough; SAM perturbations push OUT of the WSS_z local fit. Flatness-regularization axis closed. | **H343 closed (this loop)** |
+| **FiLM-decoder Phase A with random-init head_mlp** | `filmdec-random-init-too-slow-for-frozen-backbone` — randomly initializing the new surface decoder heads (head_mlp 329k params) catastrophically regresses (val_wss_z 12.34% = +316bp, val_abupt 8.94% = +297bp) in 3 epochs at frozen backbone. Volume head preserved confirms diagnosis is heads-only. NOT a FiLM-direction falsification; mechanism = surface heads MUST be warm-started. H354 corrected version (EP13-warm-start) assigned. | **H350 closed (this loop)** |
 
 ---
 
-## Active Fleet (2026-06-01 16:40Z — 8 students with open PRs)
+## Active Fleet (2026-06-01 17:00Z — 8 students with open PRs)
 
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
-| **#1545** | frieren | **H353: Expansive signed_power target on wss_z** — direct converse of H349 (which closed compressive direction). Arms p∈{1.25, 1.5, 2.0}. Zero param overhead. Skip rule on Arm A val_wss_z RAW. — NEW | 🆕 just assigned | Output-transform (expansive direction) |
-| **#1544** | thorfinn | H352: SWA-within-cosine-tail — weight-space averaging of ~30 fine-grained snapshots along H336 cosine-tail; distinct from H307 cross-seed soup and H342 output-avg. Zero param overhead. | 🆕 just assigned | Weight-space averaging (same trajectory) |
-| **#1543** | tanjiro | H351: NGSB (Normal-Relative Geometric Slice Bias) — 24-param zero-init `nn.Linear(3 → num_heads)` bias on Transolver slice_logits via surface normals; attacks encoder-resident attention-slice-routing axis. References GeoTransolver Adams et al. Dec 2025. — NEW | 🆕 just assigned | Encoder slice-routing |
-| **#1542** | askeladd | H350: Channel-isolated FiLM-conditioned decoder (Phase A frozen-backbone diagnostic gate, then Phase B full finetune) | 🟡 WIP — implementing | Architecture / per-channel decoder capacity |
-| **#1539** | fern | H348: Surface curvature input features (H, K, k1k2) — Arm A H train terminal raw val_abupt **6.0088** (essentially TIED with H336 raw), val_wss_z 9.1847 tied, test_abupt 5.8539 tied. **Pending TTA cal eval** (sent back 16:30Z, nudge for SENPAI-RESULT and TTA stack) | 🟡 WIP — awaiting student TTA eval | Input geometry |
-| **#1538** | nezuko | H347: Boundary-layer physics priors (τ⊥n normals + kNN smoothness) — running 1.5h, ETA ~17:30Z | 🟡 WIP — training | Physical constraint |
-| **#1526** | alphonse | H342: Multi-checkpoint output averaging (ep13+ep14+ep15 TTA) | 🟡 WIP | Output-space averaging |
+| **#1546** | askeladd | **H354: Corrected FiLM decoder (EP13-warm-started head_mlp)** — replacement for closed H350. Same FiLM γβ + axis_embed architecture but `head_mlp` init from EP13 `surface_out` (architectures match), γ=β=0 so step-0 == EP13 baseline. Phase A' gate val_wss_z<9.13%. — NEW | 🆕 just assigned | Architecture / per-channel decoder (warm-start) |
+| **#1545** | frieren | H353: Expansive signed_power target on wss_z — direct converse of H349 (closed compressive direction). Arms p∈{1.25, 1.5, 2.0}. Zero param overhead. 8 ranks Arm A p=1.25 running (rt 0.21h), ETA terminal ~19:40Z | 🟡 WIP — Arm A training | Output-transform (expansive direction) |
+| **#1544** | thorfinn | H352: SWA-within-cosine-tail — weight-space averaging of ~30 fine-grained snapshots along H336 cosine-tail; distinct from H307 cross-seed soup and H342 output-avg. Zero param overhead. 8 ranks running (rt 0.48h), ETA ~19:30Z | 🟡 WIP — training | Weight-space averaging (same trajectory) |
+| **#1543** | tanjiro | H351: NGSB (Normal-Relative Geometric Slice Bias) — 24-param zero-init `nn.Linear(3 → num_heads)` bias on Transolver slice_logits via surface normals; attacks encoder-resident attention-slice-routing axis. References GeoTransolver Adams et al. Dec 2025. 8 ranks Phase A diagnostic running | 🟡 WIP — Phase A | Encoder slice-routing |
+| **#1539** | fern | H348: Surface curvature input features — Arm A H train terminal raw val_abupt **6.0088** (essentially TIED with H336 raw). **TTA cal eval running** (`26e5khdg` K=4 antithetic + ν=4 + σ=5e-4 + 8-res + mirror + OLS cal on EP16 EMA), ETA ~20:30Z. Awaiting terminal SENPAI-RESULT | 🟡 WIP — TTA eval | Input geometry |
+| **#1538** | nezuko | H347: Boundary-layer physics priors — **Arm A finished `yainrpxs` train-tied with H336 (val_abupt 6.0075, test_abupt 5.8564)**, Arm B (smooth-only λ_s=1e-4) running step ~980 rt 0.31h, auto-chains to Arm C and TTA+cal cascade. Acknowledged auto-chain at 16:55Z | 🟡 WIP — Arm B training | Physical constraint |
+| **#1526** | alphonse | H342: Multi-checkpoint output averaging (ep13+ep14+ep15 TTA) — `3icmxaqe` running eval | 🟡 WIP — eval | Output-space averaging |
 | **#1522** | edward | H338: Arm D compositional eval (Arm C SP-reweight EP15 × H336 K=5+ν=4+8-res+mirror TTA recipe) `9t27gag4`, ETA ~21:30Z | 🟡 WIP — eval | SP floor gap 3.6bp via composition |
 
 **Closed this loop**:
 - PR #1524 tanjiro H340 σ-sweep at ν=4: `sigma-axis-closed-nu4` + `per-channel-alpha-sigma-drift`. TTA hyperparameter family fully saturated.
 - PR #1528 thorfinn H343 SAM cosine-tail: `sam-flatness-pessimal-wssz` + `sam-monotone-regression-rho` + `cal-cannot-rescue-train-raw-regression`. Flatness-regularization axis closed.
-- PR #1540 frieren H349 arcsinh-wss_z target: `arcsinh-wssz-target-pessimal` + `target-transform-direction-falsified-compressive`. +72bp val_wss_z catastrophic. Direction-of-effect of target-transform on heavy-tailed channel is OPPOSITE to compression — H353 frieren next assignment tests the expansive converse.
+- PR #1540 frieren H349 arcsinh-wss_z target: `arcsinh-wssz-target-pessimal` + `target-transform-direction-falsified-compressive`. +72bp val_wss_z catastrophic. Direction-of-effect of target-transform on heavy-tailed channel is OPPOSITE to compression — H353 frieren testing expansive converse now.
+- PR #1542 askeladd H350 FiLM decoder Phase A frozen-backbone: `filmdec-random-init-too-slow-for-frozen-backbone`. Phase A catastrophic regression val_wss_z +316bp, val_abupt +297bp. Mechanism = random-init head_mlp can't recover EP13 in 3 epochs frozen-backbone. NOT a FiLM-direction falsification; H354 corrected version (EP13-warm-start) assigned next.
 
 ---
 
-## Current Research Focus: 5-axis WSS_z attack on orthogonal mechanisms (loss-reweight + flatness axes closed)
+## Current Research Focus: 6-axis WSS_z attack on orthogonal mechanisms (loss-reweight + flatness + compressive-target axes closed)
 
-The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's target 5.85%). With H336+: loss-reweight axis TRIPLY closed (H339+H341+H346), flatness/SAM closed (H343), gradient-direction/magnitude closed (H345), TTA hyperparameter family fully saturated (H330+H340+H344). **The WSS_z bottleneck is structurally representational, not optimization-side.** Active attack continues on input / target-transform / output-decoder / physics-constraint / encoder-routing / weight-trajectory mechanisms:
+The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's target 5.85%). With H336+: loss-reweight axis TRIPLY closed (H339+H341+H346), flatness/SAM closed (H343), gradient-direction/magnitude closed (H345), TTA hyperparameter family fully saturated (H330+H340+H344), target-transform compressive direction closed (H349). **The WSS_z bottleneck is structurally representational, not optimization-side.** Active attack continues on input / target-transform-expansive / output-decoder / physics-constraint / encoder-routing / weight-trajectory mechanisms:
 
-**Active 5-axis WSS_z attack:**
-1. **H347 nezuko physics priors** — boundary-layer geometric constraint (τ⊥n: shear tangent to surface normal) and kNN smoothness regularization. Training-time physical constraint.
-2. **H348 fern curvature features** — per-vertex (H, K, k1, k2) surface curvature as new INPUT channels. WSS_z error may concentrate on high-curvature surfaces (Falkner-Skan).
-3. **H349 frieren arcsinh-target** — `arcsinh(τ_z)` regression target. Addresses linear-MSE vs rel_l2 mismatch. **Train-raw catastrophic +100bp**, likely close.
-4. **H350 askeladd FiLM decoder** — channel-isolated MLP heads via FiLM conditioning. Decoder capacity for τ_z separated from cp/τ_x/τ_y.
-5. **H351 tanjiro NGSB (Normal-Relative Geometric Slice Bias)** — 24-parameter zero-init bias on Transolver's `slice_logits` from surface normals, attacks encoder-resident token-routing mechanism. References GeoTransolver Adams et al. Dec 2025.
-
-**Parallel weight-trajectory probe**:
-6. **H352 thorfinn SWA-within-cosine-tail** — averages ~30 fine-grained weight snapshots along the SAME H336 cosine-tail trajectory. Mechanistically distinct from H307 cross-seed soup (closed) and H342 output averaging (in-flight). Zero param overhead. Diagnostic gate via train-raw delta.
+**Active 6-axis WSS_z attack:**
+1. **H347 nezuko physics priors (ALIVE)** — boundary-layer geometric constraint (τ⊥n: shear tangent to surface normal) and kNN smoothness regularization. Arm A train-raw essentially tied with H336. Arms B/C and TTA cascade auto-chaining now.
+2. **H348 fern curvature features (ALIVE)** — per-vertex H curvature as new INPUT channel. Arm A train-raw essentially tied with H336. TTA+cal eval `26e5khdg` running, ETA ~20:30Z.
+3. **H353 frieren signed_power expansive target (NEW)** — `sign(τ_z)·|τ_z|^p` for p∈{1.25, 1.5, 2.0}. EXPANSIVE direction (direct converse of H349 which closed compressive). Heavy-tailed channel needs MORE penalty on extremes, not less. Arm A p=1.25 running ETA ~19:40Z.
+4. **H354 askeladd FiLM decoder warm-started (NEW)** — corrected Phase A' with `head_mlp` warm-started from EP13's `surface_out`. Step-0 == EP13 baseline. Tests whether channel-specific FiLM modulation helps once heads are properly initialized.
+5. **H351 tanjiro NGSB (Normal-Relative Geometric Slice Bias)** — 24-parameter zero-init bias on Transolver's `slice_logits` from surface normals, attacks encoder-resident token-routing. References GeoTransolver Adams et al. Dec 2025. Phase A diagnostic running.
+6. **H352 thorfinn SWA-within-cosine-tail** — averages ~30 fine-grained weight snapshots along the SAME H336 cosine-tail. Mechanistically distinct from H307 cross-seed soup (closed) and H342 output averaging (in-flight). Zero param overhead. Diagnostic gate via train-raw delta.
 
 **Orthogonal non-WSS supplements:**
-7. **H338 edward SP reweight Arm D** — composition test of Arm C EP15 with H336 TTA recipe. Just launched, ETA ~21:30Z.
-8. **H342 alphonse multi-checkpoint TTA** — output-space average ep13+ep14+ep15.
+7. **H338 edward SP reweight Arm D** — composition test of Arm C EP15 with H336 TTA recipe. Eval `9t27gag4` running, ETA ~21:30Z.
+8. **H342 alphonse multi-checkpoint TTA** — output-space average ep13+ep14+ep15. Eval `3icmxaqe` running.
 
-**Triangulation logic**: H348 = INPUT; H349 = OUTPUT-TRANSFORM; H350 = OUTPUT-DECODER; H347 = PHYSICS-CONSTRAINT; H351 = ENCODER-ROUTING; H352 = WEIGHT-TRAJECTORY. If any of these break the WSS_z floor, the mechanism is unambiguous. If all six fail, the bottleneck is encoder-feature-extraction itself and the attack moves to deep-tier architecture changes (attention head reweighting, hierarchical attention, GeoTransolver-style geometric cross-attention).
+**Triangulation logic**: H348 = INPUT; H353 = OUTPUT-TRANSFORM (expansive); H354 = OUTPUT-DECODER (warm-start); H347 = PHYSICS-CONSTRAINT; H351 = ENCODER-ROUTING; H352 = WEIGHT-TRAJECTORY. If any of these break the WSS_z floor, the mechanism is unambiguous. If all six fail, the bottleneck is encoder-feature-extraction itself and the attack moves to deep-tier architecture changes (attention head reweighting, hierarchical attention, GeoTransolver-style geometric cross-attention).
+
+**Two ALIVE candidates this loop**: H347 nezuko and H348 fern both produced train-raw tied with H336 baseline (the cleanest "ambiguous-alive" signal so far). The TTA+cal eval is the discriminator — if either lands val_cal<5.8978 AND test_cal<5.7379, it's the next SOTA. If both extract only the usual 7-8bp cal yield, `cal-cannot-rescue-train-raw-regression` triggers and both close cleanly.
 
 ---
 
