@@ -1,4 +1,31 @@
-## 2026-06-01 00:16Z — PR #1520: H336 K=5 + Student-t ν=4 + 8-res + mirror + cal — MERGED NEW SOTA
+## 2026-06-01 19:40Z — PR #1543: H351 NGSB Normal-Relative Geometric Slice Bias — CLOSED
+
+- Branch: tanjiro/h351-ngsb-normal-geometric-slice-bias
+- **Hypothesis**: 24-parameter zero-init `nn.Linear(3 → num_heads)` bias injected onto Transolver slice_logits via surface normals (normal-relative geometric slice bias). Hypothesis: geometric routing signal (normals → slice-routing modification) would bias attention slices toward geometrically-similar tokens, improving WSS_z where high-curvature stress concentrations are the bottleneck.
+- W&B: phase A v3 (primary run, DDP-8)
+
+### Results
+
+| Epoch | val_abupt_raw | val_wss_z_raw | vs H336 raw |
+|---|---:|---:|---|
+| Best EP | ~6.16% | ~9.29% | +69.8bp abupt regression |
+
+No calibrated metrics generated — `cal-cannot-rescue-train-raw-regression` rule triggered at +69.8bp raw regression (threshold: >50bp above H336 raw baseline closes without TTA+cal).
+
+### Analysis
+1. **Routing normals is pessimal**: coarse normal-slice routing does not discriminate near-wall vs far-field for WSS_z. The slice-logit bias maps all normals of a given orientation to the same attention slice, but WSS_z variation is driven by local geometric CONTENT (curvature, area, position-relative-to-geometry), not normal direction alone.
+2. **NGSB architecture correctly implemented** (validated by student diagnostic): the failure is not a bug but a structural hypothesis falsification. The 24 parameters learned nontrivial slice biases (‖w‖ grew from 0), confirming signal flow, but the downstream effect was regression on every channel.
+3. **Confounders noted but non-disqualifying**: student ran with lr_warmup=1 + compile_model=True (vs canonical H244 cfg), but WSS_z target showed NO improvement at any epoch across the training trajectory — regression was monotone from step 1. Confounders would explain a training instability but not a monotone regression at every checkpoint.
+4. **Adjacent unfalsified ideas from student**: (a) GeoTransolver CONTENT path (normals+curvature → separate pre-encoder MLP → add to x, NOT routing), (b) richer input features (normals+curvature+position as concatenated input), (c) hard normal-similarity routing (discrete vs soft bias). H357 assigned to test (a).
+
+### Decision: CLOSED
+- Finding: **`ngsb-normal-only-routing-pessimal`** — Geometric slice-logit bias via surface normals alone is insufficient to drive WSS_z improvements. The routing axis is coarse at this parameterization.
+- Finding: **`encoder-routing-axis-coarse-normals-falsified`** — Normal-relative routing does not discriminate the geometric-complexity loci where WSS_z error concentrates.
+- **Key implication**: Move geometric signal from ROUTING PATH to CONTENT PATH. H357 tests this directly: per-token geometric content MLP (normals+log_area → additive content embedding, zero-init output) injected before Transolver slicing.
+
+---
+
+## 2026-06-01 19:15Z — PR #1526: H342 3-cp output-average (ep13+ep14+ep15) — NEW SOTA MERGED
 - Branch: nezuko/h336-compose-k5-studentt-cal
 - Hypothesis: Composing K=5 (one extra antithetic pair) on top of the H314 Student-t ν=4 + 8-res + mirror + cal recipe would compound due to structural independence of K-axis and noise-family axis.
 - W&B run: `348i3z1v` (nezuko/h336-K5-studentt-nu4-8res-cal)
