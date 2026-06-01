@@ -145,6 +145,9 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H348: surface curvature input features
+    curvature_mode: str = "none"
+    curvature_stats_path: str = "curvature_normalization.pt"
     debug: bool = False
 
 
@@ -271,6 +274,20 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "curvature_mode": (
+            "H348: append per-vertex surface curvature channels to the "
+            "surface input features. 'none' (default) is the H336 baseline; "
+            "'H' = mean curvature (+1 channel); 'K' = Gaussian curvature "
+            "(+1); 'k1k2' = principal curvatures (+2). When resuming from a "
+            "checkpoint trained without curvature, the first input "
+            "projection weight is zero-padded at the curvature columns so "
+            "the new channels start with no signal."
+        ),
+        "curvature_stats_path": (
+            "H348: path to the precomputed curvature normalization stats "
+            "tensor (see precompute_curvature_stats.py). Ignored when "
+            "--curvature-mode=none."
         ),
     }
     for field in fields(Config):
@@ -414,8 +431,64 @@ def mirror_augment_batch(batch, p: float = 0.5):
     )
 
 
+def _pad_input_proj_for_curvature(
+    state_dict: dict[str, torch.Tensor],
+    model: nn.Module,
+    config: "Config",
+) -> dict[str, torch.Tensor]:
+    """Zero-pad the surface input projection weight for new curvature columns.
+
+    H348: when curvature input channels are appended to surface_x, the
+    SurfaceTransolver concatenates ``[extra_features, positional_features]``
+    where ``extra_features`` has shape (B, N, surface_extra_dim) with
+    ``surface_extra_dim = surface_input_dim - space_dim``. A non-curvature
+    checkpoint has the surface projection weight at the old extra-dim;
+    inserting ``n_curv`` zero columns at the boundary between the old extra
+    columns and the positional columns produces a weight that loads cleanly
+    into the curvature-aware model with identical predictions on existing
+    channels.
+    """
+    from curvature_dataset import n_curvature_channels
+
+    n_curv = n_curvature_channels(config.curvature_mode)
+    if n_curv == 0:
+        return state_dict
+    key = "project_surface_features.project.weight"
+    if key not in state_dict:
+        # If the checkpoint doesn't have this layer at all, nothing to do.
+        return state_dict
+
+    ckpt_w = state_dict[key]
+    model_w = dict(model.named_parameters())[key]
+    if ckpt_w.shape == model_w.shape:
+        return state_dict
+
+    # Layout: feature_parts = [extra_features (surface_input_dim - 3), positional_features]
+    # Old model: surface_input_dim_old = 7 -> extra_old = 4.
+    # New model: surface_input_dim_new = 7 + n_curv -> extra_new = 4 + n_curv.
+    old_in = ckpt_w.shape[1]
+    new_in = model_w.shape[1]
+    expected_new_in = old_in + n_curv
+    extra_old = model.surface_input_dim - model.space_dim - n_curv  # 7 - 3 = 4
+    if new_in != expected_new_in:
+        raise RuntimeError(
+            f"Unexpected input projection shape mismatch: ckpt has {old_in} cols, "
+            f"model has {new_in} cols, n_curv={n_curv}; expected {expected_new_in}."
+        )
+
+    pad = torch.zeros(ckpt_w.shape[0], n_curv, dtype=ckpt_w.dtype)
+    new_w = torch.cat([ckpt_w[:, :extra_old], pad, ckpt_w[:, extra_old:]], dim=1)
+    state_dict[key] = new_w
+    return state_dict
+
+
 def build_model(config: Config) -> SurfaceTransolver:
+    from curvature_dataset import n_curvature_channels
+    from data import SURFACE_X_DIM as _BASE_SURFACE_X_DIM
+
+    n_curv = n_curvature_channels(config.curvature_mode)
     return SurfaceTransolver(
+        surface_input_dim=_BASE_SURFACE_X_DIM + n_curv,
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
         dropout=config.model_dropout,
@@ -901,6 +974,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             ck = torch.load(ckpt_path_str, map_location="cpu", weights_only=False)
             state_dict = ck["model"]
             state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+            # H348: zero-pad the surface input projection weight to absorb new
+            # curvature input columns when resuming from a non-curvature
+            # checkpoint. The features are concatenated as
+            # [extra (nx, ny, nz, area, curv...), rff/string_sep] so the new
+            # columns go at index surface_extra_dim_old = SURFACE_X_DIM - 3 = 4.
+            state_dict = _pad_input_proj_for_curvature(state_dict, model, config)
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
             resume_epoch_info = {
                 "resume_epoch": ck.get("epoch"),

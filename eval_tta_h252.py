@@ -135,6 +135,11 @@ class EvalConfig:
     drop_path_max: float = 0.1
 
     amp_mode: str = "bf16"
+
+    # H348: surface curvature input features (must match training-side mode)
+    curvature_mode: str = "none"
+    curvature_stats_path: str = "curvature_normalization.pt"
+
     debug: bool = False  # 2 val + 2 test cases
 
 
@@ -174,7 +179,12 @@ def parse_modes(spec: str) -> list[str]:
 
 
 def build_model(cfg: EvalConfig) -> SurfaceTransolver:
+    from curvature_dataset import n_curvature_channels
+    from data import SURFACE_X_DIM as _BASE_SURFACE_X_DIM
+
+    n_curv = n_curvature_channels(cfg.curvature_mode)
     return SurfaceTransolver(
+        surface_input_dim=_BASE_SURFACE_X_DIM + n_curv,
         n_layers=cfg.model_layers,
         n_hidden=cfg.model_hidden_dim,
         dropout=cfg.model_dropout,
@@ -419,20 +429,40 @@ def process_case_stacked(
         timing["perturb_seconds"] += time.time() - t_p
 
         for R in resolutions:
-            dataset = DrivAerMLSurfaceDataset(
-                case_ids=[case_id],
-                store=store,
-                max_surface_points=cfg.eval_surface_points,
-                max_volume_points=R,
-                sampling_mode="eval_chunk",
-            )
+            if cfg.curvature_mode != "none":
+                from curvature_dataset import (
+                    CurvatureAugmentedDataset,
+                    CurvatureNormalizer,
+                    pad_collate_variable_surface,
+                )
+
+                _norm = CurvatureNormalizer(cfg.curvature_stats_path)
+                dataset = CurvatureAugmentedDataset(
+                    case_ids=[case_id],
+                    store=store,
+                    max_surface_points=cfg.eval_surface_points,
+                    max_volume_points=R,
+                    sampling_mode="eval_chunk",
+                    curvature_mode=cfg.curvature_mode,
+                    normalizer=_norm,
+                )
+                _collate = pad_collate_variable_surface
+            else:
+                dataset = DrivAerMLSurfaceDataset(
+                    case_ids=[case_id],
+                    store=store,
+                    max_surface_points=cfg.eval_surface_points,
+                    max_volume_points=R,
+                    sampling_mode="eval_chunk",
+                )
+                _collate = pad_collate
             loader_iter = torch.utils.data.DataLoader(
                 dataset,
                 batch_size=cfg.batch_size,
                 shuffle=False,
                 num_workers=cfg.num_workers,
                 pin_memory=cfg.pin_memory,
-                collate_fn=pad_collate,
+                collate_fn=_collate,
                 persistent_workers=False,
                 prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
             )

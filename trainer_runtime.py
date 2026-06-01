@@ -235,8 +235,13 @@ def resolve_num_workers(config) -> int:
 
 def loader_kwargs(config) -> dict[str, object]:
     num_workers = resolve_num_workers(config)
+    collate = pad_collate
+    if getattr(config, "curvature_mode", "none") != "none":
+        from curvature_dataset import pad_collate_variable_surface
+
+        collate = pad_collate_variable_surface
     kwargs: dict[str, object] = {
-        "collate_fn": pad_collate,
+        "collate_fn": collate,
         "num_workers": num_workers,
         "pin_memory": config.pin_memory and torch.cuda.is_available(),
     }
@@ -278,6 +283,30 @@ def full_eval_loaders_from(
     }
 
 
+def _wrap_curvature(
+    dataset,
+    *,
+    curvature_mode: str,
+    normalizer,
+):
+    """Replace a DrivAerMLSurfaceDataset with CurvatureAugmentedDataset.
+
+    Reuses the existing store, case_ids, and sampling configuration so the
+    base sampler RNG / chunking stays bit-identical to the non-curvature run.
+    """
+    from curvature_dataset import CurvatureAugmentedDataset
+
+    return CurvatureAugmentedDataset(
+        dataset.case_ids,
+        store=dataset.store,
+        max_surface_points=dataset.max_surface_points,
+        max_volume_points=dataset.max_volume_points,
+        sampling_mode=dataset.sampling_mode,
+        curvature_mode=curvature_mode,
+        normalizer=normalizer,
+    )
+
+
 def make_loaders(
     config,
     distributed_state: DistributedState | None = None,
@@ -291,6 +320,21 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    curvature_mode = getattr(config, "curvature_mode", "none")
+    if curvature_mode != "none":
+        from curvature_dataset import CurvatureNormalizer
+
+        stats_path = getattr(config, "curvature_stats_path", "") or "curvature_normalization.pt"
+        normalizer = CurvatureNormalizer(stats_path)
+        train_ds = _wrap_curvature(train_ds, curvature_mode=curvature_mode, normalizer=normalizer)
+        val_splits = {
+            k: _wrap_curvature(v, curvature_mode=curvature_mode, normalizer=normalizer)
+            for k, v in val_splits.items()
+        }
+        test_splits = {
+            k: _wrap_curvature(v, curvature_mode=curvature_mode, normalizer=normalizer)
+            for k, v in test_splits.items()
+        }
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
