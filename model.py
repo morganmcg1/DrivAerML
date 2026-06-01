@@ -419,6 +419,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        film_decoder: bool = False,
+        film_axis_dim: int = 32,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +436,8 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.film_decoder = film_decoder
+        self.film_axis_dim = film_axis_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -513,7 +517,37 @@ class SurfaceTransolver(nn.Module):
             drop_path_max=drop_path_max,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        if use_aux_decoder_heads:
+        if film_decoder:
+            # H354 (corrects H350): per-channel FiLM modulation of the shared
+            # surface representation, with a head_mlp whose architecture mirrors
+            # H336's surface_out so it can be warm-started from the EP13
+            # checkpoint. Shapes: Linear(D, D) + SiLU + Linear(D, C) where C is
+            # surface_output_dim. Each surface channel c reads from its own
+            # (gamma_c, beta_c) modulation, then we take the c-th output dim of
+            # head_mlp(h_c). At gamma=beta=0 (zero-init film_proj),
+            # head_mlp(h_c)[..., c] == surface_out(h)[..., c] after warm-start,
+            # so step-0 prediction equals EP13 exactly.
+            self.axis_embed = nn.Embedding(self.surface_output_dim, film_axis_dim)
+            self.film_proj = nn.Linear(film_axis_dim, 2 * n_hidden)
+            self.head_mlp = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden),
+                nn.SiLU(),
+                nn.Linear(n_hidden, self.surface_output_dim),
+            )
+            self.head_mlp.apply(_init_linear)
+            nn.init.zeros_(self.film_proj.weight)
+            nn.init.zeros_(self.film_proj.bias)
+            nn.init.normal_(self.axis_embed.weight, std=0.01)
+            self.surface_out = None
+            self.volume_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden // 2),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 2, n_hidden // 4),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 4, self.volume_output_dim),
+            )
+            self.volume_out.apply(_init_linear)
+        elif use_aux_decoder_heads:
             # PR #958: dedicated vol_p auxiliary decoder head.
             # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
             # Volume head is a deeper 3-layer MLP for the harder vol_p task —
@@ -557,6 +591,33 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+    def _film_surface_decode(self, surface_hidden: torch.Tensor) -> torch.Tensor:
+        """H354: FiLM-conditioned per-channel surface decode.
+
+        For each channel c we FiLM-modulate the shared representation with
+        (gamma_c, beta_c), run it through head_mlp (which outputs all C channels
+        because its shape mirrors H336's surface_out for warm-start), then keep
+        only the c-th output dim. At step 0 (gamma=beta=0) the modulation is
+        identity, head_mlp matches the warm-started surface_out, and the c-th
+        output of head_mlp(h) equals surface_out(h)[..., c] — so the final
+        prediction equals EP13 exactly.
+
+        surface_hidden : (B, N, D)
+        returns        : (B, N, surface_output_dim)
+        """
+        C = self.surface_output_dim  # 4 surface channels: cp, tau_x, tau_y, tau_z
+        axis_ids = torch.arange(C, device=surface_hidden.device)
+        axis_e = self.axis_embed(axis_ids)              # (C, axis_dim)
+        gb = self.film_proj(axis_e)                     # (C, 2*D)
+        gamma, beta = gb.chunk(2, dim=-1)               # each (C, D)
+        # Sequential per-channel loop; head_mlp is called C times rather than
+        # broadcasting (B, N, C, D) which would cost ~4 GB at H336 scale.
+        channel_preds = []
+        for c in range(C):
+            h_c = surface_hidden * (1.0 + gamma[c]) + beta[c]   # (B, N, D)
+            channel_preds.append(self.head_mlp(h_c)[..., c:c + 1])  # (B, N, 1)
+        return torch.cat(channel_preds, dim=-1)                 # (B, N, C)
 
     def _encode_group(
         self,
@@ -661,7 +722,11 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.film_decoder:
+                surface_preds = self._film_surface_decode(surface_hidden)
+            else:
+                surface_preds = self.surface_out(surface_hidden)
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)

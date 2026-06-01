@@ -133,6 +133,11 @@ class EvalConfig:
     use_qk_norm: bool = True
     use_surf_to_vol_xattn: bool = True
     drop_path_max: float = 0.1
+    # H350: enable FiLM-conditioned surface decoder when loading checkpoints
+    # trained with --film-decoder. Must match the training-time setting exactly
+    # or load_state_dict will mismatch the surface_out vs FiLM head keys.
+    film_decoder: bool = False
+    film_axis_dim: int = 32
 
     amp_mode: str = "bf16"
     debug: bool = False  # 2 val + 2 test cases
@@ -188,6 +193,8 @@ def build_model(cfg: EvalConfig) -> SurfaceTransolver:
         use_qk_norm=cfg.use_qk_norm,
         use_surf_to_vol_xattn=cfg.use_surf_to_vol_xattn,
         drop_path_max=cfg.drop_path_max,
+        film_decoder=cfg.film_decoder,
+        film_axis_dim=cfg.film_axis_dim,
     )
 
 

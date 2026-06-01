@@ -145,6 +145,10 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H350: FiLM-conditioned axis-specific surface decoder + frozen-backbone mode
+    film_decoder: bool = False
+    film_axis_dim: int = 32
+    freeze_backbone: bool = False
     debug: bool = False
 
 
@@ -272,6 +276,31 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
         ),
+        "film_decoder": (
+            "H350: replace the shared Linear(d_model->4) surface decoder "
+            "with 4 axis-conditioned MLP heads modulated via FiLM (Perez "
+            "et al. 2018, arxiv 1709.07871). Each channel (cp, tau_x, "
+            "tau_y, tau_z) reads from its own (gamma, beta) modulation of "
+            "the shared n_hidden representation, then a shared head_mlp "
+            "maps the modulated features to a scalar. film_proj is "
+            "zero-initialised so the FiLM modulation is identity (gamma=0, "
+            "beta=0) at step 0. Volume head is unchanged."
+        ),
+        "film_axis_dim": (
+            "H350: dimensionality of the per-channel axis embedding fed "
+            "into film_proj. Defaults to 32 — only 4 discrete channels "
+            "need to be distinguished, so a low-dim signature keeps the "
+            "param overhead under +1% on H336-scale models. Ignored when "
+            "--film-decoder is off."
+        ),
+        "freeze_backbone": (
+            "H350 Phase A diagnostic: freeze every parameter except the "
+            "FiLM surface decoder (axis_embed, film_proj, head_mlp) and "
+            "the volume_out head. Used with --film-decoder and "
+            "--resume-from-wandb to test whether the FiLM decoder can "
+            "improve val_WSS_z on top of a fixed pre-trained encoder. "
+            "Sets requires_grad=False on all other modules."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -288,9 +317,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    # H350: respect requires_grad so freeze_backbone-mode runs only optimise the
+    # FiLM decoder + volume head. When no params are frozen this is identical
+    # to passing model.parameters().
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    if not trainable_params:
+        raise RuntimeError("build_optimizer: no trainable parameters.")
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
-            model.parameters(),
+            trainable_params,
             lr=config.lr,
             weight_decay=config.weight_decay,
         )
@@ -298,7 +333,7 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
+            trainable_params,
             lr=config.lr,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
@@ -429,7 +464,30 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        film_decoder=config.film_decoder,
+        film_axis_dim=config.film_axis_dim,
     )
+
+
+def freeze_all_but_film_decoder(model: nn.Module) -> tuple[int, int, list[str]]:
+    """H350 Phase A: freeze every parameter except the FiLM surface decoder
+    (axis_embed, film_proj, head_mlp) and the volume_out head.
+
+    Returns (num_frozen, num_trainable, trainable_param_paths) for logging.
+    """
+    trainable_prefixes = ("axis_embed", "film_proj", "head_mlp", "volume_out")
+    trainable_paths: list[str] = []
+    n_trainable = 0
+    n_frozen = 0
+    for name, param in model.named_parameters():
+        if any(name.startswith(p) or f".{p}" in name for p in trainable_prefixes):
+            param.requires_grad_(True)
+            n_trainable += param.numel()
+            trainable_paths.append(name)
+        else:
+            param.requires_grad_(False)
+            n_frozen += param.numel()
+    return n_frozen, n_trainable, trainable_paths
 
 
 def train_loss(
@@ -917,6 +975,132 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"missing={len(missing)} unexpected={len(unexpected)}"
                 )
 
+            # H354: warm-start head_mlp from EP13's surface_out. head_mlp is built
+            # with matching shape (Linear(D,D) + SiLU + Linear(D,C)) in model.py
+            # so the .copy_() lands without reshape. Combined with zero-init
+            # film_proj this makes step-0 prediction exactly equal EP13.
+            base_for_warmstart = unwrap_model(model)
+            if (
+                config.film_decoder
+                and hasattr(base_for_warmstart, "head_mlp")
+                and "surface_out.0.weight" in state_dict
+            ):
+                src_w0 = state_dict["surface_out.0.weight"]
+                src_b0 = state_dict["surface_out.0.bias"]
+                src_w2 = state_dict["surface_out.2.weight"]
+                src_b2 = state_dict["surface_out.2.bias"]
+                dst_w0 = base_for_warmstart.head_mlp[0].weight
+                dst_b0 = base_for_warmstart.head_mlp[0].bias
+                dst_w2 = base_for_warmstart.head_mlp[2].weight
+                dst_b2 = base_for_warmstart.head_mlp[2].bias
+                # Fail loudly on shape mismatch — silent reshape would corrupt
+                # the warm-start mechanism that gates Phase A'.
+                if (
+                    src_w0.shape != dst_w0.shape
+                    or src_b0.shape != dst_b0.shape
+                    or src_w2.shape != dst_w2.shape
+                    or src_b2.shape != dst_b2.shape
+                ):
+                    raise RuntimeError(
+                        "H354 warm-start shape mismatch: "
+                        f"src_w0={tuple(src_w0.shape)} vs dst_w0={tuple(dst_w0.shape)}, "
+                        f"src_w2={tuple(src_w2.shape)} vs dst_w2={tuple(dst_w2.shape)}. "
+                        "head_mlp must mirror surface_out's shape; see model.py."
+                    )
+                with torch.no_grad():
+                    pre_norm_w0 = dst_w0.norm().item()
+                    pre_norm_w2 = dst_w2.norm().item()
+                    dst_w0.copy_(src_w0.to(dst_w0.device, dtype=dst_w0.dtype))
+                    dst_b0.copy_(src_b0.to(dst_b0.device, dtype=dst_b0.dtype))
+                    dst_w2.copy_(src_w2.to(dst_w2.device, dtype=dst_w2.dtype))
+                    dst_b2.copy_(src_b2.to(dst_b2.device, dtype=dst_b2.dtype))
+                    post_norm_w0 = dst_w0.norm().item()
+                    post_norm_w2 = dst_w2.norm().item()
+                    src_norm_w0 = src_w0.norm().item()
+                    src_norm_w2 = src_w2.norm().item()
+                resume_epoch_info["head_mlp_warmstart"] = True
+                resume_epoch_info["head_mlp_warmstart_pre_norm_w0"] = pre_norm_w0
+                resume_epoch_info["head_mlp_warmstart_post_norm_w0"] = post_norm_w0
+                resume_epoch_info["head_mlp_warmstart_src_norm_w0"] = src_norm_w0
+                resume_epoch_info["head_mlp_warmstart_pre_norm_w2"] = pre_norm_w2
+                resume_epoch_info["head_mlp_warmstart_post_norm_w2"] = post_norm_w2
+                resume_epoch_info["head_mlp_warmstart_src_norm_w2"] = src_norm_w2
+                if state.is_main:
+                    print(
+                        f"[H354] head_mlp warm-started from EP13 surface_out: "
+                        f"||w0|| {pre_norm_w0:.4f} -> {post_norm_w0:.4f} "
+                        f"(src {src_norm_w0:.4f}), "
+                        f"||w2|| {pre_norm_w2:.4f} -> {post_norm_w2:.4f} "
+                        f"(src {src_norm_w2:.4f})"
+                    )
+
+                # H354 step-0 invariant: with zero-init film_proj (gamma=beta=0)
+                # and warm-started head_mlp, _film_surface_decode(h) must equal
+                # head_mlp(h) element-wise (since each channel selects its own
+                # c-th column, which together IS head_mlp(h)). Combined with
+                # head_mlp ≡ EP13 surface_out after warm-start, the model's
+                # step-0 surface prediction equals EP13's exactly. Fail loudly
+                # if the invariant breaks — the entire Phase A' diagnostic
+                # depends on it.
+                with torch.no_grad():
+                    film_proj_w_norm = base_for_warmstart.film_proj.weight.norm().item()
+                    film_proj_b_norm = base_for_warmstart.film_proj.bias.norm().item()
+                    d_in = base_for_warmstart.head_mlp[0].in_features
+                    synth_h = torch.randn(
+                        2, 128, d_in,
+                        device=base_for_warmstart.head_mlp[0].weight.device,
+                        dtype=base_for_warmstart.head_mlp[0].weight.dtype,
+                    )
+                    film_out = base_for_warmstart._film_surface_decode(synth_h)
+                    direct = base_for_warmstart.head_mlp(synth_h)
+                    invariant_mse = (film_out - direct).pow(2).mean().item()
+                resume_epoch_info["h354_film_proj_w_norm"] = film_proj_w_norm
+                resume_epoch_info["h354_film_proj_b_norm"] = film_proj_b_norm
+                resume_epoch_info["h354_step0_invariant_mse"] = invariant_mse
+                if film_proj_w_norm != 0.0 or film_proj_b_norm != 0.0:
+                    raise RuntimeError(
+                        f"H354: film_proj must be zero-init at step 0 "
+                        f"(||w||={film_proj_w_norm}, ||b||={film_proj_b_norm}). "
+                        f"This violates the gamma=beta=0 precondition."
+                    )
+                if invariant_mse > 1e-6:
+                    raise RuntimeError(
+                        f"H354 step-0 invariant FAILED: "
+                        f"MSE(FiLM decode, head_mlp direct) = {invariant_mse:.6e} "
+                        f"> 1e-6. With zero-init film_proj the FiLM modulation "
+                        f"should be identity. Bug in _film_surface_decode."
+                    )
+                if state.is_main:
+                    print(
+                        f"[H354] step-0 invariant PASSED: "
+                        f"MSE(FiLM, head_mlp) = {invariant_mse:.3e} "
+                        f"(||film_proj.w||={film_proj_w_norm:.2e}, "
+                        f"||film_proj.b||={film_proj_b_norm:.2e})"
+                    )
+
+        # H350: freeze everything except the FiLM decoder + volume head for the
+        # Phase A diagnostic. Must run AFTER load_state_dict (resume_from_wandb)
+        # so requires_grad isn't reset, and BEFORE torch.compile / DDP wrap so
+        # the freeze is visible to the optimizer and EMA.
+        freeze_info: dict[str, object] = {}
+        if config.freeze_backbone:
+            n_frozen, n_trainable, trainable_paths = freeze_all_but_film_decoder(model)
+            freeze_info = {
+                "freeze_n_frozen_params": n_frozen,
+                "freeze_n_trainable_params": n_trainable,
+                "freeze_trainable_fraction": (
+                    n_trainable / max(1, n_frozen + n_trainable)
+                ),
+            }
+            if state.is_main:
+                print(
+                    f"H350 freeze_backbone=True: trainable={n_trainable:,d} "
+                    f"frozen={n_frozen:,d} "
+                    f"({100.0 * n_trainable / max(1, n_frozen + n_trainable):.2f}% "
+                    f"of params trainable). Trainable modules: "
+                    + ", ".join(sorted({p.split('.')[0] for p in trainable_paths}))
+                )
+
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.
         surface_channel_weights = torch.tensor(
@@ -943,6 +1127,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
             if config.use_surf_to_vol_xattn:
+                ddp_kwargs["find_unused_parameters"] = True
+            # H350: frozen-backbone Phase A leaves the encoder without gradients,
+            # which trips DDP's default find_unused_parameters=False allreduce.
+            if config.freeze_backbone:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
