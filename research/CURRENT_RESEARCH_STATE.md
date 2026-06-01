@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-01 16:20Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — val_cal 5.8978 / test_cal 5.7379**
+**Updated**: 2026-06-01 16:35Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — val_cal 5.8978 / test_cal 5.7379**
 
 ---
 
@@ -41,15 +41,14 @@
 
 ---
 
-## Active Fleet (2026-06-01 16:20Z — 8 students with open PRs)
+## Active Fleet (2026-06-01 16:35Z — 7 students with open PRs, frieren idle pending H353)
 
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
 | **#1544** | thorfinn | H352: SWA-within-cosine-tail — weight-space averaging of ~30 fine-grained snapshots along H336 cosine-tail; distinct from H307 cross-seed soup and H342 output-avg. Zero param overhead. — NEW | 🆕 just assigned | Weight-space averaging (same trajectory) |
 | **#1543** | tanjiro | H351: NGSB (Normal-Relative Geometric Slice Bias) — 24-param zero-init `nn.Linear(3 → num_heads)` bias on Transolver slice_logits via surface normals; attacks encoder-resident attention-slice-routing axis. References GeoTransolver Adams et al. Dec 2025. — NEW | 🆕 just assigned | Encoder slice-routing |
 | **#1542** | askeladd | H350: Channel-isolated FiLM-conditioned decoder (Phase A frozen-backbone diagnostic gate, then Phase B full finetune) | 🟡 WIP — implementing | Architecture / per-channel decoder capacity |
-| **#1540** | frieren | H349: arcsinh target transform on WSS_z (3 arms: wss_z, wss, all) | 🟡 WIP — TTA eval pending; **train-raw catastrophic +100bp on val_WSS_z, likely close** | Target-space geometry |
-| **#1539** | fern | H348: Surface curvature input features (H, K, k1k2) — Arm A H-only train-end raw val_abupt 6.0088 (+9bp), awaits TTA eval | 🟡 WIP — TTA eval pending | Input geometry |
+| **#1539** | fern | H348: Surface curvature input features (H, K, k1k2) — Arm A H train terminal raw val_abupt **6.0088** (essentially TIED with H336 raw), val_wss_z 9.1847 tied, test_abupt 5.8539 tied. **Pending TTA cal eval** (sent back 16:30Z, nudge for SENPAI-RESULT and TTA stack) | 🟡 WIP — awaiting student TTA eval | Input geometry |
 | **#1538** | nezuko | H347: Boundary-layer physics priors (τ⊥n normals + kNN smoothness) — running 1.5h, ETA ~17:30Z | 🟡 WIP — training | Physical constraint |
 | **#1526** | alphonse | H342: Multi-checkpoint output averaging (ep13+ep14+ep15 TTA) | 🟡 WIP | Output-space averaging |
 | **#1522** | edward | H338: Arm D compositional eval (Arm C SP-reweight EP15 × H336 K=5+ν=4+8-res+mirror TTA recipe) `9t27gag4`, ETA ~21:30Z | 🟡 WIP — eval | SP floor gap 3.6bp via composition |
@@ -57,6 +56,7 @@
 **Closed this loop**:
 - PR #1524 tanjiro H340 σ-sweep at ν=4: `sigma-axis-closed-nu4` + `per-channel-alpha-sigma-drift`. TTA hyperparameter family fully saturated.
 - PR #1528 thorfinn H343 SAM cosine-tail: `sam-flatness-pessimal-wssz` + `sam-monotone-regression-rho` + `cal-cannot-rescue-train-raw-regression`. Flatness-regularization axis closed.
+- PR #1540 frieren H349 arcsinh-wss_z target: `arcsinh-wssz-target-pessimal` + `target-transform-direction-falsified-compressive`. +72bp val_wss_z catastrophic. Direction-of-effect of target-transform on heavy-tailed channel is OPPOSITE to compression — H353 frieren next assignment tests the expansive converse.
 
 ---
 

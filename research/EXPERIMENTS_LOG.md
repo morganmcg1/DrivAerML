@@ -13850,3 +13850,41 @@ Per-channel cal coefs: α_τz drifts +0.6e-3 vs H336 (modest); cal extracts ~7-8
 - Combined with `cross-seed-soup-closed` (H307), `gradient-conflict-falsified` (H345), and all loss-reweight closures, the "flatness/optimization-side" levers are now substantially exhausted at H336 base.
 - The WSS_z bottleneck is firmly REPRESENTATIONAL — not optimization, not gradient routing, not loss budget, not flatness regularization.
 - Thorfinn's 3-arm chain methodology saved ~6h GPU on Arm A (clean kill-switch firing).
+
+
+## 2026-06-01 16:30Z — PR #1540: H349 frieren Arm A arcsinh target on wss_z (closed)
+
+- frieren/h349-arcsinh-target
+- **Hypothesis:** arcsinh target transform on wss_z compresses the high-|τ_z| tail in loss space, reducing the linear-MSE vs rel_l2 mismatch and improving val_wss_z.
+- W&B run: `goa3oigg`, group: `h349-frieren-arcsinh-target`
+
+### Terminal raw metrics vs H336 raw baseline
+
+| Metric | H349 Arm A raw | H336 raw (approx) | Δ vs H336 raw | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.1481 | ~5.97 | **+22bp FAIL** | cal cannot rescue per `cal-cannot-rescue-train-raw-regression` |
+| val_wall_shear | 6.9336 | ~6.80 | +13bp | worse |
+| val_wss_x | 5.9317 | ~5.93 | tied | no change |
+| val_wss_y | 7.4151 | ~7.18 | +24bp | worse |
+| **val_wss_z** | **9.8971** | **~9.18** | **+72bp** | **PESSIMAL on target channel** |
+| test_abupt | 5.9662 | ~5.85 | +12bp | well above 5.7379 gate |
+| test_wall_shear | 6.8672 | ~6.79 | +8bp | worse |
+| test_wss_z | 9.3411 | 8.62 (cal) | +72bp vs H336 cal | catastrophic |
+
+### Mechanism (why direction-of-effect was wrong)
+
+arcsinh(y) ≈ sign(y)·log(2|y|) for |y|≫1 — i.e. high-|y| values get COMPRESSED in transformed space. When MSE is computed in arcsinh-space, the high-|y| samples contribute LESS gradient signal than vanilla MSE. For wss_z, the prediction error is concentrated on the high-|τ_z| tail (boundary-layer detachment, vortex cores) — compressing this in loss space means the model under-trained on the very tail that drives WSS_z error.
+
+The hypothesis got the direction wrong: arcsinh is the COMPRESSIVE direction, but wss_z needs EXPANSIVE training-signal redistribution (more weight on high-|τ_z|, not less).
+
+### Findings banked
+
+1. **`arcsinh-wssz-target-pessimal`** — arcsinh on wss_z before MSE causes +72bp val_wss_z regression and +22bp val_abupt regression. Direction-of-effect of target-transform on wss_z is OPPOSITE to what arcsinh provides.
+2. **`target-transform-direction-falsified-compressive`** (broader implication) — compressive target transforms on heavy-tailed channels downweight the prediction-error tail. Future target-transform attacks on wss_z should be **expansive** (signed power y'=sign(y)·|y|^p with p>1) or **tail-selective**, NOT compressive.
+3. **`cal-cannot-rescue-train-raw-regression` reconfirmed** — val raw +22bp deficit; even optimal cal (~7-8bp yield) cannot close this. Closure was immediate, no TTA eval required.
+
+### Implications
+
+- H353 (next frieren assignment) directly tests the converse hypothesis: expansive signed_power transform with p ∈ {1.25, 1.5, 2.0}. If expansion helps wss_z, the direction-of-effect finding is confirmed. If expansion ALSO hurts, the target-transform axis is broadly closed on wss_z (the basin is fragile to any nonlinearity).
+- Arms B (`wss`) and C (`all`) of H349 were not warranted — Arm A was the most surgical and cheapest, and the direction-of-effect finding generalizes; extending compression to more channels would only make things worse.
+- Frieren's skip-rule design (Arm A wss_z first, gate on test_wss_z < 8.62 before B/C) was correct methodology — the chain auto-closed at Arm A as designed.
