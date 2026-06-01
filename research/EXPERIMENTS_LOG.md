@@ -13932,3 +13932,48 @@ The training-time was perfectly fine — 3 epochs at lr=3e-4 cosine, train/loss 
 - The +14bp val_VP regression with preserved volume head is unexpectedly large. May reflect either (a) some interaction between encoder features and head channel-projection that's slightly different in the new architecture's data flow, or (b) numerical precision in the freeze-graph that DDP `find_unused_parameters=True` introduces. Worth flagging but not a blocker.
 
 ---
+
+## 2026-06-01 18:55Z — PR #1546: H354 askeladd FiLM decoder Phase A' (EP13-warm-started head_mlp) [CLOSED — FiLM axis FULLY closed]
+- **Branch**: `askeladd/h354-filmdec-ep13-warmstart`
+- **Hypothesis**: FiLM decoder per-channel modulation gives WSS_z lift if head_mlp is warm-started from EP13 surface_out (H350's catastrophic failure was due to random init, not FiLM direction). Step-0 prediction == EP13 by construction (γ=β=0 zero-init film_proj). 3 epochs frozen-backbone.
+- **Results**:
+  | Metric | EP13 (PR body) | EP1 (after 1 ep) | EP2 | EP3 (best) |
+  |---|---:|---:|---:|---:|
+  | val_abupt | 5.97 | 6.0337 | 6.0268 | **6.0173** |
+  | val_wss_z | 9.1839 | 9.2031 | 9.2011 | **9.1946** |
+  | val_wss | — | 6.8242 | 6.8203 | **6.8111** |
+  | val_SP | — | 3.9874 | 3.9792 | **3.9642** |
+  | val_VP | — | 3.5568 | 3.5510 | **3.5440** |
+  | val_wss_x | — | 5.9520 | 5.9540 | **5.9434** |
+  | val_wss_y | — | 7.4691 | 7.4486 | **7.4401** |
+  - test_abupt = 5.8615%, test_wss_z = 8.7638% (+0.87bp vs H336 raw 8.7551)
+  - W&B run id: `wfetvnn9` (rank 0)
+  - Training time: 42.1 min on 8× RTX PRO 6000 Blackwell. 8,160 optimizer steps.
+- **Pre-committed gate**: val_wss_z < 9.13% AND val_abupt < 5.97% → **BOTH FAIL** (val_wss_z +6.46bp over gate, val_abupt +4.73bp over gate)
+- **Sanity checks (all PASSED)**:
+  - head_mlp warm-start: ‖w0‖ 10.245 → 38.737 (src 38.7369), ‖w2‖ 0.913 → 2.168 (src 2.168) — copy exact to float32 precision
+  - film_proj zero-init: ‖w‖=0, ‖b‖=0 at step 0
+  - Step-0 FiLM ≡ head_mlp invariant: **MSE = 0.000e+00** (exact)
+  - Freeze ratio: 462,981 trainable / 16,984,660 frozen = 2.65% trainable
+- **What happened — definitive falsification**:
+  1. Warm-start mechanism worked perfectly. Step-0 = EP13 to machine precision.
+  2. Very first epoch already regressed val_abupt by 6.4bp (6.0337 vs 5.97) and val_wss_z by 1.9bp.
+  3. Trajectory IMPROVED monotonically across epochs 2-3 but **never re-crossed EP13** (cosine LR to 1e-6, no further recovery possible).
+  4. ‖film_proj.weight‖ grew to 11.88 with max|γ| ≈ 0.69 — the per-channel multiplicative perturbation (1+γ_c) ranges 0.31 to 1.69. **FiLM heads chose to leave the identity-modulation point and got worse.**
+  5. ALL channels regressed in lockstep (abupt, wss, wss_x, wss_y, wss_z, SP, VP all worse than EP13). Per-channel specialization hypothesis falsified — no channel benefits from FiLM, including the high-headroom τ_z.
+- **Decision**: **CLOSE** with finding `filmdec-axis-fully-closed`. Phase B (full-unfreeze + FiLM) correctly NOT run by student per pre-committed rule — would have tested a confounded question (full-unfreeze + FiLM vs full-unfreeze + shared-decoder which is what EP13 already is, +1.8% nuisance params).
+- **Banked findings**:
+  - **`filmdec-axis-fully-closed`**: H350 random-init catastrophic + H354 warm-start no-lift jointly falsify the FiLM-decoder mechanism on the H336 base. **Both endpoints of the axis are now closed.**
+  - **`decoder-pareto-optimal-at-h336-ep13`**: H336/EP13's shared `surface_out` is a Pareto-optimal point under the frozen-backbone constraint. Any local perturbation away from (γ=0, β=0) traces a strictly-worse direction in the val-loss landscape, regardless of which channel the FiLM head tries to specialize. This is the strongest possible falsification: warm-started from a known-good operating point with step-0 invariant proven, the optimizer chose to leave that point in a detrimental direction.
+  - **`wssz-gap-upstream-not-decoder`**: The H336 raw test_wss_z floor at 8.62% (vs Transolver-3 SOTA 5.85%) is **NOT a decoder-side representational bottleneck**. The shared 3-channel surface_out + per-channel-OLS cal already extracts the decoder-accessible signal. The gap is upstream — backbone / encoder / tokenizer / slice attention.
+- **Convergent diagnostic from 6 closed/saturated axes**:
+  1. Loss-reweight axis (H339+H341+H346): TRIPLY CLOSED — gradient budget isn't the bottleneck
+  2. TTA hyperparameter axis (H330+H340+H344): SATURATED — aggregation isn't the bottleneck
+  3. Flatness/SAM (H343): CLOSED — optimization landscape isn't the bottleneck
+  4. Target transform compressive (H349): CLOSED — output nonlinearity (compressive) isn't the lever; expansive direction (H353) under test
+  5. **FiLM decoder (H350+H354): FULLY CLOSED — per-channel decoder capacity isn't the bottleneck**
+  6. Cal yield ceiling (H343): cal extracts ~7-8bp val; cannot close >10bp raw deficit
+- **Implication**: The WSS_z gap is **encoder-side / upstream**. Move budget to encoder-rooted (NGSB H351, BL derivative decoder H355) and volume-rooted (H355 ghost-probe FD) interventions. Decoder/optimizer/aggregation/gradient axes are all saturated.
+- **Next assignment fired**: H355 BL derivative decoder to askeladd (PR #1547) — Morgan directive #1, never-tried mechanism. Uses ghost off-wall probes + Richardson FD on volume-token cross-attention to compute τ_w = μ·(∂u/∂n) physically. Target ~30bp test_WSS improvement.
+
+---
