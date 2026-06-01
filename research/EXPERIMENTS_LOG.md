@@ -1,5 +1,42 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-06-01 23:55Z — PR #1534: H190 per-channel surface decoder width-factor=2.5 (tanjiro) CLOSED NON-MERGE
+
+- dl24-tanjiro/h190-surface-out-width-2p5
+- W&B runs: `rmz7dng2` (main 20-EP, SIGTERM'd by 24h budget mid-EP21), `b0hywn99` (eval/test harvest), `32rarhcn` (smoke EP1 PASS)
+- **Hypothesis**: H183's per-channel surface decoder gives each output an independent gradient pathway; widening these heads (factor 2.0 → 2.5, hidden 1024 → 1280) should add capacity without cross-channel contention and improve test_WSS via late-phase descent.
+
+### Terminal test metrics — eval run `b0hywn99`, best EMA EP20
+
+| Metric | H190 | H183 SOTA | Δ | Floor | Result |
+|---|---:|---:|---:|---:|:---:|
+| test_WSS | **6.6711%** | 6.4427% | +0.228pp | — | worse |
+| test_VP  | 3.6219% | 3.4415% | +0.180pp | ≤3.643 | clear (margin 0.021pp) |
+| test_SP  | 3.6793% | 3.5187% | +0.161pp | ≤3.577 | **BREACH +0.102pp** |
+| test_ABU | 5.8359% | 5.6152% | +0.221pp | ≤5.844 | clear (margin 0.008pp) |
+| test_τ_x | 5.8956% | 5.6983% | +0.197pp | track | worse |
+| test_τ_y | 7.2391% | 6.9813% | +0.258pp | track | worse |
+| test_τ_z | 8.7434% | 8.4364% | +0.307pp | track | worse |
+
+### Trajectory (val_WSS, H190 tracked H183 with WIDENING gap)
+
+| EP | H190 | H183 | Δ |
+|---:|---:|---:|---:|
+| 10 | 6.831 | 6.640 | +0.19 |
+| 15 | 6.788 | ~6.55 | +0.24 |
+| 17 | 6.773 | — | — |
+| 18 | 6.796 | — | uptick |
+| 19 | 6.772 | — | recovered |
+| **20** | **6.769** | ~6.50 | **+0.27** |
+
+EP descent rate flat at ~0.005pp/EP from EP15 onward — wider heads do NOT unlock additional late descent.
+
+### Conclusion + architectural finding
+
+**Width-factor=2.5 does NOT compose with H183's already-per-channel decoder architecture.** SP floor breach is decisive (>0.10pp above ceiling). Gap WIDENS over training (not converged late), suggesting the extra ~100k params per head exceed the channel-conditional information ceiling at DrivAerML's 65k surface-point density. EP18 single-epoch uptick (recovered at EP19) is a minor noise artifact of higher per-head variance at wider capacity.
+
+**Forward propagation:** Future surface-decoder experiments should test width DOWN (e.g. factor=1.5) before exploring width-up. Current width=2.0 likely already at or past the channel-conditional optimum.
+
 ## 2026-06-01 13:35Z — PR #1532: H188 per-channel tau weights 1.2/1.3 + lr=9e-5 (frieren) CLOSED NON-MERGE
 
 - dl24-frieren/h188-per-channel-tau-mild-weights

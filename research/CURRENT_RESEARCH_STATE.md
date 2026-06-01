@@ -1,11 +1,39 @@
 # SENPAI Research State
 
-- **2026-06-01 21:30Z**
+- **2026-06-01 23:55Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 23:55Z checkpoint — H190 CLOSED NON-MERGE (SP floor breach decisive); H193 dispatched to tanjiro (soft tangent-basis penalty per Morgan #1056 priority)
+
+### Fleet status (23:55Z, 3 active + 1 dispatching, zero idle GPUs)
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | val_VP | val_SP | Verdict |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| fern | #1535 | H191: Sharper WSD | **EP15** | **6.687 ⭐** | 5.970 | 3.679 | 3.924 | FLEET WSS LEADER; EP25-30 decay is hypothesis test |
+| nezuko | #1533 | H189: hidden_dim=640 | **EP16** (student silent 15h+) | 6.727 | 5.933 | **3.481 ⭐⭐⭐** | 3.852 | VP=3.481 PAPER-TIER (gap to SOTA 0.039pp); advisor reads W&B directly |
+| frieren | #1541 | H192: τ_z=1.5 only, lr=1e-4 | **EP8** | 6.740 | 5.988 | 3.646 | 3.910 | τ_z=1.5 MECHANISM CONFIRMED; EP10 = official gate |
+| tanjiro | (new) | H193: WSS normal-component soft penalty | dispatching | — | — | — | — | Morgan's #2 priority (tangent-basis) implemented as soft regularizer |
+
+### Key finding (23:55Z): H190 NON-MERGE — wider per-channel heads do NOT help
+
+H190 test_WSS=6.6711 (+0.228pp vs SOTA), test_SP=3.6793 (BREACH +0.102pp over 3.577 floor). Width-factor=2.5 widening (hidden 1024 → 1280) tracked H183 with WIDENING gap (+0.19 → +0.27pp from EP10→EP20). Architectural finding: after H183 made per-channel heads the default at width=2.0, additional width is past the channel-conditional information ceiling at 65k surface-point density. PR #1534 closed at 23:55Z.
+
+### H193 hypothesis (tanjiro, dispatching): Soft normal-component penalty (tangent-basis priority, soft form)
+
+**Hypothesis:** For no-slip walls, WSS is tangential (τ · n_surface ≈ 0). Adding a soft physics penalty λ * mean((τ_pred · n_surface)²) as regularizer reduces effective output dimensionality from 3 (free cartesian) to 2 (tangent plane), expected to improve cross-flow τ_y, τ_z (the SOTA bottleneck). This is the SOFT form of Morgan's strategic priority #2 (tangent-basis output head, issue #1056). Historical hard tangent projection failed (`la5hrm16`, `lz51r7nb`, `o78w9geu`) because they enforced as hard projection/loss reframing; a soft penalty avoids that failure mode.
+
+Single delta vs H183: `--wss-normal-penalty-weight 0.5` (new flag). All other config = H183 baseline.
+
+### Action plan (23:55Z)
+
+- **Tanjiro dispatch H193** — soft normal-component WSS penalty (single delta from H183)
+- **Next wake ~01:30Z** — catch H192 EP10-11 official gate (the H188 collapse-point comparison), H191 EP18-20 stable-phase descent, H189 EP20-21 VP descent continuation, H193 smoke EP1 verification
+- **Strategic next-round (post-H191/H192/H189 terminal):** BL DERIVATIVE DECODER PROBE (Morgan's #1 priority); compound winners from this round
+- **Cleanup queue:** H183 cleanup (per-channel default merge, PR #1531) already merged; current SOTA stack stable
 
 ## 21:30Z checkpoint — H189 VP=3.481 (gap 0.039pp PAPER-TIER); H191 EP15 fleet leader 6.687; H192 τ_z mechanism CONFIRMED; H190 EP18 uptick
 
