@@ -145,6 +145,14 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H347: boundary-layer physics-prior auxiliary losses on WSS
+    physics_prior_normals: bool = False
+    physics_prior_smooth: bool = False
+    lambda_normals: float = 1e-3
+    lambda_smooth: float = 1e-3
+    physics_knn_k: int = 6
+    physics_smooth_anchors: int = 8192
+    physics_knn_chunk_size: int = 1024
     debug: bool = False
 
 
@@ -271,6 +279,56 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "physics_prior_normals": (
+            "H347: enable the tangent-plane physics prior on wall shear "
+            "stress. Adds an auxiliary loss term that penalises the cosine "
+            "of the angle between the predicted WSS vector (denormalised) "
+            "and the surface normal at every valid surface point. By "
+            "definition WSS lies in the tangent plane (tau . n = 0); this "
+            "regularises the model toward physically valid predictions in "
+            "geometric-complexity regions (A-pillar, wheel arch, etc.) "
+            "where the WSS_z residual is concentrated."
+        ),
+        "physics_prior_smooth": (
+            "H347: enable the graph-Laplacian smoothness physics prior on "
+            "tau_z. For every batch a chunked on-the-fly kNN graph is "
+            "computed in 3D coordinate space (random anchor subsample for "
+            "memory) and tau_z differences along edges are penalised. "
+            "Encourages attached-boundary-layer continuity along "
+            "streamlines without explicit edge metadata."
+        ),
+        "lambda_normals": (
+            "H347: scalar weight for the tangent-plane loss. The loss is "
+            "the mean squared cosine of the angle between predicted-WSS "
+            "and surface normal so its magnitude is O(1); 1e-3 keeps the "
+            "auxiliary term well below the primary MSE during cosine-tail "
+            "fine-tuning. Default 1e-3."
+        ),
+        "lambda_smooth": (
+            "H347: scalar weight for the kNN smoothness loss on tau_z. The "
+            "loss is mean squared neighbour difference on the model output "
+            "(normalised space) so its magnitude is O(1); default 1e-3 "
+            "mirrors lambda_normals."
+        ),
+        "physics_knn_k": (
+            "H347: number of nearest neighbours used by the smoothness "
+            "prior. Default 6 matches local mesh connectivity for "
+            "DrivAerML's near-uniform surface sampling."
+        ),
+        "physics_smooth_anchors": (
+            "H347: number of random anchor points per batch sample used "
+            "for the smoothness loss. Computing kNN over all N=65k surface "
+            "points per step is too memory-heavy; sampling 8k anchors gives "
+            "dense spatial coverage across many steps while keeping the "
+            "physics-prior overhead under ~10 percent wall-time."
+        ),
+        "physics_knn_chunk_size": (
+            "H347: chunk size for the pairwise distance computation in the "
+            "smoothness loss (anchors are processed in chunks of this size "
+            "against the full sampled point cloud). Trade-off between "
+            "peak memory and kernel-launch overhead; default 1024 keeps "
+            "the per-chunk distance matrix around 256MB at N=65k."
         ),
     }
     for field in fields(Config):
@@ -432,6 +490,120 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def _physics_prior_loss(
+    surface_pred_norm: torch.Tensor,
+    batch,
+    transform: TargetTransform,
+    *,
+    enable_normals: bool,
+    enable_smooth: bool,
+    lambda_normals: float,
+    lambda_smooth: float,
+    knn_k: int,
+    smooth_anchors: int,
+    knn_chunk_size: int,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """H347 boundary-layer physics priors on wall shear stress.
+
+    Two auxiliary losses, both optional:
+
+      (1) Tangent-plane: WSS must lie in the tangent plane of the surface,
+          i.e. ``tau . n = 0`` after denormalisation. Enforced as the mean
+          squared cosine of the angle between predicted-WSS and the
+          per-point surface normal (numerically safe at small |tau|).
+      (2) Graph-Laplacian smoothness on tau_z: penalise differences of
+          ``tau_z`` along edges of a kNN graph built on-the-fly in 3D
+          coordinate space. Uses a random anchor subsample per batch for
+          memory; ``knn_chunk_size`` controls the peak distance-matrix
+          size. The graph indices are detached so gradients flow only
+          through the predicted ``tau_z`` values.
+
+    Returns the (already weighted) auxiliary loss and a metrics dict with
+    raw and weighted components and physical-violation magnitudes for
+    monitoring.
+    """
+
+    metrics: dict[str, float] = {}
+    device = surface_pred_norm.device
+    L_aux = surface_pred_norm.new_zeros(())
+
+    surface_mask = batch.surface_mask
+    if surface_mask.dtype != torch.bool:
+        mask_bool = surface_mask.bool()
+    else:
+        mask_bool = surface_mask
+    mask_f = mask_bool.to(surface_pred_norm.dtype)
+    n_valid = mask_f.sum().clamp(min=1.0)
+
+    pred_denorm = transform.invert_surface(surface_pred_norm)
+    wss_pred = pred_denorm[..., 1:4]
+
+    if enable_normals:
+        normals = batch.surface_x[..., 3:6]
+        wss_norm = wss_pred.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+        wss_dir = wss_pred / wss_norm
+        n_norm = normals.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+        n_dir = normals / n_norm
+        dot = (wss_dir * n_dir).sum(-1)
+        dot_sq_masked = (dot * dot) * mask_f
+        L_normals = dot_sq_masked.sum() / n_valid
+        L_aux = L_aux + lambda_normals * L_normals
+        dot_abs_mean = ((dot.detach().abs()) * mask_f).sum() / n_valid
+        metrics["physics/normals_loss"] = float(L_normals.detach().item())
+        metrics["physics/normals_loss_weighted"] = float(
+            (lambda_normals * L_normals).detach().item()
+        )
+        metrics["physics/normals_violation_cos"] = float(dot_abs_mean.item())
+
+    if enable_smooth:
+        coords = batch.surface_x[..., 0:3].detach()
+        tau_z_norm = surface_pred_norm[..., 3]
+        B, _, _ = coords.shape
+        smooth_terms: list[torch.Tensor] = []
+        for b in range(B):
+            valid_idx = mask_bool[b].nonzero(as_tuple=False).squeeze(-1)
+            n_valid_b = valid_idx.numel()
+            if n_valid_b <= knn_k + 1:
+                continue
+            n_anchor = min(int(smooth_anchors), n_valid_b)
+            perm = torch.randperm(n_valid_b, device=device)[:n_anchor]
+            anchor_idx = valid_idx[perm]
+            anchor_coords = coords[b].index_select(0, anchor_idx)
+            full_coords = coords[b].index_select(0, valid_idx)
+            full_tau_z = tau_z_norm[b].index_select(0, valid_idx)
+            anchor_tau_z = tau_z_norm[b].index_select(0, anchor_idx)
+            chunk = max(1, int(knn_chunk_size))
+            neighbor_chunks: list[torch.Tensor] = []
+            for start in range(0, n_anchor, chunk):
+                end = min(start + chunk, n_anchor)
+                q = anchor_coords[start:end]
+                with torch.no_grad():
+                    dists = torch.cdist(q, full_coords)
+                    _, neigh = dists.topk(knn_k + 1, dim=-1, largest=False)
+                    neigh = neigh[..., 1:]
+                neighbor_chunks.append(neigh)
+            knn_idx = torch.cat(neighbor_chunks, dim=0)
+            tau_z_neighbors = full_tau_z[knn_idx]
+            diff = anchor_tau_z.unsqueeze(-1) - tau_z_neighbors
+            smooth_terms.append((diff * diff).mean())
+        if smooth_terms:
+            L_smooth = torch.stack(smooth_terms).mean()
+            L_aux = L_aux + lambda_smooth * L_smooth
+            metrics["physics/smooth_loss"] = float(L_smooth.detach().item())
+            metrics["physics/smooth_loss_weighted"] = float(
+                (lambda_smooth * L_smooth).detach().item()
+            )
+            metrics["physics/smooth_violation_rms"] = float(
+                L_smooth.detach().sqrt().item()
+            )
+        else:
+            metrics["physics/smooth_loss"] = 0.0
+            metrics["physics/smooth_loss_weighted"] = 0.0
+            metrics["physics/smooth_violation_rms"] = 0.0
+
+    return L_aux, metrics
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -442,6 +614,13 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    physics_prior_normals: bool = False,
+    physics_prior_smooth: bool = False,
+    lambda_normals: float = 0.0,
+    lambda_smooth: float = 0.0,
+    physics_knn_k: int = 6,
+    physics_smooth_anchors: int = 8192,
+    physics_knn_chunk_size: int = 1024,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -453,27 +632,45 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        surface_pred = out["surface_preds"]
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
+                surface_pred,
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(surface_pred, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if physics_prior_normals or physics_prior_smooth:
+        L_phys, phys_metrics = _physics_prior_loss(
+            surface_pred,
+            batch,
+            transform,
+            enable_normals=physics_prior_normals,
+            enable_smooth=physics_prior_smooth,
+            lambda_normals=lambda_normals,
+            lambda_smooth=lambda_smooth,
+            knn_k=physics_knn_k,
+            smooth_anchors=physics_smooth_anchors,
+            knn_chunk_size=physics_knn_chunk_size,
+        )
+        loss = loss + L_phys
+        metrics["physics/total_loss_weighted"] = float(L_phys.detach().cpu().item())
+        metrics.update(phys_metrics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1081,6 +1278,23 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["mirror_augmentation"] = config.mirror_augmentation
             wandb.summary["epochs_already_done"] = config.epochs_already_done
             wandb.summary["save_every_epoch"] = config.save_every_epoch
+            wandb.summary["physics/prior_normals"] = config.physics_prior_normals
+            wandb.summary["physics/prior_smooth"] = config.physics_prior_smooth
+            wandb.summary["physics/lambda_normals"] = config.lambda_normals
+            wandb.summary["physics/lambda_smooth"] = config.lambda_smooth
+            wandb.summary["physics/knn_k"] = config.physics_knn_k
+            wandb.summary["physics/smooth_anchors"] = config.physics_smooth_anchors
+            wandb.summary["physics/knn_chunk_size"] = config.physics_knn_chunk_size
+            if config.physics_prior_normals or config.physics_prior_smooth:
+                priors = []
+                if config.physics_prior_normals:
+                    priors.append(f"normals(lambda={config.lambda_normals})")
+                if config.physics_prior_smooth:
+                    priors.append(
+                        f"smooth(lambda={config.lambda_smooth},k={config.physics_knn_k},"
+                        f"anchors={config.physics_smooth_anchors})"
+                    )
+                print("H347 physics priors: " + " + ".join(priors))
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1230,6 +1444,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        physics_prior_normals=config.physics_prior_normals,
+                        physics_prior_smooth=config.physics_prior_smooth,
+                        lambda_normals=config.lambda_normals,
+                        lambda_smooth=config.lambda_smooth,
+                        physics_knn_k=config.physics_knn_k,
+                        physics_smooth_anchors=config.physics_smooth_anchors,
+                        physics_knn_chunk_size=config.physics_knn_chunk_size,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1270,6 +1491,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for key, value in batch_loss_metrics.items():
+                        if key.startswith("physics/"):
+                            train_log[f"train/{key}"] = value
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
