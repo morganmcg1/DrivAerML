@@ -1,10 +1,49 @@
 # SENPAI Research State
 
-- **2026-06-01 17:40Z**
+- **2026-06-01 19:25Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
+- **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 19:25Z checkpoint — H189 VP plateau at 3.507 (−0.121pp); H191 leads WSS at EP11 (6.719); H192 EP5 PASSED tight gate
+
+### Fleet status (19:25Z, all 4 healthy, zero idle GPUs)
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | val_VP | val_SP | Δ vs H183 EP10 | Verdict |
+|---|---|---|---:|---:|---:|---:|---:|---|---|
+| fern | #1535 | H191: Sharper WSD | **EP11** (W&B, 9.5h) | **6.719 ⭐** | 5.999 | 3.701 | 3.929 | WSS +0.08 | **FLEET WSS LEADER**; stable phase still has signal (EP10→11 −0.024); EP25-30 decay is hypothesis test |
+| nezuko | #1533 | H189: hidden_dim=640 | **EP14** (W&B, 14.1h, student silent since 08:25Z) | 6.746 | 5.952 | **3.507 ⭐⭐** | 3.865 | WSS +0.11; **VP −0.121pp**; ABU +0.04 (closing) | **PROGRAMME VP LEADER**; VP plateau EP13→EP14; cosine T_max=30, past midpoint |
+| tanjiro | #1534 | H190: width-factor=2.5 | **EP15** (12.2h) | 6.788 | 6.049 | 3.722 | 3.975 | WSS +0.15 | EP15 BOTH gates FAILED; extending to EP20 cosine tail (advisor); if EP18-20 stays ≥6.75 close NON-MERGE |
+| frieren | #1541 | H192: τ_z=1.5 only, lr=1e-4 | **EP5** (4.2h) | 6.845 | 6.116 | 3.844 | 3.974 | (early) | EP5 kill gate PASSED margin 0.005pp; EP10 = the H188 collapse-point comparison |
+
+### Key finding (19:25Z): H189 VP plateau but lead deepening since EP10
+
+H189 VP trajectory: EP10 3.570 → EP12 3.514 → EP13 3.507 → **EP14 3.507** (plateau but lead at −0.121pp vs H183 EP10 SOTA 3.628). val_ABU=5.952 at EP14 (only 0.035pp behind SOTA), still descending slowly. WSS=6.746 holding +0.11pp behind SOTA — capacity boost protective on VP but doesn't help WSS (Morgan's diagnosis confirmed: WSS needs architectural mechanism, not capacity).
+
+### Operational issue: H189 nezuko Claude student session stalled
+
+Pod healthy 4d8h Running 0 restarts, training W&B run `c2qyhgmh` healthy with 1-min heartbeat through 14h. But pod logs show Claude iteration 144 at 08:02Z then silent. kubectl logs --since=2h returns empty. Advisor doing W&B-direct reads + posting heartbeats. Escalation #3 at 19:05Z with 20:00Z deadline. If student doesn't recover before EP30 (~9h), advisor will need to construct terminal SENPAI-RESULT marker from W&B + run test harvest via human intervention.
+
+### H191 (fern, PR #1535) — fleet WSS leader entering deep stable phase
+
+EP10 kill gate PASSED 0.0075pp margin; EP11 deepens to 6.719 (−0.024 from EP10). Per fern's confirmation, val/* rows ARE EMA-validated (config.eval_raw_vs_ema=False default). Critical waypoint is EP25-30 decay test (lr 1e-4 → 1e-6 over 6 EPs, 100× drop). Advisor not expecting posts EP12-EP24 unless plateau breaks.
+
+### H190 (tanjiro, PR #1534) — extended to EP20 cosine tail
+
+EP15 6.788 failed BOTH gates (advisor 6.55, PR 6.60). EP13 was best descent (−0.036), EP14 ticked +0.006, EP15 recovered to 6.788 but trajectory clearly stalled. Extension to EP20 to test whether width=2.5 catches H183 late. If EP18-20 ≥6.75 flat, close NON-MERGE.
+
+### H192 (frieren, PR #1541) — EP5 kill gate PASSED (margin 0.005pp tight)
+
+EP boundaries: EP1 12.80 → EP2 7.30 → EP3 7.02 → EP4 6.89 → EP5 6.845. VP descent especially strong (EP4→EP5 −0.142pp). Per-axis EP3→EP5: τ_x −0.13, τ_y −0.29, τ_z −0.19 (upweighted axis descending faster than τ_x). Next critical milestone: EP10 (the H188 collapse point — H188 was at 6.802 with lr=9e-5+τ_y/τ_z weights). If H192 EP10 < 6.80, τ_z=1.5 isolation helps; if ≈ 6.80, then H188 collapse was lr=9e-5 alone.
+
+### Action plan (19:25Z)
+
+- **Next wake ~20:00Z** — H189 nezuko escalation deadline + H192 EP6-7 boundary + H190 EP16-17 + H189 EP15 cosine descent acceleration check
+- **Priority watch:** H189 nezuko terminal protocol — paper-tier VP candidate, may need advisor-side terminal if student doesn't recover
+- **Strategic next-round:** Architectural pivot per issue #1056 (BL probe, tangent-basis decoder) once H189 terminal lands and confirms VP-direction is the right paper-axis lever
+- **VP-direction next experiments:** If H189 terminates with strong VP, compound with WSS-targeted architecture (BL probe ON TOP OF hidden_dim=640)
 
 ## 17:40Z checkpoint — H189 EXTENDS VP lead at EP12 (−0.11pp vs H183); H189 closing on ABU SOTA
 
