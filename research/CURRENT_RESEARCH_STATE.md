@@ -1,10 +1,50 @@
 # SENPAI Research State
 
-- **2026-06-01 15:20Z**
+- **2026-06-01 17:40Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
-- **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment. **Current fleet (H189/H190/H191/H192) tests capacity/width/schedule/loss weight — symptomatic. Next round should pivot toward architectural mechanisms.**
+- **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
+
+## 17:40Z checkpoint — H189 EXTENDS VP lead at EP12 (−0.11pp vs H183); H189 closing on ABU SOTA
+
+### Fleet status (17:40Z, all 4 healthy, zero idle GPUs)
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | val_VP | val_SP | Δ vs H183 EP10 | Verdict |
+|---|---|---|---:|---:|---:|---:|---:|---|---|
+| nezuko | #1533 | **H189**: hidden_dim=640 | **EP12** (W&B, 12.8h) | 6.753 | **5.960** | **3.514 ⭐⭐** | 3.863 | WSS +0.11; **VP −0.11pp**; ABU +0.04 (closing) | **PROGRAMME LEADER on VP** — capacity helps VP, descent monotonic, on track for EP30 terminal |
+| fern | #1535 | H191: Sharper WSD | **EP10** (8.2h) | **6.743** | 6.020 | 3.720 | 3.937 | WSS +0.10 | EP10 kill gate PASS (margin 0.0075pp); 14 more stable EPs to EP24, then 100× decay EP25-30 (the actual hypothesis test) |
+| tanjiro | #1534 | H190: width-factor=2.5 | **EP13** (10.9h) | 6.792 | 6.051 | 3.721 | 3.965 | WSS +0.15 | EP12→EP13 −0.036 (strongest single-EP since EP10); descent resumed after EP11 plateau; EP15 ≤6.55 gate still unlikely |
+| frieren | #1541 | H192: τ_z=1.5 only, lr=1e-4 | **EP3** (3.0h) | 7.018 | 6.339 | 4.259 | 4.070 | (early) | Mechanism descending healthy, EP5 gate ETA 18:45Z |
+
+### Key finding (17:40Z): H189 hidden_dim=640 VP improvement DEEPENS with epochs
+
+H189 EP10 val_VP=3.570 → **EP12 val_VP=3.514** (improvement deepens, −0.058pp → −0.114pp gap vs H183 EP10). This is a real capacity-direction effect. ABU also converging: EP10=6.011, EP11=5.969, EP12=5.960 — now only 0.04pp behind SOTA 5.917 and still descending at −0.01 to −0.04pp/EP. If EP15-EP30 sustains this, H189 will cross BOTH val_VP AND val_ABU SOTA simultaneously.
+
+**WSS is the holdout axis** for H189: EP12 val_WSS=6.753 vs H183 SOTA 6.640 = +0.113pp behind. Capacity boost is NOT helping WSS in the same way — confirms Morgan's hypothesis (issue #1056) that WSS needs architectural mechanism (BL probe, tangent decoder), not just capacity.
+
+### Critical: H189 may be the strongest paper-tier candidate so far
+
+If H189 terminal lands with test_VP < 3.4415 AND test_ABUPT < 5.6152 (the current floors), this is a multi-axis SOTA improvement. The student has been silent since 08:25Z — escalation posted at 17:40Z requesting EP13/EP14 reads by 18:30Z and confirming terminal report plan.
+
+### H191 (fern, PR #1535) — EP10 kill gate cleared 0.0075pp margin
+
+val_WSS=6.7425, descent slowing per stable-phase expectation (EP8→9 −0.010, EP9→10 −0.020). Per fern's own note, the hypothesis is tested EP25-30 (the 100× decay), not stable phase. Advisor will not kill on EP10-EP24 plateau. EP24 ≤6.55 advisor gate active, then decay test EP25→EP30.
+
+### H190 (tanjiro, PR #1534) — EP13 descent resumed after EP11 tick-up
+
+EP10→EP13 deltas: WSS −0.039, ABU −0.038, VP −0.044, SP −0.015. EP15 ≤6.55 gate still requires ~−0.12pp/EP unrealistic; if EP15 lands ≥6.75 we close NON-MERGE; if 6.70-6.75 extend to EP20.
+
+### H192 (frieren, PR #1541) — EP3 healthy, mechanism test starts EP5
+
+EP1→EP2→EP3: WSS 12.80→7.30→7.02, VP 14.21→5.14→4.26 (very strong). EP5 kill gate ≤6.85 ETA 18:45Z. EP10 is the H188 collapse point — if H192 EP10 < 6.80, τ_z=1.5 alone helps; if ≈ H183, then H188 collapse was lr=9e-5 alone.
+
+### Action plan
+
+- **Next wake ~18:50Z** — H192 EP5 gate + H189 nezuko response + H190 EP14-15 + H191 EP12-13
+- **Priority watch:** H189 nezuko terminal protocol — needs proper SENPAI-RESULT at EP30 since this is paper-tier candidate
+- **Strategic next-round:** Architectural pivot per issue #1056 (BL probe, tangent-basis decoder) once H189 terminal lands and confirms VP-direction is the right paper-axis lever
+- **VP-direction next experiments:** If H189 terminates with strong VP, compound with WSS-targeted architecture (BL probe ON TOP OF hidden_dim=640)
 
 ## 15:20Z checkpoint — H191 leading WSS; H189 wins VP; H192 main launched
 
