@@ -98,9 +98,56 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1520 H336 K=5 + Student-t ν=4 + 8-res + mirror + cal (tay) — 2026-06-01 ***
+## *** CURRENT SOTA: PR #1526 H342 3-cp output-average (ep13+ep14+ep15) × H336 TTA recipe (tay) — 2026-06-01 ***
 
-**val_abupt_calibrated=5.8978%** / **test_abupt_calibrated=5.7379%** (corrected split, H185 EP15 EMA + K=5 anti-thetic × 8-res × mirror TTA + Student-t ν=4 weight noise → per-channel affine α/β calibration)
+**val_abupt_calibrated=5.8962%** / **test_abupt_calibrated=5.7357%** (corrected split, 3-checkpoint output-space average of H244 cosine-tail EMA ep13/ep14/ep15, each evaluated with H336 K=5+Student-t ν=4 × 8-res × mirror TTA → per-channel affine α/β calibration)
+
+**New SOTA — beats H336 by −1.6bp val / −2.2bp test. Output-space averaging across 3 nearby cosine-tail checkpoints (ep13+ep14+ep15) acts as variance reduction on the residual prediction noise; improvement scales with checkpoint count (D > B,C > A). Largest per-channel gains on noisier WSS channels (τ_y −6.6bp, τ_z −5.3bp). Slight VP regression (+1.6bp) from ep13/ep14 being marginally weaker VP predictors — net surface improvement far outweighs. Mechanism distinct from H307 weight-soup (null) because output-space preserves nonlinearities. Composable with future cosine-tail extensions and K-axis changes.**
+
+**W&B runs:** `3icmxaqe` (ep13 TTA) · `qgw0ix77` (ep14 TTA) · `ijadzof0` (ep15 TTA, sanity arm)
+**Source checkpoints:** ep13=`yw2a5dyl:v0`, ep14=`run-0gjfv45i-ep14:v0`, ep15=`run-0gjfv45i:best_epoch=15`
+**PR:** #1526
+
+**Val metrics (calibrated, Arm D):** val_abupt=5.8962%
+**Test metrics (calibrated, Arm D):** test_abupt=**5.7357%**, test_VP=**3.3751%**, test_SP=**3.6124%**, test_WSS=**6.6351%**, test_WSS_z=**8.6122%**
+
+**Per-channel calibration coefficients (Arm D):**
+- surface[cp  ]: α=+0.994786, β=−0.00261
+- surface[τ_x ]: α=+0.994398, β=−0.00742
+- surface[τ_y ]: α=+0.994111, β=−0.00031
+- surface[τ_z ]: α=+0.991747, β=−0.00019
+- volume[VP   ]: α=+0.999664, β=−0.84322
+
+**Paper floors:** test_VP 3.3751 < 3.421 ✓ | test_WSS 6.6351 < 6.727 ✓ | test_SP 3.6124 > 3.577 ✗ (3.5bp gap)
+**Stretch goal:** test_WSS < 5.85% — gap = **0.785pp** (H355 BL derivative decoder in flight)
+
+**Merge gate (updated):** val_abupt_calibrated < **5.8962%** AND test_abupt_calibrated < **5.7357%**
+
+**Reproduce (4-arm post-hoc average):**
+```bash
+# Step 1: Run 3 TTA evals (can chain sequentially on 8 GPUs, ~6-7h each)
+for CKPT_EPOCH in ep13 ep14 ep15; do
+  torchrun --standalone --nproc-per-node=8 eval_tta_h252.py \
+    --checkpoint outputs/drivaerml/run-{yw2a5dyl,0gjfv45i,0gjfv45i}/checkpoint_${CKPT_EPOCH}.pt \
+    --resolutions "32768,40960,49152,57344,65536,81920,98304,131072" \
+    --eval-modes "weight_noise_mirror_res_avg" \
+    --weight-noise-sigma 5e-4 --weight-noise-passes 4 --antithetic-noise \
+    --weight-noise-dist student_t --weight-noise-df 4 \
+    --test-time-calibration \
+    --save-raw-predictions outputs/h342/${CKPT_EPOCH}_raw.npz \
+    --wandb-group "h342-repro" --wandb-name "repro/h342-${CKPT_EPOCH}-tta"
+done
+# Step 2: 3-cp symmetric post-hoc average
+python tools/h342_avg_checkpoints.py \
+  --inputs outputs/h342/ep13_raw.npz outputs/h342/ep14_raw.npz outputs/h342/ep15_raw.npz \
+  --arms "D:0,1,2" --out outputs/h342/results_arm_d.json
+```
+
+---
+
+## PRIOR SOTA: PR #1520 H336 K=5 + Student-t ν=4 + 8-res + mirror + cal (tay) — 2026-06-01 ###
+
+**val_abupt_calibrated=5.8978%** / **test_abupt_calibrated=5.7379%** (corrected split, H185 EP15 EMA + K=5 anti-thetic × 8-res × mirror TTA + Student-t ν=4 weight noise → per-channel affine α/β calibration) — superseded by H342 (PR #1526)
 
 **New SOTA — beats H314 by −0.9bp val / −0.8bp test. K=5 stacking under Student-t ν=4 is mildly superadditive (2× the linear-additive prediction vs independent K and ν gains), reopening the K-axis that was closed under Gaussian noise (H330). All 5 channels Pareto-improve. Cal coefficients ≈ H312 to 1e-3 — cal axis is noise-family-invariant. Composition: +K=5 over K=4 upon H314 recipe with no other changes.**
 
