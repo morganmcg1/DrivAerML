@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-01 19:45Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=4 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-01 20:11Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=4 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -51,7 +51,7 @@
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
 | **#1547** | askeladd | **H355: BL derivative decoder (Morgan #1)** — Ghost off-wall probe points at {1e-5, 1e-4, 1e-3, 1e-2}·L_ref, cross-attend to volume tokens, Richardson FD τ_w = μ·∂u/∂n. Smoke PASSED → Phase 1 DDP-8 launched. | 🟡 WIP — Phase 1 DDP-8 | Physical / volume-rooted decoder |
-| **#1545** | frieren | H353: Expansive signed_power target on wss_z — Arms p∈{1.25, 1.5, 2.0}. **Arm A step 5545 (67.9%), val_abupt 6.06 / val_wssz 9.20 — +9bp abupt regression vs H336 raw. Pre-committed close trigger approaching** (same regression pattern as H349 compressive). ETA terminal ~20:46Z. | 🟡 WIP — Arm A training (regression) | Output-transform (expansive direction) |
+| **#1550** | frieren | **H358: Native tangent-basis residual output head (FRESH)** — TangentResidualHead predicts (τ_t1, τ_t2) in local tangent basis, rotates to xyz, added to existing 3-channel surface_out. Zero-init output → step-0 invariant. Tests OUTPUT BASIS axis (untouched). Physics constraint: τ·n=0 by no-slip wall BC. Fine-tune 3 epochs from EP13. **PR #1550 just assigned.** | 🆕 just assigned | Output basis (physics-correct τ·n=0) |
 | **#1544** | thorfinn | H352: SWA-within-cosine-tail — fresh restart at 17:32Z. Heartbeat sent 19:35Z. ETA terminal ~20:15Z. Gate tightened to val_cal < 5.8962 (H342 SOTA). | 🟡 WIP — training (ETA ~20:15Z) | Weight-space averaging (same trajectory) |
 | **#1549** | tanjiro | **H357: GeoTransolver geometric content embedding (FRESH)** — GeometricContentNet: [nx,ny,nz,log_area]→64→d_model, zero-init output, added to surface token content x BEFORE Transolver slicing. Warm-start from H185 EP15 + fine-tune 3 cosine-tail epochs. Directly tests CONTENT PATH (distinct from H351's routing path). **PR #1549 just assigned.** | 🆕 just assigned | Encoder content (geometric inductive bias) |
 | **#1539** | fern | **H348: Surface curvature input features — POTENTIAL SOTA.** Arm A TTA eval `26e5khdg` RUNNING (2.78h elapsed). Val metric = 5.9213% (likely raw TTA; cal yield ~7-8bp → val_cal ~5.843-5.849, easily beats H342 gate). **Test metrics still executing — ETA ~22:00Z.** | 🔥 WIP — POTENTIAL SOTA | Input geometry |
@@ -66,6 +66,7 @@
 - PR #1542 askeladd H350 FiLM decoder Phase A: `filmdec-random-init-too-slow-for-frozen-backbone`. Catastrophic regression val_wss_z +316bp.
 - PR #1546 askeladd H354 FiLM decoder Phase A' EP13-warm-started: `filmdec-axis-fully-closed` + `decoder-pareto-optimal-at-h336-ep13` + `wssz-gap-upstream-not-decoder`. **FiLM-decoder axis fully closed.**
 - **PR #1543 tanjiro H351 NGSB**: `ngsb-normal-only-routing-pessimal` + `encoder-routing-axis-coarse-normals-falsified`. +69.8bp val abupt monotone regression; WSS_z no improvement at any epoch. **Routing path via normals is pessimal; H357 tests CONTENT path.**
+- **PR #1545 frieren H353 signed_power expansive**: `target-transform-axis-closed-wssz` + `signed-power-expansive-also-pessimal` + `wss-z-residuals-not-heavy-tail-loss-problem`. Arm A p=1.25 +15bp val_abupt/+15bp val_wss_z. Arms B/C skipped. **Both directions of target-transform now closed — 7th converging axis. Loss-shape is NOT the lever; representation IS.**
 
 ---
 
@@ -76,7 +77,7 @@ The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's tar
 **Active 6-axis WSS_z attack PLUS Morgan #1:**
 1. **H348 fern curvature features (POTENTIAL SOTA)** — per-vertex H curvature as new INPUT channel. Arm A train-raw tied with H336. **TTA eval `26e5khdg` shows val_abupt RAW TTA = 5.9213% (−4.87bp vs H336 raw)**, val_wss_z 9.0846. If cal extracts 7-8bp, val_cal ~5.84-5.85 = NEW SOTA. Awaiting student SENPAI-RESULT with cal + test metrics.
 2. **H347 nezuko physics priors (ALIVE)** — boundary-layer geometric constraint (τ⊥n: shear tangent to surface normal) and kNN smoothness regularization. Arm A finished train-tied with H336 (test_abupt 5.8564). Arm B smooth-only at step 4884 ties Arm A. Arm C + TTA cascade auto-chaining.
-3. **H353 frieren signed_power expansive target (CONCERNING)** — `sign(τ_z)·|τ_z|^p` for p∈{1.25, 1.5, 2.0}. EXPANSIVE direction (direct converse of H349 closed compressive). **Arm A p=1.25 at step 3013 rt 1.50h shows val_abupt 6.155 / val_wssz 9.388 — +18/+22bp regression**, mirroring H349's failure pattern. If terminal holds, expansive direction also closed = target-transform axis fully closed on heavy-tailed channels.
+3. **~~H353 frieren signed_power expansive~~ CLOSED → H358 frieren tangent-basis residual head (FRESH)** — H353 closed (`target-transform-axis-closed-wssz` + `signed-power-expansive-also-pessimal`). H358 pivots to OUTPUT BASIS axis (never touched): TangentResidualHead predicts (τ_t1, τ_t2) in per-point local tangent basis, projects to global xyz, added to existing 3-channel head. Zero-init safe warm-start, physics constraint τ·n=0 by construction. **PR #1550.**
 4. **~~H351 tanjiro NGSB~~ CLOSED → H357 tanjiro GeoTransolver content embedding (FRESH)** — H351 closed (`ngsb-normal-only-routing-pessimal`). H357 replaces routing path with CONTENT path: GeometricContentNet([nx,ny,nz,log_area])→64→d_model, zero-init output, added to surface token `x` before Transolver slicing. Warm-start EP15, fine-tune 3 cosine-tail epochs. **PR #1549 just assigned.**
 5. **H352 thorfinn SWA-within-cosine-tail** — averages ~30 fine-grained weight snapshots along the SAME H336 cosine-tail. Mechanistically distinct from H307 cross-seed soup (closed) and H342 output averaging (in-flight). Zero param overhead. Fresh restart at 17:32Z after swa_save_from_step fix.
 6. **H355 askeladd BL derivative decoder (Morgan #1 — NEW)** — **volume-rooted** ghost-probe finite-difference computation of τ_w. Cross-attend off-wall probe locations into Transolver volume tokens, predict u(x+η·n̂), use Richardson FD to derive τ_w = μ·∂u/∂n. Auxiliary loss + inference-time OLS blend with direct head. Target ~30bp test_WSS improvement. Physically-correct decoder structure (replaces direct τ_xyz regression with FD-derived prediction). 8-12h student-time. **Tests upstream/volume mechanism after FiLM decoder axis fully closed.**
@@ -85,7 +86,7 @@ The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's tar
 7. **H338 edward SP reweight Arm D** — composition test of Arm C EP15 with H336 TTA recipe. Eval `9t27gag4` running, ETA ~21:30Z.
 8. **H342 alphonse multi-checkpoint TTA (ALIVE)** — output-space average ep13+ep14+ep15. RAW val_abupt 5.9299 (−4.0bp vs H336 raw). Test_surface 5/6 cases at 17:28Z heartbeat. Eval `3icmxaqe` running.
 
-**Triangulation logic**: H348 = INPUT; H353 = OUTPUT-TRANSFORM (expansive); ~~H354 = OUTPUT-DECODER CLOSED~~; H355 = PHYSICAL-DECODER (volume-rooted); H347 = PHYSICS-CONSTRAINT; ~~H351 = ENCODER-ROUTING CLOSED~~; H357 = ENCODER-CONTENT (geometric inductive bias → CONTENT not routing); H352 = WEIGHT-TRAJECTORY. If these all null, escalate to deep-tier (hierarchical attention, native tangent-basis output head — Morgan directive #2).
+**Triangulation logic**: H348 = INPUT; ~~H353 = OUTPUT-TRANSFORM CLOSED~~; ~~H354 = OUTPUT-DECODER CLOSED~~; H355 = PHYSICAL-DECODER (volume-rooted); H347 = PHYSICS-CONSTRAINT; ~~H351 = ENCODER-ROUTING CLOSED~~; H357 = ENCODER-CONTENT; H358 = OUTPUT-BASIS (NEW, tangent-basis residual); H352 = WEIGHT-TRAJECTORY. If these all null, escalate to deep-tier (hierarchical attention, native tangent-basis pure replacement, multi-scale local surface manifold — Morgan directives #2/#3).
 
 **CURRENT STRONG ALIVE CANDIDATES (against new H342 gate: val<5.8962 AND test<5.7357)**:
 - **H342 MERGED as SOTA** ✓ — val_cal 5.8962, test_cal 5.7357

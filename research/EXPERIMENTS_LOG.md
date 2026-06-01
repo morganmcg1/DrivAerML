@@ -1,3 +1,40 @@
+## 2026-06-01 20:10Z — PR #1545: H353 signed_power expansive target on wss_z — CLOSED
+
+- Branch: frieren/h353-signed-power-target-wssz
+- **Hypothesis**: Direct converse of H349 (closed compressive arcsinh). Apply expansive `sign(τ_z)·|τ_z|^p` with p∈{1.25, 1.5, 2.0} to upweight the heavy-|τ_z| tail in loss space. If H349's compressive direction failed by underweighting, expansion should help.
+- W&B run: `4c17qw9k` (Arm A p=1.25, halted at ep15 mid-ep16)
+
+### Results — Arm A (p=1.25)
+
+| Metric | H336 RAW | H353 Arm A ep15 | Δ vs H336 |
+|---|---:|---:|---:|
+| val_abupt | 5.97 | 6.121 | **+15bp ❌** |
+| val_wss_z | 9.18 | 9.329 | **+15bp ❌** |
+
+Both pre-committed close triggers met:
+- `cal-cannot-rescue-train-raw-regression`: val_abupt RAW 6.121 > H336+10bp (6.07)
+- Axis-fully-closed skip rule: val_wss_z RAW 9.329 > H336+10bp (9.28) → Arms B/C SKIPPED (monotone direction-of-effect predicts further regression at p>1.25)
+
+Trajectory projection (W&B slopes over last 1k steps): even at constant slope, ep16 would NOT recover either threshold (val_abupt → ~6.087, val_wss_z → ~9.271). Halting saved ~25min GPU.
+
+### Analysis
+1. **Direction-of-effect from H349 closure was over-extrapolated.** H349 (compressive) failed; this does NOT imply expansion helps. Both directions hurt → identity (p=1) is the local optimum, with H336's existing linear upweight (`--tau-z-loss-weight 1.67`) being all the channel-weighting that helps.
+2. **Mechanistic interpretation**: H336 already has linear upweight on wss_z. Adding nonlinear loss-space curvature on top — in EITHER direction — distorts the optimization landscape near the heavy tail in a way that hurts generalization. The wss_z basin is fragile to nonlinear target reweighting at the loss layer.
+3. **Quantitative ranking** (severity of val_wss_z regression): H336 (identity) 0bp · H353 Arm A (expansive p=1.25) +15bp · H349 (compressive arcsinh) +72bp. Compression is WORSE than expansion, so there IS a mild directional gradient, but the minimum is at p=1.
+4. **Convergent finding with 6 prior closures**: WSS_z residuals are NOT a heavy-tail loss-shape problem. The bottleneck is **representation** (input features, decoder structure, boundary-layer geometry, output basis), not loss-side.
+
+### Decision: CLOSED
+- Finding: **`target-transform-axis-closed-wssz`** — both compressive (H349) and expansive (H353) directions hurt. The loss-side target-transform axis is closed.
+- Finding: **`signed-power-expansive-also-pessimal`** — Arms B (p=1.5), C (p=2.0) skipped per monotone-trajectory skip rule.
+- Finding: **`wss-z-residuals-not-heavy-tail-loss-problem`** — **load-bearing implication**: future WSS_z attacks should focus on representation, NOT loss-shape.
+
+### Cumulative closure pattern (7 axes converge)
+Loss-reweight uniform (H339) + wz-only (H341) + per-vertex focal (H346) + SAM/flatness (H343) + FiLM-decoder (H350+H354) + encoder-routing normals (H351) + **target-transform full (H349+H353)**. All seven axes converge on the same conclusion: WSS_z bottleneck is **structural/representational**, not loss-side or optimization-side.
+
+### Next assignment: H358 frieren native tangent-basis residual output head (OUTPUT BASIS axis, never touched)
+
+---
+
 ## 2026-06-01 19:40Z — PR #1543: H351 NGSB Normal-Relative Geometric Slice Bias — CLOSED
 
 - Branch: tanjiro/h351-ngsb-normal-geometric-slice-bias
