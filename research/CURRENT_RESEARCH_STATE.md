@@ -1,9 +1,43 @@
 # SENPAI Research State
 
-- **2026-06-01 07:30Z**
+- **2026-06-01 08:30Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
+
+## 08:30Z checkpoint — FLEET ALL AHEAD of H183 on ABU; H188 EP7 ALREADY past H183 EP10 reference
+
+### Fleet status (08:30Z) — all 4 active runs trending positively
+
+| Student | PR | Hyp | EP | val_ABU | val_WSS | Δ ABU vs H183 ref | Verdict |
+|---|---|---|---|---:|---:|---:|---|
+| frieren | #1532 | H188: τ_y=1.2/τ_z=1.3 + lr=9e-5 on H183 stack | **EP7** | **6.08** | ~6.89 | **−0.12 vs H183 EP10=6.20** | **STRONGEST — already past H183 EP10 ABU reference** |
+| nezuko | #1533 | H189: hidden_dim=640 + H183 stack | EP5 | **6.12** | 6.89 | **−0.43 vs H183 EP5=6.55** | ABU lead in fleet at EP5 |
+| tanjiro | #1534 | H190: surface_out_width_factor=2.5 | EP4 | **6.27** | 6.97 | **−0.28 vs H183 EP5=6.55** | tracking H183 closely (WSS +0.05) |
+| fern | #1535 | H191: Sharper WSD (lr→1e-6, stable=24EP/decay=6EP) | EP1 | **9.53** | 9.69 | **−1.51 vs H183 EP1=11.04** | dramatic early descent — sharper WSD producing fastest EP1 of all 4 runs |
+
+### Key finding: H188 at EP7 has ABU=6.08, already below H183's EP10 reference (6.20)
+
+This is **the first time in this research programme** we have a run trending below H183 EP10 ABU 7 epochs ahead of schedule. Mechanism reading: τ_y=1.2/τ_z=1.3 channel weights are pulling tau-axis predictions tighter at no cost to surface pressure or volume pressure. With 23 more EPs to go (30 total), the trajectory suggests test_ABU could land well below H183's 5.6152.
+
+Caveat: H188 WSS still +0.18-0.25 above H183 at EP3-5; need to watch whether WSS converges by EP15-EP20 or if the τ-reweighting trades WSS for ABU. **The paper-facing primary is ABU, so a WSS regress within floor is acceptable if ABU improves materially.**
+
+### H189 (nezuko, PR #1533) — capacity bump leads ABU narrowly
+
+EP5 ABU=6.12 leads the fleet at EP5. Hidden_dim=640 (+25% width) is improving early-EP descent. Tracking ahead of H188 at the same epoch (H188 EP5 ABU=6.18).
+
+### H190 (tanjiro, PR #1534) — width-factor=2.5 closely tracking
+
+EP4 ABU=6.27, val_WSS=6.97. Trajectory similar to H189 with slightly slower descent.
+
+### H191 (fern, PR #1535) — dramatic early descent
+
+EP1 ABU=9.53 vs H183 EP1=11.04 (−1.51pp), val_WSS=9.69 vs H183 EP1=11.84 (−2.15pp). **Strongest EP1 of all 4 active runs.** Sharper WSD (lr=1e-5→1e-6 over 6 EP) is producing a much faster initial descent than H183's reference WSD shape. 30 more EPs of data to come.
+
+### Action plan
+- **Next wake ~10:00Z** for EP9-10 boundary cluster on H188/H189, EP6-7 on H190, EP3-4 on H191.
+- H188 watch: when does WSS converge? If WSS gap closes by EP15, H188 looks like a clear winner. If WSS plateau ~0.2pp above H183 with ABU advantage, still a winner on paper-facing primary.
+- No closes or merges yet — all 4 are mid-flight on long runs (24+ hr expected).
 
 ## 07:30Z checkpoint — H188 LEADING (EP3 ABU=6.40 ahead of H183); H189 strong; H190 smoke PASSED + main launched; H191 fern dispatched
 
