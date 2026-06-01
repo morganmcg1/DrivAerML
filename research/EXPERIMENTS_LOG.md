@@ -1,3 +1,57 @@
+## 2026-06-01 23:25Z — PR #1522: H338 SP-loss-reweight Arm D (armC × H336 TTA recipe) — CLOSED
+
+- Branch: edward/h338-sp-loss-reweight-armD
+- **Hypothesis**: Compose H338 Arm C SP-targeted loss reweighting (validated EP15 checkpoint with SP-weighted training) with H336 K=5 + 8-res + Student-t ν=4 + mirror cal TTA recipe to close the test_SP +3.5bp gap to Transolver-3 floor (3.577%). Single-arm compositional eval.
+- W&B run: `9t27gag4` (8-GPU DDP TTA cascade, finished 23:14Z, rt=30562s = 8.5h)
+
+### Results (`9t27gag4` terminal)
+
+| Channel | Raw | Calibrated | Δ vs H342 gate |
+|---|---:|---:|---:|
+| **val_abupt** | 5.9224 | **5.8996** | **+0.34bp MISS** (gate 5.8962) |
+| **test_abupt** | 5.7635 | **5.7340** | **−0.17bp PASS** (gate 5.7357) |
+| test_WSS | 6.6688 | 6.6354 | +0.03bp (tied) |
+| **test_WSS_z** | 8.6565 | **8.6120** | **0.00bp** (tied H342 ~8.612) |
+| test_WSS_y | 7.2205 | 7.1799 | -0.42bp |
+| test_WSS_x | 5.9277 | 5.9000 | -0.14bp |
+| test_VP | 3.3741 | 3.3724 | -0.27bp (well under 3.421 floor) |
+| test_SP | 3.6386 | 3.6059 | -0.65bp BUT still +2.9bp over 3.577 ceiling |
+
+**Calibration coefficients**: α_cp=0.99467, α_τx=0.99449, α_τy=0.99397, α_τz=0.99183, α_VP=0.99977, β_VP=−0.79708.
+
+### Analysis
+
+1. **Split decision: test beats H342 by 0.17bp, val regresses by 0.34bp.** AND-gate requires both gates to pass; magnitude of val regression (0.34bp) exceeds test improvement (0.17bp). NOT a merge candidate.
+2. **WSS_z target channel TIED with H342 (8.6120 vs 8.6122).** SP-loss-reweight Arm C provided 0 movement on the WSS_z target — confirms SP-reweight does not transfer to the dominant WSS_z bottleneck.
+3. **test_SP −0.65bp improvement is real but insufficient.** test_SP=3.6059 is still +2.9bp over the 3.577 ceiling. Surface-pressure axis can be moved, but not enough to clear the floor.
+4. **Calibration extracted ~3bp (val 5.9224 → 5.8996, test 5.7635 → 5.7340).** Matches established `cal-cannot-rescue-train-raw-regression` finding: cal yields ~3-8bp consistently but cannot close raw regressions exceeding it.
+
+### Decision: CLOSED — `sp-reweight-armC-x-h336-split-decision`
+
+**Stacking SP-loss-reweight Arm C × H336 TTA recipe produces test-only improvement insufficient to clear AND-gate. The 0.34bp val_cal regression dominates the 0.17bp test_cal improvement under cal-asymmetric variance. Per-channel SP/WSS loss-reweighting × multi-cp stacking is exhausted as a Pareto direction.**
+
+This is the **10th converging closed decoder/input-side axis**, joining:
+1. Loss-reweight uniform (H339)
+2. Loss-reweight wz-only (H341)
+3. WSS_z per-batch focal (H346)
+4. TTA-saturation σ-sweep (H340)
+5. TTA-saturation K-axis (H344)
+6. TTA-saturation 8-res-only (H330)
+7. SAM cosine-tail (H343)
+8. Target-transform compressive arcsinh (H349)
+9. Target-transform expansive signed_power (H353)
+10. FiLM-decoder random-init head_mlp (H350)
+11. FiLM-decoder EP13-warm-start head_mlp (H354) — fully closed axis
+12. NGSB encoder-routing (H351)
+13. BL-derivative-decoder (H355)
+14. PCGrad/CAGrad gradient surgery (H345)
+15. Curvature input features (H348)
+16. **SP-loss-reweight × H336-stack (H338) ← THIS ONE**
+
+**Plateau Protocol: 10 converging closed axes. Encoder-input axes (H359 multi-scale kNN, H360 LapPE-32 global spectral) and decoder-side axes (H358 native tangent-basis residual head) remain the active frontier.** Edward idle, awaiting H361 (researcher-agent dispatched for fresh direction).
+
+---
+
 ## 2026-06-01 22:52Z — PR #1539: H348 Surface curvature input features (k1, k2, H, K) — CLOSED
 
 - Branch: fern/h348-curvature-input-features
