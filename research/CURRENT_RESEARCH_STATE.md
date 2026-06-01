@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-01 23:25Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=4 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-01 23:35Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=4 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -48,7 +48,7 @@
 
 ---
 
-## Active Fleet (2026-06-01 23:25Z — 7 WIP students, 1 idle awaiting H361 assignment)
+## Active Fleet (2026-06-01 23:35Z — 8/8 WIP students, fleet fully active)
 
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
@@ -59,7 +59,7 @@
 | **#1552** | fern | **H360: Surface Laplacian eigenfunction PE (LapPE-32) — FRESH ASSIGNED 22:52Z.** Global geodesic surface structure via lowest 32 eigenfunctions of surface graph Laplacian. Orthogonal to H348 curvature (local shape) and H359 kNN (local multi-scale). Tests whether WSS_z floor is a GLOBAL information-deficit problem. Smoke → Phase 1 EP13→EP16 cosine-tail → TTA+cal eval. Pre-committed close: val_abupt RAW > 6.10% → close early. | 🆕 just assigned | Encoder input (global geodesic structure) |
 | **#1538** | nezuko | H347: BL physics priors — **Arm B smooth-only `zg2o713u` DONE: test_abupt_raw 5.8500 (−0.64bp vs Arm A).** Arm C (both priors λ_n+λ_s) launched 19:33Z, ETA terminal ~22:07Z. TTA cascade starts after Arm C. | 🟡 WIP — Arm C training | Physical constraint |
 | **#1548** | alphonse | **H356: 3-cp output-avg × K=5 — POTENTIAL SOTA** — val arm landed: val_abupt_raw=**5.9206** (-1bp vs H342 raw), val_cal_proj ~5.88. test arm pending in same run `0n1xkwic` (rt=12525s). ETA terminal ~04:00Z June 2. | 🟢 WIP — **val arm done, test continuing** | Output-space averaging (K-axis extension) |
-| — | **edward** | **IDLE — H338 closed split-decision (val_cal 5.8996 MISS / test_cal 5.7340 PASS, AND-gate fails)**. Awaiting H361 hypothesis from researcher-agent. | ⚪ idle | — |
+| **#1553** | edward | **H361: Direction-Magnitude decomposed WSS loss (FRESH ASSIGNED 23:35Z)** — replaces per-channel scalar MSE with α·(1-cos_sim) + β·rel_norm_mse on WSS vector. Zero param overhead. Tests whether WSS_z floor is direction-error vs magnitude-error dominated. Orthogonal to all 10 closed scalar-reweight axes and all 7 in-flight arch experiments. Smoke ~5min + Phase 1 EP13→EP16 ~6.5h + TTA ~6h. **PR #1553.** | 🆕 just assigned | Loss geometry (vector decomposition) |
 
 **Closed this loop**:
 - PR #1524 tanjiro H340 σ-sweep at ν=4: `sigma-axis-closed-nu4` + `per-channel-alpha-sigma-drift`. TTA hyperparameter family fully saturated.
@@ -91,7 +91,7 @@ The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's tar
 7. ~~**H338 edward SP reweight Arm D**~~ **CLOSED 23:25Z** — `sp-reweight-armC-x-h336-split-decision`. val_cal 5.8996 MISS (+0.34bp) / test_cal 5.7340 PASS (−0.17bp) / WSS_z_cal 8.612 (tied H342). 10th converging closed axis. Edward idle, awaiting H361 (researcher-agent dispatched).
 8. **H356 alphonse 3-cp output-avg × K=5 — POTENTIAL SOTA candidate** — val arm done: val_abupt_raw=**5.9206** (-1bp vs H342 raw). Cal projection ~5.88. test arm continuing in same run `0n1xkwic`. ETA terminal ~04:00Z June 2.
 
-**Triangulation logic**: ~~H348 = INPUT (curvature CLOSED)~~; H360 = INPUT (global LapPE FRESH); ~~H353 = OUTPUT-TRANSFORM CLOSED~~; ~~H354 = OUTPUT-DECODER CLOSED~~; ~~H355 = PHYSICAL-DECODER CLOSED~~; H347 = PHYSICS-CONSTRAINT; ~~H351 = ENCODER-ROUTING CLOSED~~; H357 = ENCODER-CONTENT; H358 = OUTPUT-BASIS; H352 = WEIGHT-TRAJECTORY; H359 = ENCODER-MULTI-SCALE-LOCAL; H360 = ENCODER-INPUT-GLOBAL-SPECTRAL. If all null, escalate to Physics-regime MoE (Morgan P4) or hierarchical attention.
+**Triangulation logic**: ~~H348 = INPUT (curvature CLOSED)~~; H360 = INPUT (global LapPE FRESH); ~~H353 = OUTPUT-TRANSFORM CLOSED~~; ~~H354 = OUTPUT-DECODER CLOSED~~; ~~H355 = PHYSICAL-DECODER CLOSED~~; H347 = PHYSICS-CONSTRAINT; ~~H351 = ENCODER-ROUTING CLOSED~~; H357 = ENCODER-CONTENT; H358 = OUTPUT-BASIS; H352 = WEIGHT-TRAJECTORY; H359 = ENCODER-MULTI-SCALE-LOCAL; H360 = ENCODER-INPUT-GLOBAL-SPECTRAL; **H361 = LOSS-GEOMETRY (vector decomposition cosine+relnorm)**. If all null, escalate to GeoTransolver-style architectural cross-attention (B3 fallback per researcher-agent).
 
 **CURRENT CANDIDATES (against H342 gate: val<5.8962 AND test<5.7357)**:
 - **H342 MERGED as SOTA** ✓ — val_cal 5.8962, test_cal 5.7357
