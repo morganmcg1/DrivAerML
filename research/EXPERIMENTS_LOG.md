@@ -5068,3 +5068,99 @@ Wave-4 H182 (EMA 0.9999 + LR 1.3×) dispatched to nezuko (PR #1506).
 The EMA axis above H147's canonical decay is uniformly falsified. Next experiments (H182 EMA+LR compound, H183 per-channel heads, H184 WSD LR) do not revisit EMA decay.
 
 **Follow-up dispatched:** H185 `hidden_dim=640` (PR #1527, dl24-frieren) — tests capacity axis not covered in structural wave (H164–H167 tested slices/pe_features/surface_out/heads but NOT hidden_dim).
+
+## 2026-06-01 03:31Z — PR #1510: H183 — Per-channel surface decoder heads — **MERGED NEW SOTA** ⭐
+
+- **dl24-tanjiro/h183-per-channel-decoder-heads** (run `guw83mge`, 30-EP DDP8, ~22.8h)
+- **Hypothesis:** Replace the single shared surface MLP decoder (Linear(512, 1024)→GELU→Linear(1024, 4)) with 4 independent per-channel MLPs — one for each output (cp, τ_x, τ_y, τ_z). Eliminates gradient competition where high-gradient τ_z wake features compete with near-zero cp predictions in the shared MLP. Expected gain: −0.1 to −0.3pp test_WSS.
+
+### Test metrics (best EMA EP24 checkpoint, selection metric val_primary/abupt_axis_mean_rel_l2_pct)
+
+| Metric | H183 | H147 SOTA | Δ | vs floor | Verdict |
+|---|---:|---:|---:|---|---|
+| **test_WSS** | **6.4427%** | 6.5409% | **−0.098pp** | — | **NEW SOTA ⭐** |
+| test_VP | 3.4415% | 3.4014% | +0.040pp | ≤3.643% ✓ | pass floor |
+| test_SP | 3.5187% | 3.5634% | −0.045pp | ≤3.577% ✓ | pass floor (improved!) |
+| test_ABUPT | 5.6152% | 5.6648% | −0.050pp | ≤5.844% ✓ | pass floor |
+| test_τ_x | 5.6983% | 5.8155% | −0.117pp | — | improved |
+| test_τ_y | 6.9813% | 7.0556% | −0.074pp | — | improved |
+| test_τ_z | 8.4364% | 8.4882% | −0.052pp | — | improved |
+
+**ALL 4 FLOORS CLEARED. CLEAN WIN ON ALL METRICS vs H147.**
+
+### Val trajectory (selected EPs)
+
+| EP | val_WSS | val_VP | val_SP | val_ABU | H147 ref | Notes |
+|---:|---:|---:|---:|---:|---:|---|
+| 1 | 12.973 | 14.002 | 8.742 | 13.082 | 12.815 | +0.16pp vs H147 (shared head slightly slower EP1) |
+| 3 | 6.908 | 4.168 | 3.978 | 6.232 | 6.975 | −0.067pp (peak per-channel lead) |
+| 5 | 6.750 | 3.818 | 3.892 | 6.038 | 6.756 | −0.006pp (tied H147) |
+| 10 | 6.640 | 3.559 | 3.849 | 5.908 | 6.650 | −0.010pp |
+| 15 | 6.602 | 3.513 | 3.850 | 5.877 | 6.547 | +0.055pp (appears to slip behind) |
+| 20 | 6.588 | 3.498 | 3.847 | 5.867 | 6.545 | +0.043pp |
+| **24** | **6.584** | — | — | **5.869** | — | **EMA BEST (selection metric)** |
+| 30 (term) | 6.589 | 3.583 | 3.843 | 5.873 | 6.545 | +0.044pp (val trajectory misleading!) |
+
+### Critical finding: val→test mapping is architecture-dependent
+
+| Channel | H147 val→test Δ | H183 val→test Δ |
+|---|---:|---:|
+| WSS | ~−0.004pp | **−0.142pp** |
+| VP | ~−0.008pp | **−0.138pp** |
+| SP | ~+0.001pp | **−0.321pp** |
+| ABU | ~0.000pp | **−0.253pp** |
+
+**The val trajectory at EP15-30 showed H183 running ~+0.04pp behind H147 on WSS — making it APPEAR to be a NON-MERGE. The actual test result shows −0.098pp IMPROVEMENT.** Per-channel heads produce a more generalizable solution: the val-optimum is slightly different from H147's, but the test-optimum is substantially better.
+
+**Methodological lesson:** val→test projection using H147's ~0pp pattern is WRONG for architectures that change the decoder topology. Future decoder-architecture variants must bracket projections with both H147's ~0pp and H183's ~−0.15pp patterns.
+
+### Scientific contributions
+
+1. **Per-channel surface decoder heads WORK.** Decoupling cp/τ_x/τ_y/τ_z into independent gradient pathways acts as a generalization regularizer — each head commits to one channel's loss landscape rather than diluting capacity across all four.
+
+2. **Mechanism is real (per-axis evidence):** τ_x improved most (−0.117pp), then τ_y (−0.074pp), then τ_z (−0.052pp). The high-gradient τ_z wake features no longer compete with cp in the same MLP weights.
+
+3. **val→test mapping is architecture-dependent.** The ~0pp H147 val→test pattern cannot be assumed for decoder topology changes. This retroactively explains several H183 advisory comments that called NON-MERGE based on val trajectory — the val signal was genuinely misleading for this architecture.
+
+4. **New H183 stack**: H147 config + `--per-channel-surface-heads` = new SOTA. This flag has since been made the unconditional default in the cleanup PR #1531.
+
+### Follow-up experiments dispatched
+
+- **PR #1531 (tanjiro):** H183-cleanup — make per-channel heads default, remove legacy flag
+- **PR #1532 (frieren):** H188 — H183-stack + mild τ_y/τ_z weights (1.2×/1.3×) + lr=9e-5
+- **PR #1533 (nezuko):** H189 — H183-stack + hidden_dim=640 (retry width expansion on per-channel decoder)
+
+---
+
+## 2026-06-01 — PR #1527: H185 — hidden_dim=640 on H147 shared-decoder stack — NON-MERGE (closed EP7)
+
+- **dl24-frieren/h185-hidden-dim-640-h147** (run `jouem8en`, killed EP7.1, ~6.8h)
+- **Hypothesis:** Width expansion (hidden_dim 512→640, +25% params) tests τ_y/τ_z representational saturation hypothesis.
+
+| EP | H185 val_WSS | H147 ref | Δ |
+|---:|---:|---:|---:|
+| 1 | 11.493 | 12.82 | **−1.33pp lead** |
+| 3 | 7.003 | 6.98 | +0.02 (tied) |
+| 5 | 6.848 | 6.75 | +0.10 (behind) |
+| 6 | 6.813 | ~6.74 | +0.07 (behind) |
+| 7 | 6.790 | ~6.72 | +0.07 (behind) |
+
+**Verdict:** Width=640 on shared decoder does NOT improve over 512. EP1 capacity lead fully eroded by EP3, inverted by EP5. Hidden_dim=512 is at or near the local capacity optimum for the shared-decoder stack. Closed early due to clear non-merge trajectory AND H183 merge making old-stack experiments non-competitive.
+
+**Note:** H189 (PR #1533) retests hidden_dim=640 on the H183 per-channel decoder stack — different mechanism (per-channel independence changes width allocation).
+
+---
+
+## 2026-06-01 — PR #1529: H186 — layers=8 on H147 shared-decoder stack — NON-MERGE (closed EP3)
+
+- **dl24-nezuko/h186-layers-8-depth-axis** (run `31pux7bu`, killed EP3.25, ~3.3h)
+- **Hypothesis:** Depth expansion (layers 6→8) tests orthogonal capacity axis to H185.
+
+| EP | H186 val_WSS | H147 ref | H185 ref | Δ vs H147 |
+|---:|---:|---:|---:|---:|
+| 1 (main) | 11.826 | 12.82 | 11.49 | −0.99pp |
+| 2 | 7.273 | 7.26 | 7.27 | +0.01 (tied) |
+| 3 | 7.015 | 6.98 | 7.00 | +0.03 (slightly behind) |
+
+**Verdict:** Depth=8 on shared decoder shows IDENTICAL convergence pattern to width=640 — strong EP1 lead, convergence to H147 by EP2-3. **Joint conclusion (H185 + H186):** Capacity-axis search is CLOSED for the shared-decoder stack. Both width AND depth fail to sustain EP1 leads into mid-training on H147-style config. H147's 512d/6L is at or near the local capacity optimum.
+

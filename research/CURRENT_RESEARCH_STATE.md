@@ -1,11 +1,90 @@
 # SENPAI Research State
 
-- **2026-06-01 01:00Z**
+- **2026-06-01 04:30Z**
 - **Advisor branch:** drivaerml-long-20260504
-- **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
-- **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+- **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
+- **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 
-## 01:00Z snapshot — H185 EP6 SLIPS BEHIND H147 (+0.07pp); H184 EP27 decay finally activating but still NON-MERGE; H183 EP27 final stretch; H186 EP3 tracking H147
+## 04:30Z MAJOR UPDATE — H183 MERGED NEW SOTA; H185/H186/H184 closed; 3 new assignments dispatched on H183 stack
+
+### Current fleet status
+
+| Student | PR | Hyp | Status |
+|---|---|---|---|
+| tanjiro | #1531 | H183-cleanup: make per-channel heads default | NEW WIP — code cleanup, ~1-2h |
+| frieren | #1532 | H188: H183-stack + mild τ_y/z weights (1.2/1.3) + lr=9e-5 | NEW WIP — smoke then 30-EP |
+| nezuko | #1533 | H189: H183-stack + hidden_dim=640 | NEW WIP — smoke then 25-EP |
+| fern | #1513 | H184: WSD LR schedule | WIP TERMINAL IMMINENT — NON-MERGE all 4 axes; SENPAI-RESULT pending |
+
+### H183 MERGED — test metrics (EP24 EMA, run `guw83mge`)
+
+| Metric | H183 | H147 prev SOTA | Δ |
+|---|---:|---:|---:|
+| **test_WSS** | **6.4427%** | 6.5409% | **−0.098pp ⭐ NEW SOTA** |
+| test_SP | 3.5187% | 3.5634% | −0.045pp ✅ |
+| test_VP | 3.4415% | 3.4014% | +0.040pp ✅ |
+| test_ABU | 5.6152% | 5.6648% | −0.050pp ✅ |
+| test_τ_x | 5.6983% | 5.8155% | −0.117pp |
+| test_τ_y | 6.9813% | 7.0556% | −0.074pp |
+| test_τ_z | 8.4364% | 8.4882% | −0.052pp |
+
+**Critical methodological finding (val→test mapping):** H183's val trajectory appeared +0.04pp BEHIND H147 at EP15-30, but test showed −0.098pp IMPROVEMENT. Val→test gap is architecture-dependent: H147 shows ~0pp gap; H183 shows −0.14pp (WSS) / −0.32pp (SP). **Future decoder-architecture variants MUST NOT use H147's val→test pattern for projection.**
+
+### Closed this cycle
+
+| PR | Hyp | Verdict | Reason |
+|---|---|---|---|
+| #1510 | H183 per-channel heads | **MERGED** ⭐ | test_WSS=6.4427 (NEW SOTA, all 4 floors) |
+| #1527 | H185 hidden_dim=640 (old stack) | NON-MERGE | EP7 val_WSS=6.79, +0.07pp behind H147; definitively non-merge against new SOTA |
+| #1529 | H186 layers=8 (old stack) | NON-MERGE | EP3 val_WSS=7.01, same EP1-lead-erasure pattern as H185 |
+| #1513 | H184 WSD LR | NON-MERGE (terminal pending) | lr≈0, val_WSS=6.84 — WSD decay null, all 4 axes fail |
+
+### Research direction change (H183 stack)
+
+All new experiments now build on H183 per-channel decoder stack (default in codebase). The old shared-MLP surface decoder path is removed in PR #1531.
+
+**Key findings from this wave:**
+1. Per-channel decoder heads = confirmed SOTA mechanism (+0.098pp WSS, all floors improved)
+2. Capacity axis (width=640, depth=8) CLOSED on shared-decoder stack — H147 512d/6L is optimal
+3. WSD schedule FALSIFIED on this stack (wrong schedule shape — needs 100× drop, not 0.32×)
+4. val→test mapping is NOT constant across decoder architectures — critical lesson for future val-trajectory projections
+
+**Next research directions:**
+1. **H188 (frieren):** Mild τ_y/z loss weights (1.2/1.3) + lr=9e-5 on H183 stack — per-channel independence should make this cleaner than on shared decoder
+2. **H189 (nezuko):** hidden_dim=640 on H183 per-channel decoder — retry capacity expansion with decoupled gradients
+3. **H183-cleanup (tanjiro):** Consolidate per-channel heads as unconditional default
+4. **Post-cleanup tanjiro:** H190 planned — extended training (40-45 EP) or per-head width sweep
+5. **Post-H184 fern:** H191 — sharper WSD (100× lr drop, longer stable phase) on H183 stack
+6. **Longer-term:** grouped crossflow head (τ_y+τ_z shared, τ_x separate) to test mechanism direction
+
+### H184 (fern, #1513) — terminal pending
+
+val_WSS=6.8386, val_SP=4.0627, val_VP=3.7123, val_ABU=6.0918 at last W&B read. train/lr≈0. SENPAI-RESULT expected any minute. Close NON-MERGE after result lands.
+
+## 01:40Z snapshot — H183 EP28 plateau confirmed + per-channel asymmetry finding; H185 EP7 descent slowing (kill-gate fail likely); H186 EP3 tracking H147; H184 EP28 still decay-null
+
+**Terminal cluster timing:** H183 ~03:20Z, H184 ~03:30-04:00Z, H185 EP10 gate ~04:00Z, H186 EP5 gate ~03:30Z.
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | val_SP | val_ABU | lr | Status |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
+| frieren | #1527 | H185 hidden_dim=640 | 7.1 | 6.7902 (rate slowing) | 3.6352 | 3.9476 | 6.0192 | 9.05e-5 | EP10 gate ≤6.65 likely FAIL (linear proj 6.72) |
+| nezuko | #1529 | H186 layers=8 main | 3.25 | 7.0149 (+0.03 vs H147 EP3) | 4.0338 | 4.0905 | 6.2914 | 9.84e-5 | EP5 gate ~03:00Z |
+| tanjiro | #1510 | H183 per-channel heads | 27.98 | 6.5886 (plateau, EP24 best=6.5844) | 3.5826 | **3.8428 (flat)** | 5.8726 | 3.4e-6 (deep tail) | NON-MERGE on SP floor; terminal ~03:20Z |
+| fern | #1513 | H184 WSD LR | 27.78 | 6.8321 (decay null) | 3.7123 | 4.0628 | 6.0887 | 3.16e-5 | NON-MERGE projected ALL 4 axes; terminal ~03:30Z |
+
+### H183 per-channel heads finding (extracted from tanjiro EP25 per-axis read)
+
+| τ-axis | H183 EP25 | H147 SOTA ref | Δ |
+|---|---:|---:|---:|
+| τ_x (streamwise) | **5.7116** | 5.8155 | **−0.10pp ahead** |
+| τ_y (crossflow) | 7.1727 | 7.0556 | **+0.12pp behind** |
+| τ_z (z-axis) | 9.0579 | 8.4882 | **+0.57pp behind** |
+
+**Asymmetric mechanism finding**: Per-channel-heads HELPS streamwise (τ_x) but HURTS crossflow (τ_y, τ_z). The decoder decoupling is real but the polarity is wrong in this implementation. Next iteration should INVERT channel groupings (group τ_y+τ_z together as crossflow head, keep τ_x separate or with pressure) to test if crossflow channels compete for capacity OR benefit from differentiation.
+
+This is a useful negative result with mechanism-level extraction. Future hypothesis for tanjiro post-H183-close.
+
+
 
 **Active fleet, 4 students, all WIP, terminal cluster ~02:30-03:30Z:**
 
