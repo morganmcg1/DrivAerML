@@ -1,9 +1,52 @@
 # SENPAI Research State
 
-- **2026-06-01 04:00Z**
+- **2026-06-01 05:15Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
+
+## 05:15Z checkpoint — H183-cleanup MERGED; tanjiro idle→H190; H188/H189 main runs launched; H184 FINISHED (NON-MERGE)
+
+### Fleet status (05:15Z)
+
+| Student | PR | Hyp | Status |
+|---|---|---|---|
+| tanjiro | #1534 | H190: per-channel surface width=2.5 | **JUST ASSIGNED** — smoke expected ~06:00Z |
+| frieren | #1532 | H188: H183-stack + mild τ_y/z weights (1.2/1.3) + lr=9e-5 | **MAIN RUNNING** — 8 ranks since 05:08Z, step ~1500 (~7min). EP1 val ~06:10Z |
+| nezuko | #1533 | H189: H183-stack + hidden_dim=640 | **MAIN RUNNING** — 8 ranks since 05:01Z, step advancing. EP1 val ~05:50Z |
+| fern | #1513 | H184: WSD LR schedule | **FINISHED** 22.42h, val_WSS=6.838% — NON-MERGE all 4 axes. SENPAI-RESULT pending from fern. Close when result lands. |
+
+### H183-cleanup (PR #1531) MERGED 04:58Z
+
+Tanjiro's cleanup successfully removed `--per-channel-surface-heads` flag and ~30 LOC dead code paths. Per-channel surface decoder heads are now the **unconditional default in model.py**. All future experiments on this branch inherit per-channel heads without any flag.
+
+- Smoke verified: EP1 val_WSS=12.691% (within H183 EP1 RNG variance of 12.973%, nonfinite_grads=0)
+- Codebase: cleaner, harder to mis-run, no legacy flags
+
+### H190 hypothesis (PR #1534, dl24-tanjiro)
+
+**Width-factor sweep for per-channel surface decoder heads**: `--surface-out-width-factor 2.5` vs H183's 2.0.
+
+- H183 established per-channel heads at width=2.0 (each head MLP: Linear(512,1024)→GELU→Linear(1024,1))
+- With per-channel structure, no capacity sharing between channels — each head may benefit from modestly wider hidden layers
+- 2.5 → Linear(512,1280)→GELU→Linear(1280,1) — 25% wider per head, ~100k extra params total across 4 heads
+- Single-variable change vs H183 reproduce command
+- Smoke EP1/EP2 gates, then 30-EP main if clear
+
+### H184 (fern, PR #1513) — FINISHED terminal NON-MERGE
+
+val at terminal (step=329281, 22.42h):
+- val_WSS=6.838% (+0.40pp vs H183 SOTA 6.443%), NON-MERGE
+- val_VP=3.714%, val_SP=4.066%, val_ABU=6.093%
+- WSD mechanism FALSIFIED: decay to ~32% peak LR produced no descent (−0.0003pp/1k steps on WSS slope)
+- Closing direction: WSD on this stack requires sharper 100× drop + longer stable phase to work at all
+- SENPAI-RESULT from fern pending; close PR as NON-MERGE upon receipt
+
+### Post-H184 fern assignment (H191 planned)
+
+Once fern closes H184, next assignment is H191: **Sharper WSD** on H183 stack — same mechanism but with a true 100× LR drop (lr_peak=1e-4 → lr_min=1e-6, stable phase = 24 EPs, decay = 6 EPs). Tests whether the WSD mechanism requires steeper schedule to deliver the "deep minimum" effect.
+
+**Reason for deeper investigation**: WSD literature claim (4-5× boost from sharp 100× lr drop at decay start) requires the stable phase NOT to close too aggressively. H184's decay was ~0.32× peak → did not satisfy the 100× drop condition. H191 will use the correct configuration.
 
 ## 04:00Z checkpoint — fleet update: H184 EP28 WSD-null confirmed, smokes starting for H188/H189/cleanup
 
