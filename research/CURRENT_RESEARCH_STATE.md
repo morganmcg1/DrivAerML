@@ -1,21 +1,24 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-01 18:55Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — val_cal 5.8978 / test_cal 5.7379**
+**Updated**: 2026-06-01 19:20Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=4 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
-## Current SOTA (H336 calibrated)
+## Current SOTA (H342 calibrated — PR #1526 MERGED 2026-06-01 19:15Z)
 
 | Model | val_cal | test_cal | test_WSS | test_VP | test_SP | W&B |
 |---|---:|---:|---:|---:|---:|---|
-| **H336 K=5+Student-t ν=4+8-res+cal ← CURRENT SOTA** | **5.8978%** | **5.7379%** | **6.6382%** | **3.3735%** | **3.6133%** | 348i3z1v |
+| **H342 3-cp output-avg ep13+ep14+ep15 × K=4 ← CURRENT SOTA** | **5.8962%** | **5.7357%** | **6.6351%** | **3.3751%** | **3.6124%** | 3icmxaqe/qgw0ix77/ijadzof0 |
+| H336 K=5+Student-t ν=4+8-res+cal (prior SOTA) | 5.8978% | 5.7379% | 6.6382% | 3.3735% | 3.6133% | 348i3z1v |
 | Transolver-3 target | — | — | **< 5.850%** | ≤ 3.421% | ≤ 3.577% | — |
 
-**Merge gate**: val_abupt_calibrated < **5.8978%** AND test_abupt_calibrated < **5.7379%**
+**Merge gate**: val_abupt_calibrated < **5.8962%** AND test_abupt_calibrated < **5.7357%** (tightened after H342 merge)
 
-**WSS gap**: test_WSS_z 8.6175% → 5.85% Transolver target = **0.788pp remaining** (primary obstacle)
-**test_SP gap**: 3.6133% vs floor 3.577% = **+3.6bp** (edward H338 targeting this)
-**test_VP**: 3.3735% ✓ (safely below 3.421% floor)
+**WSS gap**: test_WSS_z 8.6122% → 5.85% Transolver target = **0.762pp remaining** (primary obstacle)
+**test_SP gap**: 3.6124% vs floor 3.577% = **+3.5bp** (edward H338 targeting this)
+**test_VP**: 3.3751% ✓ (safely below 3.421% floor; +1.6bp regression vs H336 — tolerable)
+
+**H342 mechanism**: output-space averaging across 3 nearby cosine-tail checkpoints (ep13+ep14+ep15), each evaluated at K=4+Student-t ν=4 × 8-res × mirror TTA. Largest gains on noisy WSS channels (τ_z −5.3bp, τ_y −4.9bp). Distinct from H307 weight-soup (null); output-space preserves nonlinearities. Finding: `multi-cp-symmetric-best`.
 
 ---
 
@@ -43,7 +46,7 @@
 
 ---
 
-## Active Fleet (2026-06-01 18:55Z — 8 students with open PRs)
+## Active Fleet (2026-06-01 19:20Z — 8 students with open PRs)
 
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
@@ -53,7 +56,7 @@
 | **#1543** | tanjiro | H351: NGSB (Normal-Relative Geometric Slice Bias) — 24-param zero-init `nn.Linear(3 → num_heads)` bias on Transolver slice_logits via surface normals; attacks encoder-resident attention-slice-routing axis. References GeoTransolver Adams et al. Dec 2025. step 4756 rt 1.09h, val_abupt 6.098 val_wssz 9.221 — mid-training | 🟡 WIP — Phase A v3 | Encoder slice-routing |
 | **#1539** | fern | **H348: Surface curvature input features — ALIVE CANDIDATE!** Arm A H train tied with H336 (val_abupt 6.0088). **TTA cal eval `26e5khdg` shows val_abupt RAW TTA = 5.9213% (−4.87bp vs H336 raw 5.97)**, val_wss_z 9.0846. If cal extracts usual 7-8bp on val, val_cal lands ~5.84-5.85 — **POTENTIAL SOTA**. Advisor nudge sent for terminal SENPAI-RESULT with val_cal + test_cal. | 🔥 WIP — POTENTIAL SOTA | Input geometry |
 | **#1538** | nezuko | H347: Boundary-layer physics priors — **Arm A finished `yainrpxs` train-tied with H336 (val_abupt 6.0075, test_abupt 5.8564)**, Arm B (smooth-only λ_s=1e-4) `zg2o713u` step 4884 rt 1.56h showing val_abupt 6.020 val_wssz 9.196 — ties Arm A. Auto-chains Arm C + TTA cascade | 🟡 WIP — Arm B training | Physical constraint |
-| **#1526** | alphonse | H342: Multi-checkpoint output averaging (ep13+ep14+ep15 TTA) — `3icmxaqe` eval running. RAW val_abupt 5.9299 (−4.0bp vs H336 raw). Test_surface 5/6 cases at 17:28Z heartbeat | 🟡 WIP — eval (ALIVE) | Output-space averaging |
+| **#1548** | alphonse | **H356: 3-cp output-avg ep13+ep14+ep15 × K=5** — extends H342 merged winner; upgrade per-checkpoint TTA from K=4→K=5. Predicted +0.7-1bp test_cal beyond H342 (val gate < 5.8962, test gate < 5.7357). Pure TTA eval, no training. ETA ~22:00Z (3×7h sequential evals) | 🆕 just assigned | Output-space averaging (K-axis extension) |
 | **#1522** | edward | H338: Arm D compositional eval (Arm C SP-reweight EP15 × H336 K=5+ν=4+8-res+mirror TTA recipe) `9t27gag4`, ETA ~21:30Z (~2.5h remaining) | 🟡 WIP — eval | SP floor gap 3.6bp via composition |
 
 **Closed this loop**:
@@ -83,11 +86,12 @@ The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's tar
 
 **Triangulation logic**: H348 = INPUT; H353 = OUTPUT-TRANSFORM (expansive); ~~H354 = OUTPUT-DECODER (warm-start) closed~~; H355 = PHYSICAL-DECODER (volume-rooted, NEW); H347 = PHYSICS-CONSTRAINT; H351 = ENCODER-ROUTING; H352 = WEIGHT-TRAJECTORY. If any of these break the WSS_z floor, the mechanism is unambiguous. If all five remaining axes fail, the bottleneck is encoder-feature-extraction itself and the attack moves to deep-tier architecture changes (attention head reweighting, hierarchical attention, GeoTransolver-style geometric cross-attention, native tangent-basis output head — Morgan directive #2).
 
-**TWO STRONG ALIVE CANDIDATES THIS LOOP**:
-- **H348 fern**: val_abupt RAW TTA = 5.9213% (better than H336 raw 5.97 by 4.87bp). Cal yield should land val_cal ~5.84-5.85 — **THIS IS THE STRONGEST RAW-TTA IMPROVEMENT SINCE H336 LANDED**.
-- **H342 alphonse**: val_abupt RAW (TTA-aggregated) = 5.9299 (−4.0bp). Test_surface eval near terminal.
+**CURRENT STRONG ALIVE CANDIDATES (against new H342 gate: val<5.8962 AND test<5.7357)**:
+- **H342 MERGED as SOTA** ✓ — val_cal 5.8962, test_cal 5.7357
+- **H348 fern**: val_abupt RAW TTA = 5.9213% (better than H336 raw 5.97 by 4.87bp). Cal yield ~7-8bp → val_cal ~5.843-5.849. Easily beats H342 gate. **LEADING CANDIDATE — test_cal ETA ~22:00Z.**
+- **H356 alphonse** (new): K=5 version of H342 — predicted val_cal ~5.889, test_cal ~5.728. Pure eval, no training.
 
-If either passes the strict gate (val_cal<5.8978 AND test_cal<5.7379), it's the next SOTA. **Crucially, both H342 (multi-checkpoint avg) and H348 (curvature input features) are STRUCTURALLY DISTINCT from H355 BL decoder, H347 physics priors, etc. — so they could compound with H355 if both land.**
+Crucially, H348 (curvature input = training-time improvement) and H342/H356 (output-avg = TTA mechanism) are STRUCTURALLY DISTINCT and COMPOSABLE. If H348 lands as SOTA, next step is H342+K=5 applied to the H348-trained model. The compounding potential is significant.
 
 ### Morgan directive queue (Issue #1056, 2026-06-01 13:15Z)
 

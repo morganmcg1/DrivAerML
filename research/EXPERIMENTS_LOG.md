@@ -13977,3 +13977,45 @@ The training-time was perfectly fine — 3 epochs at lr=3e-4 cosine, train/loss 
 - **Next assignment fired**: H355 BL derivative decoder to askeladd (PR #1547) — Morgan directive #1, never-tried mechanism. Uses ghost off-wall probes + Richardson FD on volume-token cross-attention to compute τ_w = μ·(∂u/∂n) physically. Target ~30bp test_WSS improvement.
 
 ---
+
+## 2026-06-01 19:15Z — PR #1526: H342 3-cp output-average (ep13+ep14+ep15) — NEW SOTA MERGED
+
+- alphonse/h342-multi-checkpoint-output-averaging
+- **Hypothesis**: Post-hoc output-space averaging across 3 nearby H244 cosine-tail EMA checkpoints (ep13/ep14/ep15) reduces residual prediction variance via 1/√N noise suppression. Each checkpoint evaluated independently with H314 recipe (K=4+Student-t ν=4 × 8-res × mirror TTA + cal), then outputs averaged and calibrated.
+
+### Results
+
+| Arm | Composition | val_cal | test_cal | Beats H336? |
+|---|---|---:|---:|:---:|
+| A (control) | ep15 only | 5.8987 | 5.7387 | ✗ |
+| B (2-cp adjacent) | ep14+ep15 | 5.8970 | 5.7363 | ✓ |
+| C (2-cp boundary) | ep13+ep15 | 5.8966 | 5.7365 | ✓ |
+| **D (3-cp symmetric)** | ep13+ep14+ep15 | **5.8962** | **5.7357** | ✓ |
+
+W&B runs: `3icmxaqe` (ep13 TTA), `qgw0ix77` (ep14 TTA), `ijadzof0` (ep15 TTA sanity)
+
+**Channel breakdown — Arm D vs H336 SOTA:**
+
+| Channel | Arm D | H336 ref | Δ bp |
+|---|---:|---:|---:|
+| test_abupt_cal | 5.7357 | 5.7379 | −2.2 |
+| test_SP_cal | 3.6124 | 3.6133 | −0.9 |
+| test_WSS_cal | 6.6351 | 6.6382 | −3.1 |
+| test_WSS_y_cal | 7.1792 | 7.1841 | −4.9 |
+| test_WSS_z_cal | 8.6122 | 8.6175 | −5.3 |
+| test_VP_cal | 3.3751 | 3.3735 | +1.6 |
+
+### Analysis
+- **Mechanism confirmed**: output-space averaging across nearby cosine-tail checkpoints produces real variance reduction. Gain scales with checkpoint count (D>B,C>A), consistent with 1/√N prediction.
+- **Distinct from H307 weight-soup** (which nulled at val_N=34): output-space preserves nonlinearities, weight-space collapses them.
+- **Largest gains on noisier channels**: τ_z −5.3bp, τ_y −4.9bp. This is the diagnostic signature of variance reduction.
+- **VP slight regression** (+1.6bp): ep13/ep14 are marginally weaker VP predictors than ep15 alone. Tolerable since surface improvement net-wins on aggregate.
+- **Follow-up**: Run 3-cp at K=5 (H356) — H336's K=5 win over K=4 was ~0.9bp per checkpoint; composing with 3-cp averaging should give ~0.7-1bp additional.
+
+### Decision: MERGED as new SOTA
+- val_cal: 5.8978 → **5.8962** (−1.6bp)
+- test_cal: 5.7379 → **5.7357** (−2.2bp)
+- New merge gate: val_cal < 5.8962 AND test_cal < 5.7357
+- Finding: **`multi-cp-symmetric-best`** — 3-cp symmetric output average > both 2-cp asymmetric arms
+
+---
