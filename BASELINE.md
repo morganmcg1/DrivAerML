@@ -98,7 +98,48 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## *** CURRENT SINGLE-MODEL SOTA: PR #1500 H314 Student-t ν=4 Weight-Noise TTA (tay) — 2026-05-31 ***
+## *** CURRENT SINGLE-MODEL SOTA: PR #1520 H336 K=5 + Student-t ν=4 + 8-res + mirror + cal (tay) — 2026-06-01 ***
+
+**val_abupt_calibrated=5.8978%** / **test_abupt_calibrated=5.7379%** (corrected split, H185 EP15 EMA + K=5 anti-thetic × 8-res × mirror TTA + Student-t ν=4 weight noise → per-channel affine α/β calibration)
+
+**New SOTA — beats H314 by −0.9bp val / −0.8bp test. K=5 stacking under Student-t ν=4 is mildly superadditive (2× the linear-additive prediction vs independent K and ν gains), reopening the K-axis that was closed under Gaussian noise (H330). All 5 channels Pareto-improve. Cal coefficients ≈ H312 to 1e-3 — cal axis is noise-family-invariant. Composition: +K=5 over K=4 upon H314 recipe with no other changes.**
+
+**W&B run:** `348i3z1v` (nezuko/h336-K5-studentt-nu4-8res-cal)
+**Source checkpoint:** H185 EP15 EMA (`outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt`)
+**PR:** #1520
+
+**Val metrics (calibrated):** val_abupt=5.8978%
+**Test metrics (calibrated):** test_abupt=**5.7379%**, test_VP=**3.3735%**, test_SP=**3.6133%**, test_WSS=**6.6382%**, test_WSS_x=5.9014%, test_WSS_y=7.1841%, test_WSS_z=8.6175%
+
+**Per-channel calibration coefficients:**
+- surface[cp  ]: α=+0.99476, β=−0.00236
+- surface[τ_x ]: α=+0.99443, β=−0.00721
+- surface[τ_y ]: α=+0.99425, β=−0.00023
+- surface[τ_z ]: α=+0.99172, β=−0.00018
+- volume[VP   ]: α=+0.99963, β=−0.86162
+
+**Paper floors:** test_VP 3.3735 < 3.421 ✓ | test_WSS 6.6382 < 6.727 ✓ | test_SP 3.6133 > 3.577 ✗ (3.6bp gap, H338 in flight)
+**Stretch goal:** test_WSS < 5.85% — gap = **0.788pp** (H339 in flight for WSS training attack)
+
+**Merge gate (updated):** val_abupt_calibrated < **5.8978%** AND test_abupt_calibrated < **5.7379%**
+
+**Reproduce:**
+```bash
+H185_EP15_CKPT="outputs/drivaerml/run-0gjfv45i/checkpoint_ep15.pt"
+
+torchrun --standalone --nproc-per-node=8 eval_tta_h252.py \
+  --checkpoint $H185_EP15_CKPT \
+  --resolutions "32768,40960,49152,57344,65536,81920,98304,131072" \
+  --eval-modes "weight_noise_mirror_res_avg" \
+  --weight-noise-sigma 5e-4 --weight-noise-passes 5 --antithetic-noise \
+  --weight-noise-dist student_t --weight-noise-df 4 \
+  --test-time-calibration \
+  --batch-size 2 --num-workers 4
+```
+
+---
+
+## *** PRIOR SINGLE-MODEL SOTA: PR #1500 H314 Student-t ν=4 Weight-Noise TTA (tay) — 2026-05-31 (superseded by #1520) ***
 
 **val_abupt_calibrated=5.8987%** / **test_abupt_calibrated=5.7387%** (corrected split, H185 EP15 EMA + K=4 anti-thetic × 8-res × mirror TTA + **Student-t ν=4 weight noise** → per-channel affine α/β calibration)
 
