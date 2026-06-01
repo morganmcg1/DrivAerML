@@ -1,51 +1,54 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-31 22:10Z | Branch: `tay` | **SOTA: H314 Student-t ν=4 — MERGED 17:45Z** | Round 4k+3 | **All inference axes closed (TTA K+R, cal 7-fold null after H333+H334, noise-family ν-sweep, weight-space soup α∈[0.5,0.85] H307 monotone-no-cross). Open frontier: (a) training-time SP-floor gap H338/edward; (b) training-time WSS uniform reweight H339/frieren; (c) training-time WSS wz-only reweight H341/fern (per-axis decomposition); (d) composition K×noise-family H336/nezuko (rebase pending); (e) σ-axis at ν=4 H340/tanjiro; (f) multi-checkpoint output-averaging H342/alphonse (output-space ensemble); (g) **H343 SAM cosine-tail thorfinn (PR #1528, NEW — flatter-minimum optimizer-axis, orthogonal to all in-flight)**.
+**Updated**: 2026-06-01 00:16Z | Branch: `tay` | **SOTA: H336 K=5+Student-t ν=4+8-res+mirror+cal — MERGED 00:16Z** | Round 4k+4 | **All inference axes closed (TTA K+R, cal 7-fold null, ν-sweep, weight-space soup H307). NEW FINDING: K-axis reopens under Student-t ν=4 (K5-studentt-superadditive). Open frontier: (a) K=6 at ν=4 H344/nezuko (JUST ASSIGNED — K-axis continuation); (b) training-time SP-floor gap H338/edward; (c) training-time WSS uniform reweight H339/frieren; (d) training-time WSS wz-only reweight H341/fern; (e) σ-axis at ν=4 H340/tanjiro; (f) multi-checkpoint output-averaging H342/alphonse; (g) SAM cosine-tail H343/thorfinn.**
 
 **Partial result this loop (08:11Z)**: H307 Arm B α=0.5 (model soup of two EP15 seeds + H300 cal) → **test_cal 5.7380 BEATS gate (−0.8bp)**, val_cal 5.9017 misses by +2.3bp. Soup extracts −30.4bp on test (vs ~28bp on single-seed H312) — **mechanistic finding: weight-averaging produces more affine residual structure, so diagonal cal catches more error post-soup**. Thorfinn launched Arm C α=0.75 at 08:14Z (ETA ~14:59Z). α_τz on soup = 0.99160 vs H312 ref 0.99170 — preliminary cross-axis confirmation that α is model-perturbation-stable.
 
-## 2026-05-31 SOTA progression (5 merges now):
+## 2026-05-31/06-01 SOTA progression (6 merges):
 1. H295 (K=5+6-res, 15:45Z) → test 5.7679
 2. H296 (K=4+8-res, 17:05Z) → test 5.7678 (−0.15bp)
 3. H300 (per-channel calibration, 18:48Z) → test_cal 5.7399 (−28bp)
 4. H312 (H296+8-res base+cal, 02:30Z) → test_cal 5.7388 (−1.1bp)
-5. **H314 (Student-t ν=4 weight noise, 17:45Z) → test_cal 5.7387** (−0.1bp) ← **CURRENT SOTA**
+5. H314 (Student-t ν=4 weight noise, 17:45Z) → test_cal 5.7387 (−0.1bp)
+6. **H336 (K=5+Student-t ν=4+8-res+mirror+cal, 00:16Z+1) → test_cal 5.7379** (−0.8bp) ← **CURRENT SOTA**
 
 **Finding 'better-raw-better-cal'**: H296 base (val_raw 5.9221) gives lower calibrated test than H285 base (val_raw 5.9275). H300's 28bp initial gain was from the calibration axis itself; H312 adds 1.1bp more by combining the better TTA base with calibration. Calibration on single-model is near saturation — next axes: cross-channel WSS mixing (H323), regional spatial calibration (H313 in-flight), quadratic terms (H317 in-flight).
 
 ---
 
-## Current SOTA (H314 calibrated)
+## Current SOTA (H336 calibrated)
 
 | Model | val_cal | test_cal | test_WSS | test_VP | test_SP | W&B |
 |---|---:|---:|---:|---:|---:|---|
-| **H314 Student-t ν=4 + 8-res+cal ← CURRENT SOTA** | **5.8987%** | **5.7387%** | **6.6390%** | **3.3739%** | **3.6136%** | 2scozlaf |
+| **H336 K=5+Student-t ν=4+8-res+cal ← CURRENT SOTA** | **5.8978%** | **5.7379%** | **6.6382%** | **3.3735%** | **3.6133%** | 348i3z1v |
+| H314 Student-t ν=4+8-res+cal | 5.8987% | 5.7387% | 6.6390% | 3.3739% | 3.6136% | 2scozlaf |
 | H312 H296+8-res+cal | 5.8994% | 5.7388% | 6.6391% | 3.3743% | 3.6137% | enf61qrr |
-| H300 H285+cal | 5.9011% | 5.7399% | 6.6404% | 3.3763% | 3.6132% | 59r4noqh |
 | Transolver-3 target | — | — | **< 5.850%** | ≤ 3.421% | ≤ 3.577% | — |
 
-**Merge gate (UPDATED)**: val_abupt_calibrated < **5.8987%** AND test_abupt_calibrated < **5.7387%**
-**Paper floors**: test_VP 3.3739 < 3.421 ✓ | test_WSS 6.6390 < 6.727 ✓ | test_SP 3.6136 > 3.577 ✗ (3.6bp gap, H338 in flight)
-**WSS gap**: 6.6390 → 5.85 target = **0.789pp remaining** (H339 frieren targeting this)
+**Merge gate (UPDATED)**: val_abupt_calibrated < **5.8978%** AND test_abupt_calibrated < **5.7379%**
+**Paper floors**: test_VP 3.3735 < 3.421 ✓ | test_WSS 6.6382 < 6.727 ✓ | test_SP 3.6133 > 3.577 ✗ (3.6bp gap, H338 in flight)
+**WSS gap**: 6.6382 → 5.85 target = **0.788pp remaining** (H339 frieren targeting this)
+**New finding**: `K5-studentt-superadditive` — K-axis (closed under Gaussian per H330) reopens under Student-t ν=4. K=5 vs K=4 at ν=4 yields −0.8bp test_cal (2× the linear-additive prediction). K=6 probe (H344/nezuko) is next.
 
 ---
 
-## Active Fleet (as of 22:10Z 2026-05-31 — 8 students active, all assigned)
+## Active Fleet (as of 00:16Z 2026-06-01 — 8 students assigned, nezuko newly idle pending H344)
 
-| PR | Student | Hypothesis | val_raw | Status | ETA calibrated |
-|---|---|---|---:|---|---|
-| **#1528** | **thorfinn** | **H343: SAM cosine-tail — Sharpness-Aware Minimization optimizer during ep12→ep16 extension (ρ∈{0.05, 0.02}). Orthogonal optimizer-axis attack: flatter minimum expected to close val→test OOD gap, especially test_WSS_z bottleneck channel.** | — | 🆕 assigned 22:10Z (post-H307 close) | ~10-14h chained (2 arms × 3h SAM-train + 2 eval × 6-7h) |
-| **#1522** | **edward** | **H338: SP-targeted loss reweighting cosine-tail (3-arm SP-weight sweep {1.05, 1.10, 1.20} to close paper SP floor gap +3.4bp)** | — | 🆕 assigned 15:45Z (post-H332 close) | ~01:00Z+1 (3 arms × 3h sequential) |
-| **#1524** | **tanjiro** | **H340: σ-sweep at Student-t ν=4 — last inference-axis question. 3 arms σ ∈ {2.5e-4, 5e-4 ref, 1e-3} on H185 ep15. Arm B reproduces H314 (sanity).** | — | 🆕 assigned 18:55Z (post-H337 close, post-H314 merge) | ~14:00Z+1 (~18-21h chained eval) |
-| **#1526** | **alphonse** | **H342: Multi-checkpoint output-averaging TTA (ep14+ep15+ep16 EMA from H312 SOTA cosine-tail run-enf61qrr) — 3 evals + 4 post-hoc arms (ep15 alone control, ep14+ep15, ep15+ep16, ep14+ep15+ep16). Orthogonal output-space ensemble vs H307 weight-space.** | — | 🆕 assigned 19:58Z (post-H334 close) | ~13:00Z+1 (3 evals × ~6-7h + post-hoc avg) |
-| **#1520** | **nezuko** | **H336: Compose K=5 + Student-t ν=4 + 8-res + mirror + cal (K × noise-family interaction at cal-extracted regime)** | — | 🟡 in-flight 348i3z1v ETA ~23:30-00:00Z; **PR sent back 18:15Z for rebase** (H314 merge conflict on eval_tta_h252.py) — rebase after terminal | ~00:00Z+1 |
-| **#1523** | **frieren** | **H339: WSS-targeted loss reweighting cosine-tail (3-arm sweep {1.5, 2.0, 3.0} on WSS loss multiplier — targets 0.789pp WSS gap)** | — | 🆕 assigned 17:45Z (post-H314 merge) | ~24:00Z+1 (training ~9h + eval ~21h, chained multi-session) |
-| **#1519** | **askeladd** | **H335: Per-resolution K allocation under fixed H312-budget (3 arms: low-res-heavy / high-res-heavy / uniform-control)** | 5.9221 (Arm C) | 🟡 Arm C TTA in-flight ~19:30Z; **PR sent back 18:51Z for rebase** (H314 merge conflict on eval_tta_h252.py) — rebase before Arms A/B launch | ~22:00Z+ |
-| **#1525** | **fern** | **H341: wz-only WSS loss reweight cosine-tail (3 arms wz × {2.0, 3.0, 5.0} — per-axis decomposition of H339 targeting bottleneck wz=8.62%)** | — | 🆕 assigned 19:25Z (post-H333 close, post-H314 merge) | ~25:00Z+1 (training ~9h + eval ~21h, chained multi-session) |
+| PR | Student | Hypothesis | Status | ETA calibrated |
+|---|---|---|---|---|
+| **NEW** | **nezuko** | **H344: K=6 + Student-t ν=4 + 8-res + mirror + cal — extend K-axis beyond H336** | 🆕 being assigned 00:16Z | ~10h (~6 antithetic pairs × 8-res × mirror = 192 fwd/case) |
+| **#1528** | **thorfinn** | **H343: SAM cosine-tail — ρ∈{0.05, 0.02} (2 chained 3h training arms + 2 evals)** | 🟡 in-flight | ~10-14h from assignment |
+| **#1526** | **alphonse** | **H342: Multi-checkpoint output-averaging TTA ep13+ep14+ep15** | 🟡 ep15 sanity eval running, ETA ~03:00Z | ~13:00Z+1 |
+| **#1525** | **fern** | **H341: wz-only WSS reweight cosine-tail (3-arm wz×{2.0, 3.0, 5.0})** | 🟡 Arm B wss=3.0 training | ~25:00Z+1 |
+| **#1524** | **tanjiro** | **H340: σ-sweep at ν=4 (3 arms σ∈{2.5e-4, 5e-4 ref, 1e-3})** | 🟡 Arm A running, ETA ~02:00Z | ~18-21h chained |
+| **#1523** | **frieren** | **H339: WSS uniform reweight cosine-tail (3-arm {1.5, 2.0, 3.0})** | 🟡 Arm B wss=2.0 training ~23:35Z end | ~25:00Z+1 |
+| **#1522** | **edward** | **H338: SP-targeted reweight cosine-tail (3-arm {1.05, 1.10, 1.20})** | 🟡 Arm C sp=1.20 training ~00:10Z end | ~18h chained evals |
+| **#1519** | **askeladd** | **H335: Per-resolution K allocation (3 arms: low/high/uniform)** | 🟡 rebase pending | ~22:00Z+ |
 
 **Merged this loop**:
-- **PR #1500 frieren H314** — MERGED (17:45Z). **NEW SOTA** val_cal 5.8987 / test_cal 5.7387. Student-t ν=4 beats H312 by 0.7bp/0.1bp. ν-sweep parabolic (ν=4 minimum), gain uniform across channels, α ν-invariant. Merge gate tightened.
-- **PR #1498 edward H312** — MERGED (02:30Z). **PRIOR SOTA** val_cal 5.8994 / test_cal 5.7388. Finding 'better-raw-better-cal' confirmed. Calibration near saturation for diagonal affine on single model.
+- **PR #1520 nezuko H336** — MERGED (00:16Z+1). **NEW SOTA** val_cal 5.8978 / test_cal 5.7379. K=5 stacking under Student-t ν=4 is mildly **superadditive** (2× linear-additive prediction). K-axis (closed under Gaussian per H330) reopens under Student-t. All 5 channels Pareto-improve. Finding banked: `K5-studentt-superadditive`. Gate updated: val < 5.8978 AND test < 5.7379.
+- **PR #1500 frieren H314** — MERGED (17:45Z). Student-t ν=4 beats H312 by 0.7bp/0.1bp. ν-sweep unimodal (ν=4 minimum). Now superseded by H336.
+- **PR #1498 edward H312** — MERGED (02:30Z). 8-res+cal base SOTA. Now 2 generations back.
 
 **Closed this loop (22:01Z)**:
 - **PR #1507 thorfinn H307** — CLOSED (22:01Z). **Weight-space model soup α-sweep NULL on H314 gate** (3 findings banked): 3-arm α∈{0.5, 0.75, 0.85} sweep of seed-1+seed-2 EP15 EMA mix with full H312 cal. Terminal Arm D α=0.85 `v4ye4e4k`: val_cal **5.8990** (+0.27bp MISS H314 gate) / test_cal **5.7380** (−0.7bp BEAT). AND-fails by 3 milli-bp on val. **3 findings**: (a) **`soup-alpha-val-monotone-no-cross`** — val_cal monotone 5.9017→5.8999→5.8990 across α∈{0.5, 0.75, 0.85} approaching seed-1 from below; diminishing returns geometry → linear extrapolation from D→1.0 closes only ~0.13bp, seed-1-alone val_cal estimated ~5.8977; pure-seed-1 IS the val_raw optimum at val_N=34; soup cannot improve val. test_cal α-invariant at ~5.7380 across all 3 arms (within 0.2bp noise floor). (b) **`soup-cal-extracts-more`** — α_cp shift across arms Δ=3.75e-4 vs H332 cross-α invariance threshold ±2.6e-4 — soup flattens residual structure, letting diagonal-affine cal catch slightly more error. The 2.7bp val_cal closure across arms is entirely cal-extraction, not raw improvement. (c) **`soup-wz-improves-mildly`** — test_WSS_z 8.617 vs H314 8.6195 (−0.22bp) only channel-level improvement; insufficient alone but third corroborating signal that wz is the bottleneck (motivates H341/fern). **Structural verdict**: α-soup axis exhausted at this datapool. Response curve is smooth, monotone, lands ~0.3bp below H314 gate at most favorable α (0.85). No room without (a) larger seed-pool ensembling [Morgan blocked 2026-05-28] or (b) different perturbation geometry (H342 alphonse output-space). → **thorfinn now idle — next hypothesis assignment pending**.
