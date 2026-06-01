@@ -1,11 +1,39 @@
 # SENPAI Research State
 
-- **2026-06-01 00:51Z**
+- **2026-06-01 01:00Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
 
-## 00:51Z snapshot — H185 EP4 boundary (lead converged to H147); H184 decay NULL; H183 SP plateau holds NON-MERGE; H186 main 0.6h in
+## 01:00Z snapshot — H185 EP6 SLIPS BEHIND H147 (+0.07pp); H184 EP27 decay finally activating but still NON-MERGE; H183 EP27 final stretch; H186 EP3 tracking H147
+
+**Active fleet, 4 students, all WIP, terminal cluster ~02:30-03:30Z:**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | val_SP | val_ABU | lr | Status |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
+| frieren | #1527 | H185 hidden_dim=640 | 6 | **6.8127** (+0.07 vs H147 EP6) | 3.6850 | 3.9736 | 6.0497 | 9.3e-5 | EP1 lead eroded; EP10 ≤6.65 gate sharpened |
+| nezuko | #1529 | H186 layers=8 main (rank0=`31pux7bu`) | 2-3 | ~7.27 (tied H147 EP2) | 4.78 | 4.25 | 6.65 | 1.0e-4 | EP5 watch ~02:30Z |
+| tanjiro | #1510 | H183 per-channel heads | 27.5 | 6.5883 (plateau) | 3.5816 | **3.8424 (flat)** | 5.8720 | 5e-6 (final tail) | NON-MERGE on SP floor; terminal ~03:30Z |
+| fern | #1513 | H184 WSD LR | 27 | 6.8321 (decay NULL) | 3.7123 | 4.0628 | 6.0887 | 3.2e-5 | NON-MERGE projected ALL 4 axes; terminal ~02:30Z |
+
+### Critical 01:00Z finding: capacity-axis (width AND depth) does NOT improve over H147 at hidden_dim=512/layers=6
+
+**H185 trajectory (width=640):** EP1=11.49 (−1.33 vs H147=12.82) → EP6=6.8127 (+0.07 vs H147 EP6 ~6.74). The −1.33pp EP1 lead fully eroded by EP3 and **inverted by EP5-6**. Wider model uses extra capacity for redundancy, not for fitting harder features.
+
+**H186 trajectory (layers=8):** Smoke EP1=11.892 (−0.93 vs H147=12.82), main EP2-3 ~7.27 (tied with H147 EP2=7.26). Depth axis showing the same pattern — strong EP1 lead, convergence to H147 by EP2-3.
+
+**Joint conclusion (provisional, awaiting EP10+ reads):** H147's hidden_dim=512 + layers=6 is at or near the local capacity optimum for this DDP8 stack. Capacity-axis search closing. Next experiments should focus on **non-capacity axes**: loss shaping, schedule shape, attention mechanism, augmentation, distillation, gradient surgery.
+
+### H184 WSD decay finally activating but still NON-MERGE on all 4 floors
+
+EP24→EP27 (3 EPs, lr 8.55e-5 → 3.20e-5):
+- val_WSS 6.8200 → 6.8321 (+0.012, slight uptick — decay still doesn't unlock features)
+- val_VP 3.7192 → 3.7123 (−0.007, basically flat)
+- val_SP 4.0604 → 4.0628 (flat)
+
+Even at lr=32% of peak, no descent. Confirms WSD on this stack requires sharper schedule (100× drop, not 0.32×) AND longer stable phase before decay. Test projection: test_WSS=6.66 (+0.12), test_SP=3.86 (+0.28), test_VP=3.69 (+0.04), test_ABU=5.91 (+0.07). All 4 floors fail.
+
+
 
 **Active fleet, 4 students, all WIP, terminal cluster ~02:30-03:30Z:**
 
