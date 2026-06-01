@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         use_curvature_attention_bias: bool = False,
         curvature_dim: int = 3,
         surface_out_width_factor: float = 1.0,
+        per_channel_surface_heads: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.use_curvature_attention_bias = use_curvature_attention_bias
         self.curvature_dim = curvature_dim
         self.surface_out_width_factor = float(surface_out_width_factor)
+        self.per_channel_surface_heads = bool(per_channel_surface_heads)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -408,11 +410,29 @@ class SurfaceTransolver(nn.Module):
         # explicitly uses factor=2.0.
         surf_hidden_width = max(1, int(n_hidden * self.surface_out_width_factor))
         self.surface_out_hidden_width = surf_hidden_width
-        self.surface_out = nn.Sequential(
-            nn.Linear(n_hidden, surf_hidden_width),
-            nn.GELU(),
-            nn.Linear(surf_hidden_width, self.surface_output_dim),
-        )
+        if self.per_channel_surface_heads:
+            # H183 (PR #1510): split shared MLP decoder into 4 per-channel heads
+            # (cp, tau_x, tau_y, tau_z). Each head is the same 2-layer MLP
+            # shape as the shared head, but with a 1-dim output. Eliminates
+            # cross-channel capacity bottleneck.
+            self.surface_out = None
+            self.surface_out_heads = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.Linear(n_hidden, surf_hidden_width),
+                        nn.GELU(),
+                        nn.Linear(surf_hidden_width, 1),
+                    )
+                    for _ in range(self.surface_output_dim)
+                ]
+            )
+        else:
+            self.surface_out = nn.Sequential(
+                nn.Linear(n_hidden, surf_hidden_width),
+                nn.GELU(),
+                nn.Linear(surf_hidden_width, self.surface_output_dim),
+            )
+            self.surface_out_heads = None
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
@@ -494,7 +514,13 @@ class SurfaceTransolver(nn.Module):
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.surface_out_heads is not None:
+                surface_preds = torch.cat(
+                    [head(surface_hidden) for head in self.surface_out_heads],
+                    dim=-1,
+                ) * surface_mask.unsqueeze(-1)
+            else:
+                surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
