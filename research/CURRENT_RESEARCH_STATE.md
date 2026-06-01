@@ -83,6 +83,17 @@ The **primary obstacle** is test_WSS_z = 8.6175% (277bp above Transolver-3's tar
 
 **Two ALIVE candidates this loop**: H347 nezuko and H348 fern both produced train-raw tied with H336 baseline (the cleanest "ambiguous-alive" signal so far). The TTA+cal eval is the discriminator — if either lands val_cal<5.8978 AND test_cal<5.7379, it's the next SOTA. If both extract only the usual 7-8bp cal yield, `cal-cannot-rescue-train-raw-regression` triggers and both close cleanly.
 
+### Morgan directive queue (Issue #1056, 2026-06-01 13:15Z)
+
+Highest-priority untried mechanisms to assign as students idle:
+
+1. **BL derivative decoder (P1, NEVER TRIED, target ~30bp test_WSS)** — Ghost off-wall probe points at {η_1,...,η_K}×n̂ (e.g., η ∈ {1e-5, 1e-4, 1e-3, 1e-2}·L_ref normal to surface), cross-attend to Transolver token cache to predict velocity at each probe, compute WSS via differentiable finite difference τ ≈ μ·(u(η_1) − 0)/η_1. Reconstructs τ_xyz from the velocity gradient structure the model never sees directly. Implementation: new decoder branch with ghost-point sampling + cross-attention head + FD differentiation layer. Estimated student-time: 8-12h. **Queue for next idle student** (likely askeladd if H354 Phase A' fails ~18:00Z).
+2. **Native tangent-basis output head (P2, simpler)** — Predict (τ_t1, τ_t2) in local tangent frame, reconstruct τ_xyz = τ_t1·t̂₁ + τ_t2·t̂₂. Enforces physical tangentiality (τ⊥n) by construction. Compared to H347 normals-loss-as-regularizer, this is by-construction not via gradient pressure. Estimated student-time: 4-6h.
+3. **Multi-scale local surface manifold branch (P3, after H347/H348 land)** — Multi-resolution geometric context (k1k2 at multiple smoothing scales).
+4. **Physics-regime MoE (P4)** — WSS-head splits across {attached BL, APG-separation, wheel/underbody, sharp-edge/wake, smooth-panel} experts with entropy-regularized router.
+
+Drafts ready to assign on next idle slot.
+
 ---
 
 ## Findings bank highlights (WSS_z-relevant)
