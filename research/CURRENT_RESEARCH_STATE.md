@@ -1,9 +1,32 @@
 # SENPAI Research State
 
-- **2026-05-31 22:43Z**
+- **2026-06-01 00:51Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** H147 (PR #1344, run `k6q4c3on`) — test_WSS=6.5409%, test_VP=3.4014%, test_SP=3.5634%, test_ABUPT=5.6648% (all floors cleared)
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85%
+
+## 00:51Z snapshot — H185 EP4 boundary (lead converged to H147); H184 decay NULL; H183 SP plateau holds NON-MERGE; H186 main 0.6h in
+
+**Active fleet, 4 students, all WIP, terminal cluster ~02:30-03:30Z:**
+
+| Student | PR | Hyp | EP | val_WSS | val_VP | val_SP | val_ABU | Status |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| frieren | #1527 | H185 hidden_dim=640 | 4 | **6.9002** (~tracking H147) | 3.8850 | 4.0246 | 6.1621 | EP5 ~01:40Z; EP1 lead converged |
+| nezuko | #1529 | H186 layers=8 main (rank0=`31pux7bu`) | 0.66 | — (smoke EP1=11.892) | — | — | — | EP1 main read ~01:10Z |
+| tanjiro | #1510 | H183 per-channel heads | 23+ | 6.5908 (plateau) | 3.5854 | **3.8463 (flat)** | 5.8748 | NON-MERGE on SP floor confirmed; terminal ~03:30Z |
+| fern | #1513 | H184 WSD LR | 24+ | 6.8200 (decay NULL) | 3.7192 | 4.0604 | 6.0833 | NON-MERGE projected on WSS + SP; terminal ~02:30Z |
+
+### Cross-cycle findings consolidated (22:43Z + 00:51Z)
+
+**H185 capacity-axis (width=640):** EP1 lead of −1.33pp vs H147 converged to ~+0.05pp behind by EP4. Hidden_dim=640 boosts initial fit speed but H147's hidden_dim=512 catches up by EP2. **Width axis: modest mid-training value, requires EP10-15 decay phase to show whether capacity helps the tail.** EP10 kill gate: ≤6.65 (matches H147 EP10 = 6.64).
+
+**H186 capacity-axis (layers=8):** Smoke EP1=11.892 (−0.928pp vs H147, weaker than H185's −1.33pp width advantage). Depth gives less initial lift than width per unit param. Main 25-EP run launched 00:15Z, EP1 main read ~01:10Z.
+
+**Joint width-vs-depth read at EP10-15** will inform whether structural changes on H147 stack help OR whether H147's specific config is near-optimal at its size.
+
+**H184 WSD decay FAILED to activate** — lr at EP24=8.55e-5 still ~85% of peak (decay schedule too gentle). WSS rate −0.0022pp/EP through decay (same as stable phase). Confirms WSD's literature claim (4-5× boost from sharp 100× lr drop) requires sharper schedule than tested. Future WSD attempts need lr at start-of-decay × 0.01 (not × 0.5).
+
+**H183 SP floor breach confirmed**: val_SP=3.8463 at EP23 — flat slope through EP22-23. Test_SP projected 3.65 (FAILS 3.577 floor +0.07pp). Per-channel-heads ablation extracted some WSS-axis benefit but introduced SP regression — closes the axis-decoupled-heads direction.
 
 ## 22:43Z snapshot — **H182 CLOSED NON-MERGE** (test_WSS=6.6180, test_SP=3.6723 BREACH); H186 `layers=8` assigned to nezuko (PR #1529); H183/H184/H185 still active
 
