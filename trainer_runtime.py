@@ -1414,6 +1414,41 @@ def build_lr_scheduler(
     config,
     max_epochs: int,
 ) -> torch.optim.lr_scheduler.LRScheduler:
+    schedule_type = getattr(config, "lr_schedule", "cosine")
+
+    if schedule_type == "wsd":
+        warmup_epochs = max(1, config.lr_warmup_epochs)
+        stable_epochs = max(1, config.lr_wsd_stable_epochs)
+        decay_epochs = max(1, config.lr_wsd_decay_epochs)
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=config.lr_warmup_start_lr / config.lr,
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+        stable_scheduler = torch.optim.lr_scheduler.ConstantLR(
+            optimizer,
+            factor=1.0,
+            total_iters=stable_epochs,
+        )
+        decay_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=1.0,
+            end_factor=config.lr_min / config.lr,
+            total_iters=decay_epochs,
+        )
+        # Milestone shift: train.py calls scheduler.step() AFTER each epoch, so the lr
+        # USED for training epoch K is the lr after K step() calls. To make the final
+        # training epoch use lr_min, the decay phase must START one boundary step earlier.
+        # SequentialLR's transition step calls decay.step(0) which keeps lr at peak (the
+        # "last stable epoch"), so we still get warmup_epochs + stable_epochs effective
+        # stable epochs and decay_epochs effective decay-advancing epochs.
+        return torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, stable_scheduler, decay_scheduler],
+            milestones=[warmup_epochs, warmup_epochs + stable_epochs - 1],
+        )
+
     t_max = config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,

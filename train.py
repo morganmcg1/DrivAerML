@@ -113,6 +113,9 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     lr_cosine_t_max: int = 0
     lr_min: float = 1e-6
+    lr_schedule: str = "cosine"
+    lr_wsd_stable_epochs: int = 24
+    lr_wsd_decay_epochs: int = 6
     grad_clip_norm: float = 1.0
     gradient_log_every: int = 250
     log_gradient_histograms: bool = False
@@ -162,9 +165,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
         ),
+        "lr_schedule": (
+            "LR schedule type: 'cosine' (default) or 'wsd' (warmup-stable-decay). "
+            "WSD uses lr_warmup_epochs for warmup, then lr_wsd_stable_epochs at peak LR, "
+            "then linear decay over lr_wsd_decay_epochs from lr to lr_min."
+        ),
+        "lr_wsd_stable_epochs": (
+            "WSD schedule: number of constant-LR (stable) epochs between warmup and decay."
+        ),
+        "lr_wsd_decay_epochs": (
+            "WSD schedule: number of linear decay epochs from lr to lr_min."
+        ),
     }
     choices_text = {
         "wss_charbonnier_axes": ["all", "z"],
+        "lr_schedule": ["cosine", "wsd"],
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -638,6 +653,16 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
+        if state.is_main:
+            _probe_opt = torch.optim.SGD([torch.zeros(1, requires_grad=True)], lr=config.lr)
+            _probe_sched = build_lr_scheduler(_probe_opt, config, max_epochs)
+            _traj = [_probe_opt.param_groups[0]["lr"]]
+            for _ in range(max_epochs):
+                _probe_sched.step()
+                _traj.append(_probe_opt.param_groups[0]["lr"])
+            print(f"LR trajectory ({config.lr_schedule}, max_epochs={max_epochs}):")
+            for _i, _lr in enumerate(_traj[:max_epochs]):
+                print(f"  EP{_i:02d} train: lr={_lr:.4e}")
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
         gradnorm_weights: GradNormWeights | None = None
