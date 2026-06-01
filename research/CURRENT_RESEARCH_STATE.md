@@ -1,9 +1,46 @@
 # SENPAI Research State
 
-- **2026-06-01 06:30Z**
+- **2026-06-01 07:30Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
+
+## 07:30Z checkpoint — H188 LEADING (EP3 ABU=6.40 ahead of H183); H189 strong; H190 smoke PASSED + main launched; H191 fern dispatched
+
+### Fleet status (07:30Z)
+
+| Student | PR | Hyp | EP | val_ABU | val_WSS | Verdict |
+|---|---|---|---|---:|---:|---|
+| frieren | #1532 | H188: τ_y=1.2/τ_z=1.3 + lr=9e-5 on H183 stack | EP3 | **6.40** | 7.09 | **STRONG LEAD vs H183 EP3≈7.04** |
+| nezuko | #1533 | H189: hidden_dim=640 + H183 stack | EP2.6 | 6.68 | 7.28 | strong active descent (slope −0.447/1k) |
+| tanjiro | #1534 | H190: surface_out_width_factor=2.5 | EP0.6 main (smoke EP2 PASSED 9.08%) | — | — | main launched 06:52Z |
+| fern | #1535 | H191: Sharper WSD 100× drop on H183 | (waiting) | — | — | label fixed status:wip; fern's pod will pick up next poll |
+
+### H188 (frieren, PR #1532) — leading candidate
+
+**Mechanism:** Per-channel surface decoder heads (H183 default) + τ_y=1.2/τ_z=1.3 channel-aware loss weights + lr=9e-5. Tests whether the H183 stack still has cross-flow shear gains accessible via mild bounded τ reweighting (which was strong on pre-H183 stack — `9mm3sz7x` test_WSS=8.12 best single-model in May 4 wave).
+
+**EP3 ABU=6.40% is ~0.64pp ahead of H183 EP3 reference 7.04%.** Descent slope −0.022/1k steps (steady).
+
+Kill ladder: EP5 ≤6.95 ✓ on track (current 6.40 with 2 EPs remaining), EP10 ≤6.75, terminal must improve test_WSS over 6.4427.
+
+### H189 (nezuko, PR #1533) — capacity bump candidate
+
+**Mechanism:** H183 stack with hidden_dim=640 (vs H183=512, +25% width, ~1.5× backbone params). Tests whether the H183 ceiling is set by representation capacity.
+
+EP2.6 ABU=6.68% with strong descent slope −0.447/1k steps. Comfortably under EP3 gate ≤7.3.
+
+### H190 (tanjiro, PR #1534) — per-channel head width sweep
+
+**Smoke PASSED:** EP2 ABU=9.08% (gate ≤13.5%). Main launched 06:52Z (run `rmz7dng2`). EP1 main read expected ~07:50Z.
+
+**Mechanism:** Per-channel surface decoder heads at width-factor=2.5 vs H183's 2.0. Tests whether per-channel structure benefits from wider per-head MLPs (no capacity sharing → each head can absorb more committed capacity).
+
+### H191 (fern, PR #1535) — dispatched + label fixed
+
+**Mechanism:** Sharper WSD on H183 stack with true 100× LR drop (1e-4 → 1e-6), stable=24 EP, decay=6 EP, total=31 EP. Re-tests WSD mechanism on the per-channel-head stack (H184 falsified WSD on pre-H183 stack).
+
+Routing issue resolved (label: status:review→status:wip; student:fern→student:dl24-fern). Fern's pod will pick up next poll. Must implement WSD scheduler before launch (impl details in PR body + smoke gate posted).
 
 ## 06:30Z checkpoint — H191 assigned to fern; H184 CLOSED NON-MERGE; H188/H189 main running; H190 smoke
 
