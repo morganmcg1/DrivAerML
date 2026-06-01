@@ -394,6 +394,161 @@ class Transformer(nn.Module):
         return x
 
 
+class BLDerivativeHead(nn.Module):
+    """H355: Boundary-layer derivative decoder for wall shear stress.
+
+    Predicts off-wall velocity via cross-attention from ghost probe positions
+    into the post-backbone volume hidden states, then derives tau_w via
+    Richardson finite-difference extrapolation to the wall:
+
+        u(eta) = a * eta + b * eta^2 + O(eta^3)
+        tau_w = mu * du/dn |_{wall} = mu * a
+
+    With two off-wall samples u1 = u(eta1), u2 = u(eta2), the linear
+    coefficient is recovered exactly as:
+
+        tau_fd = mu * (eta2^2 * u1 - eta1^2 * u2) / (eta1 * eta2 * (eta2 - eta1))
+
+    The cross-attention output projection is zero-initialised and the
+    velocity decoder's final linear is zero-initialised so the head is
+    identity-zero at warm-start (tau_fd == 0 at step 0); gradients then
+    awaken naturally via the auxiliary loss.
+    """
+
+    def __init__(
+        self,
+        *,
+        hidden_dim: int,
+        num_heads: int,
+        eta_distances: list[float],
+        num_volume_slices: int = 256,
+        dropout: float = 0.0,
+        mu: float = 1.8e-5,
+    ):
+        super().__init__()
+        if len(eta_distances) < 2:
+            raise ValueError(
+                f"BLDerivativeHead requires at least 2 eta distances; got {eta_distances}"
+            )
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.num_eta = len(eta_distances)
+        self.num_volume_slices = num_volume_slices
+        self.register_buffer("eta_grid", torch.tensor(eta_distances, dtype=torch.float32))
+        self.register_buffer("mu", torch.tensor(mu, dtype=torch.float32))
+        # Slice-pool volume_hidden (B, N_v, H) -> (B, S, H) via learnable
+        # queries. Without this compression the ghost xattn cost is
+        # O(N_s*K * N_v) which explodes at full Phase-1 scale
+        # (N_s*K=131k, N_v=65k -> ~9G attention-matrix elements per sample).
+        # Pooling to S=256 slice tokens caps attention memory at O(N_s*K * S).
+        self.volume_slice_queries = nn.Parameter(
+            torch.randn(1, num_volume_slices, hidden_dim) * 0.02
+        )
+        self.volume_pool = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+        )
+        nn.init.zeros_(self.volume_pool.out_proj.weight)
+        nn.init.zeros_(self.volume_pool.out_proj.bias)
+        self.volume_pool_norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        # Cross-attention: ghost queries attend the pooled volume slice tokens.
+        self.ghost_xattn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+        )
+        nn.init.zeros_(self.ghost_xattn.out_proj.weight)
+        nn.init.zeros_(self.ghost_xattn.out_proj.bias)
+        self.ghost_norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        # Velocity decoder: hidden -> hidden//2 -> 3 (halved bottleneck to
+        # keep step-time overhead bounded at full Phase-1 scale; the
+        # bottleneck still has SiLU non-linearity needed to learn the
+        # off-wall velocity distribution). Final linear is zero-init so
+        # u_probe == 0 at warm-start, killing all gradient flow from the
+        # aux loss back into the backbone until the head wakes up.
+        self.velocity_decoder = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.SiLU(),
+            nn.Linear(hidden_dim // 2, 3),
+        )
+        nn.init.trunc_normal_(self.velocity_decoder[0].weight, std=0.02)
+        nn.init.zeros_(self.velocity_decoder[0].bias)
+        nn.init.zeros_(self.velocity_decoder[2].weight)
+        nn.init.zeros_(self.velocity_decoder[2].bias)
+
+    def forward(
+        self,
+        *,
+        ghost_query: torch.Tensor,
+        volume_hidden: torch.Tensor,
+        volume_mask: torch.Tensor | None,
+        surface_normals: torch.Tensor,
+        surface_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Compute tau_fd from ghost queries attending volume hidden states.
+
+        Args:
+            ghost_query: (B, N_s, K, hidden_dim) pre-encoded ghost positions.
+            volume_hidden: (B, N_v, hidden_dim) post-backbone volume tokens.
+            volume_mask: (B, N_v) bool/float mask; True = real, False = pad.
+            surface_normals: (B, N_s, 3) outward unit normals.
+            surface_mask: (B, N_s) bool/float mask for the surface tokens.
+
+        Returns:
+            dict with key 'tau_fd' = (B, N_s, 3) wall-tangential WSS in physical
+            units (Pa), and 'u_probe' = (B, N_s, K, 3) for diagnostics.
+        """
+        B, N_s, K, H = ghost_query.shape
+        if K != self.num_eta:
+            raise ValueError(f"Expected K={self.num_eta} ghost probes; got {K}")
+        # Flatten ghost queries for MHA: (B, N_s*K, H)
+        q = ghost_query.reshape(B, N_s * K, H)
+        if volume_mask is not None:
+            # MHA key_padding_mask: True = ignore. volume_mask has 1 for real.
+            key_padding_mask = ~volume_mask.bool()
+        else:
+            key_padding_mask = None
+        # Step 1: pool volume_hidden to S slice tokens with learnable queries.
+        slice_q = self.volume_slice_queries.expand(B, -1, -1).to(volume_hidden.dtype)
+        slice_pool_out, _ = self.volume_pool(
+            query=slice_q,
+            key=volume_hidden,
+            value=volume_hidden,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )
+        slice_tokens = self.volume_pool_norm(slice_q + slice_pool_out)
+        # Step 2: ghost queries attend the compressed slice tokens.
+        xattn_out, _ = self.ghost_xattn(
+            query=q,
+            key=slice_tokens,
+            value=slice_tokens,
+            need_weights=False,
+        )
+        # Residual-norm: ghost_query + xattn_out (xattn_out == 0 at init).
+        ghost_feat = self.ghost_norm(q + xattn_out)
+        # Predict velocity at each probe (in physical units).
+        u_flat = self.velocity_decoder(ghost_feat)  # (B, N_s*K, 3)
+        u_probe = u_flat.view(B, N_s, K, 3)
+        # Richardson 2-point extrapolation using the first two eta values.
+        eta1 = self.eta_grid[0]
+        eta2 = self.eta_grid[1]
+        u1 = u_probe[:, :, 0, :]
+        u2 = u_probe[:, :, 1, :]
+        denom = eta1 * eta2 * (eta2 - eta1)
+        a = (eta2 * eta2 * u1 - eta1 * eta1 * u2) / denom
+        tau_fd_vec = self.mu * a  # (B, N_s, 3) in physical units
+        # Project onto wall-tangent plane: subtract (tau . n) * n.
+        normal_component = (tau_fd_vec * surface_normals).sum(dim=-1, keepdim=True)
+        tau_fd = tau_fd_vec - normal_component * surface_normals
+        if surface_mask is not None:
+            tau_fd = tau_fd * surface_mask.unsqueeze(-1).to(tau_fd.dtype)
+        return {"tau_fd": tau_fd, "u_probe": u_probe}
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -419,6 +574,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        bl_derivative_decoder: bool = False,
+        bl_eta_distances: list[float] | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -558,6 +715,29 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H355: boundary-layer derivative decoder. Ghost probes at K wall-normal
+        # offsets attend volume_hidden to produce u(probe); a Richardson 2-point
+        # FD then derives tau_w = mu * du/dn. Aux head is parallel to the main
+        # surface_out, so warm-start safety is achieved by zero-init out_proj of
+        # ghost_xattn AND zero-init final linear of velocity_decoder.
+        self.bl_derivative_decoder = bool(bl_derivative_decoder)
+        if self.bl_derivative_decoder:
+            etas = bl_eta_distances if bl_eta_distances else [1e-5, 1e-4]
+            if len(etas) < 2:
+                raise ValueError(
+                    f"bl-derivative-decoder requires >=2 eta distances; got {etas}"
+                )
+            self.bl_eta_distances = list(etas)
+            self.bl_head = BLDerivativeHead(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                eta_distances=self.bl_eta_distances,
+                dropout=dropout,
+            )
+        else:
+            self.bl_eta_distances = None
+            self.bl_head = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -672,10 +852,39 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        outputs: dict[str, torch.Tensor] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+
+        if (
+            self.bl_head is not None
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            surface_coords = surface_x[:, :, : self.space_dim]
+            surface_normals = surface_x[:, :, self.space_dim : self.space_dim + 3]
+            eta_t = surface_coords.new_tensor(self.bl_eta_distances).view(
+                1, 1, len(self.bl_eta_distances), 1
+            )
+            # ghost_coords = x_surf + eta * n_outward (probe sits in fluid).
+            ghost_coords = surface_coords.unsqueeze(2) + eta_t * surface_normals.unsqueeze(2)
+            B, N_s, K, _ = ghost_coords.shape
+            ghost_query = self.pos_embed(ghost_coords.reshape(B, N_s * K, self.space_dim))
+            ghost_query = ghost_query.view(B, N_s, K, -1)
+            bl_out = self.bl_head(
+                ghost_query=ghost_query,
+                volume_hidden=volume_hidden,
+                volume_mask=volume_mask,
+                surface_normals=surface_normals,
+                surface_mask=surface_mask,
+            )
+            outputs["tau_fd"] = bl_out["tau_fd"]
+            outputs["bl_u_probe"] = bl_out["u_probe"]
+
+        return outputs

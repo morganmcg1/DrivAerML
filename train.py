@@ -145,6 +145,11 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H355: boundary-layer derivative decoder (Morgan #1)
+    bl_derivative_decoder: bool = False
+    lambda_bl: float = 0.5
+    bl_eta_distances: str = "1e-5,1e-4"
+    bl_lambda_warmup_steps: int = 0
     debug: bool = False
 
 
@@ -271,6 +276,34 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "bl_derivative_decoder": (
+            "H355: enable the boundary-layer derivative decoder (Morgan #1). "
+            "Generates ghost-probe positions at K wall-normal offsets, attends "
+            "them into volume_hidden via a dedicated zero-init MHA module, "
+            "predicts off-wall velocity u(eta), and derives tau_fd via "
+            "Richardson 2-point extrapolation: "
+            "tau_fd = mu * (eta2^2*u1 - eta1^2*u2) / (eta1*eta2*(eta2-eta1)). "
+            "Adds an L1 aux loss (normalised by wss std) against the ground-truth "
+            "wss xyz, weighted by --lambda-bl. The BL head is parallel to the "
+            "direct surface_out; zero-init out_proj of ghost_xattn and the final "
+            "linear of velocity_decoder make the head identity-zero at warm-start."
+        ),
+        "lambda_bl": (
+            "H355: weight for the BL-derivative auxiliary L1 loss "
+            "(normalised by surface_y_std[1:4]). Default 0.5 per PR spec."
+        ),
+        "bl_eta_distances": (
+            "H355: comma-separated wall-normal offsets (meters) for ghost probes. "
+            "Only the first two values enter the Richardson formula; additional "
+            "values are diagnostic. Default '1e-5,1e-4' targets the viscous "
+            "sublayer (y+~1) and buffer layer (y+~10) where the linear-in-eta "
+            "ansatz holds. Probes beyond y+~30 violate the Taylor expansion."
+        ),
+        "bl_lambda_warmup_steps": (
+            "H355: optional linear ramp on lambda_bl over the first N steps "
+            "(0 = no ramp, full lambda from step 0). Useful if the BL head's "
+            "early predictions perturb the main loss too aggressively."
         ),
     }
     for field in fields(Config):
@@ -414,6 +447,22 @@ def mirror_augment_batch(batch, p: float = 0.5):
     )
 
 
+def parse_bl_eta_distances(spec: str) -> list[float]:
+    spec = (spec or "").strip()
+    if not spec:
+        raise ValueError("--bl-eta-distances must be a non-empty comma-separated list")
+    etas = [float(tok.strip()) for tok in spec.split(",") if tok.strip()]
+    if len(etas) < 2:
+        raise ValueError(
+            f"--bl-eta-distances requires >=2 values; got {etas} (spec={spec!r})"
+        )
+    if any(e <= 0.0 for e in etas):
+        raise ValueError(f"--bl-eta-distances must be positive; got {etas}")
+    if any(etas[i] >= etas[i + 1] for i in range(len(etas) - 1)):
+        raise ValueError(f"--bl-eta-distances must be strictly increasing; got {etas}")
+    return etas
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -429,6 +478,12 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        bl_derivative_decoder=config.bl_derivative_decoder,
+        bl_eta_distances=(
+            parse_bl_eta_distances(config.bl_eta_distances)
+            if config.bl_derivative_decoder
+            else None
+        ),
     )
 
 
@@ -442,6 +497,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    bl_lambda: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -467,13 +523,40 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        bl_metrics: dict[str, float] = {}
+        if "tau_fd" in out:
+            tau_fd = out["tau_fd"]
+            wss_target_raw = batch.surface_y[..., 1:4]
+            # L1 in normalized space: divide by surface_y_std[1:4] so the BL
+            # loss magnitude is comparable to the (normalized) main losses.
+            wss_std = transform.surface_y_std.to(tau_fd.device, dtype=tau_fd.dtype)[1:4]
+            mask = batch.surface_mask.unsqueeze(-1).to(tau_fd.dtype)
+            diff_norm = ((tau_fd - wss_target_raw) / wss_std) * mask
+            denom = (mask.sum() * 3.0).clamp(min=1.0)
+            bl_loss_raw = diff_norm.abs().sum() / denom
+            bl_loss_weighted = bl_lambda * bl_loss_raw
+            loss = loss + bl_loss_weighted
+            with torch.no_grad():
+                tau_fd_abs_mean = (tau_fd.abs() * mask).sum() / denom
+                wss_target_abs_mean = (wss_target_raw.abs() * mask).sum() / denom
+                u_probe_abs_mean = out["bl_u_probe"].detach().abs().mean()
+            bl_metrics = {
+                "bl/loss_raw": float(bl_loss_raw.detach().cpu().item()),
+                "bl/loss_weighted": float(bl_loss_weighted.detach().cpu().item()),
+                "bl/lambda": float(bl_lambda),
+                "bl/tau_fd_abs_mean": float(tau_fd_abs_mean.cpu().item()),
+                "bl/wss_target_abs_mean": float(wss_target_abs_mean.cpu().item()),
+                "bl/u_probe_abs_mean": float(u_probe_abs_mean.cpu().item()),
+            }
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(bl_metrics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -941,8 +1024,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             # batch, so DDP's default find_unused_parameters=False deadlocks
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
-            # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # params across ranks, at a small per-step overhead. H355: same
+            # consideration applies to the BL derivative decoder which also
+            # gates on surface_tokens > 0 AND volume_tokens > 0.
+            if config.use_surf_to_vol_xattn or config.bl_derivative_decoder:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -1221,6 +1306,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    if config.bl_derivative_decoder:
+                        if config.bl_lambda_warmup_steps > 0:
+                            ramp = min(
+                                1.0,
+                                (global_step + 1) / float(config.bl_lambda_warmup_steps),
+                            )
+                            bl_lambda = config.lambda_bl * ramp
+                        else:
+                            bl_lambda = config.lambda_bl
+                    else:
+                        bl_lambda = 0.0
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1230,6 +1326,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        bl_lambda=bl_lambda,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1270,6 +1367,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for bl_key in (
+                        "bl/loss_raw",
+                        "bl/loss_weighted",
+                        "bl/lambda",
+                        "bl/tau_fd_abs_mean",
+                        "bl/wss_target_abs_mean",
+                        "bl/u_probe_abs_mean",
+                    ):
+                        if bl_key in batch_loss_metrics:
+                            train_log[bl_key] = batch_loss_metrics[bl_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
