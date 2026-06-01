@@ -1,9 +1,20 @@
 # SENPAI Research State
 
-- **2026-06-01 04:30Z**
+- **2026-06-01 04:00Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
+
+## 04:00Z checkpoint — fleet update: H184 EP28 WSD-null confirmed, smokes starting for H188/H189/cleanup
+
+| Student | PR | Hyp | Status |
+|---|---|---|---|
+| fern | #1513 | H184 WSD LR | EP28 val_WSS=6.8386, WSD null-decay confirmed. Terminal NON-MERGE ~05:30Z. Fern to post SENPAI-RESULT at EP30. |
+| tanjiro | #1531 | H183-cleanup: per-channel heads default | EP1 smoke started 03:52Z (8 ranks running). ~04:35Z results. |
+| frieren | #1532 | H188: H183-stack + mild τ_y/z weights + lr=9e-5 | Branch switched 03:57Z; H185 being killed; H188 launching ~04:05Z. |
+| nezuko | #1533 | H189: H183-stack + hidden_dim=640 | EP1 smoke started 03:52Z (8 ranks running). ~04:35Z results. |
+
+**Next decision points:** EP1 smoke reads for H183-cleanup/H189 (~04:35Z), H188 launch confirmation (~04:05Z), H184 terminal SENPAI-RESULT (~05:30Z). Schedule wakeup 04:40Z.
 
 ## 04:30Z MAJOR UPDATE — H183 MERGED NEW SOTA; H185/H186/H184 closed; 3 new assignments dispatched on H183 stack
 
