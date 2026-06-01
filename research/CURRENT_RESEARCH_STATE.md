@@ -41,11 +41,12 @@
 
 ---
 
-## Active Fleet (2026-06-01 16:35Z — 7 students with open PRs, frieren idle pending H353)
+## Active Fleet (2026-06-01 16:40Z — 8 students with open PRs)
 
 | PR | Student | Hypothesis | Status | Theme |
 |---|---|---|---|---|
-| **#1544** | thorfinn | H352: SWA-within-cosine-tail — weight-space averaging of ~30 fine-grained snapshots along H336 cosine-tail; distinct from H307 cross-seed soup and H342 output-avg. Zero param overhead. — NEW | 🆕 just assigned | Weight-space averaging (same trajectory) |
+| **#1545** | frieren | **H353: Expansive signed_power target on wss_z** — direct converse of H349 (which closed compressive direction). Arms p∈{1.25, 1.5, 2.0}. Zero param overhead. Skip rule on Arm A val_wss_z RAW. — NEW | 🆕 just assigned | Output-transform (expansive direction) |
+| **#1544** | thorfinn | H352: SWA-within-cosine-tail — weight-space averaging of ~30 fine-grained snapshots along H336 cosine-tail; distinct from H307 cross-seed soup and H342 output-avg. Zero param overhead. | 🆕 just assigned | Weight-space averaging (same trajectory) |
 | **#1543** | tanjiro | H351: NGSB (Normal-Relative Geometric Slice Bias) — 24-param zero-init `nn.Linear(3 → num_heads)` bias on Transolver slice_logits via surface normals; attacks encoder-resident attention-slice-routing axis. References GeoTransolver Adams et al. Dec 2025. — NEW | 🆕 just assigned | Encoder slice-routing |
 | **#1542** | askeladd | H350: Channel-isolated FiLM-conditioned decoder (Phase A frozen-backbone diagnostic gate, then Phase B full finetune) | 🟡 WIP — implementing | Architecture / per-channel decoder capacity |
 | **#1539** | fern | H348: Surface curvature input features (H, K, k1k2) — Arm A H train terminal raw val_abupt **6.0088** (essentially TIED with H336 raw), val_wss_z 9.1847 tied, test_abupt 5.8539 tied. **Pending TTA cal eval** (sent back 16:30Z, nudge for SENPAI-RESULT and TTA stack) | 🟡 WIP — awaiting student TTA eval | Input geometry |
