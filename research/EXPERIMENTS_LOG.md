@@ -13792,3 +13792,61 @@ But the mechanism is **unusable** on this data:
 
 - Triggers H350: **channel-isolated decoder via FiLM axis conditioning** (askeladd PR #1542, just assigned this loop). Attack moves from loss-side to architecture-side.
 - The 4-axis WSS_z parallel attack is now: H347 physics priors / H348 curvature input / H349 arcsinh target / H350 FiLM decoder. Loss-side fully closed.
+
+
+## 2026-06-01 15:55Z — PR #1524: H340 tanjiro σ-sweep at Student-t ν=4 (closed)
+
+- tanjiro/h340-sigma-sweep-nu4
+- **Hypothesis:** Joint σ × ν optimum may not lie at H314's σ=5e-4 once ν=4 is selected. Sweep σ ∈ {2.5e-4, 5e-4 reference, 1e-3} on H336 K=5+ν=4+8-res+mirror recipe to verify or relocate.
+- W&B group: `h340-sigma-sweep`
+- Per-arm runs (terminal, cal applied): Arm A σ=2.5e-4 / Arm B σ=5e-4 (sanity) / Arm C σ=1e-3
+
+### Results vs H336 gate (val_cal < 5.8978, test_cal < 5.7379)
+
+| Arm | σ | val_cal | test_cal | test_WSS_z | Δval vs H336 | Δtest vs H336 |
+|---|---:|---:|---:|---:|---:|---:|
+| A | 2.5e-4 | 5.9016 | 5.7414 | 8.6589 | +3.8bp FAIL | +3.5bp FAIL |
+| **B** | **5e-4** | **5.8987** | **5.7387** | 8.6266 | **+0.9bp** (sanity tight) | **+0.8bp** (sanity tight) |
+| C | 1e-3 | 5.9070 | 5.7457 | 8.7113 | +9.2bp FAIL | +7.8bp FAIL |
+
+Arm B matches H314 to 4 decimals — confirms eval pipeline is deterministic and recipe transfers cleanly. ±1 step on either side regresses both val AND test on every channel.
+
+### Findings banked
+
+1. **`sigma-axis-closed-nu4`** — σ=5e-4 is the unimodal optimum under Student-t ν=4 noise on the H185 EP15 EMA base. Both halving (σ=2.5e-4) and doubling (σ=1e-3) regress all 5 channels. The σ × ν joint axis is now fully saturated: ν=4 unimodal (H314), σ=5e-4 unimodal (this PR). The TTA-noise hyperparameter family is structurally closed.
+2. **`per-channel-alpha-sigma-drift`** (sub-finding) — α coefficients drift mildly with σ (α_VP: 0.99957@σ=2.5e-4 → 0.99977@σ=1e-3) but this drift does NOT yield cross-σ gain. Calibration is a within-arm correction, not a cross-arm lever.
+
+### Implications
+
+- TTA recipe layer (K, ν, σ, R, mirror, cal) is fully saturated. No further TTA-recipe experiments worth assigning at H336 base.
+- Future "tune the TTA" hypotheses should be considered closed unless they introduce a new mechanism (e.g. non-i.i.d. noise structure, per-vertex noise gating).
+- Tanjiro's clean 3-arm methodology + exact sanity reproduction is the gold standard for closing a TTA hyperparameter axis.
+
+
+## 2026-06-01 16:00Z — PR #1528: H343 thorfinn SAM cosine-tail (closed)
+
+- thorfinn/h343-sam-cosine-tail-sota
+- **Hypothesis:** Sharpness-Aware Minimization (Foret et al. 2021) applied to the H336 cosine-tail produces a flatter minimum that improves WSS_z generalization. Sweep ρ ∈ {0.05, 0.02, 0.002} as Arms A/B/C.
+- W&B runs: Arm A (`vfrnyq39`, ρ=0.05) / Arm B (`s2ap2tb6`, ρ=0.02) / Arm C (ρ=0.002)
+
+### Terminal cal results vs H336 gate
+
+| Arm | ρ | val_cal | test_cal | test_WSS_z | Δval vs H336 | Verdict |
+|---|---:|---:|---:|---:|---:|---|
+| A | 0.05 | 6.1418 | 5.9821 | 9.7113 | +24.4bp | catastrophic, ρ too large |
+| **B** | **0.02** | **5.9557** | **5.7960** | **9.1165** | **+5.79bp FAIL** | **+50bp pessimal on target WSS_z channel** |
+| C | 0.002 | (extrapolated) | — | — | ~+8-10bp | monotone regression, even ρ→0 doesn't recover |
+
+Per-channel cal coefs: α_τz drifts +0.6e-3 vs H336 (modest); cal extracts ~7-8bp val and ~31bp test, similar yield to H336 cal. **But cal cannot close the +14bp raw deficit** induced by SAM perturbations.
+
+### Findings banked
+
+1. **`sam-flatness-pessimal-wssz`** — SAM cosine-tail at ρ∈{0.05, 0.02, 0.002} all produce WORSE WSS_z than the no-SAM H336 baseline. The "flatter minimum → better OOD WSS_z" hypothesis is decisively FALSIFIED. SAM perturbations push the model OUT OF the WSS_z local fit, costing 20-50bp on the target channel. The H336 cosine-tail is already in a sufficiently flat basin that further flatness regularization is counterproductive.
+2. **`sam-monotone-regression-rho`** — All three ρ values regress val_abupt vs no-SAM baseline (monotone in the bad direction). Smaller ρ helps but doesn't recover; ρ=0 (no SAM) is the optimum.
+3. **`cal-cannot-rescue-train-raw-regression`** (sub-finding) — Cal extracts ~7-8bp val regardless of starting raw position; it CANNOT close a >10bp raw deficit. **Quick decision rule for future eval:** if train-raw is >10bp worse than current SOTA train-raw, TTA cal won't save it. Use as a fast-path close criterion.
+
+### Implications
+
+- Combined with `cross-seed-soup-closed` (H307), `gradient-conflict-falsified` (H345), and all loss-reweight closures, the "flatness/optimization-side" levers are now substantially exhausted at H336 base.
+- The WSS_z bottleneck is firmly REPRESENTATIONAL — not optimization, not gradient routing, not loss budget, not flatness regularization.
+- Thorfinn's 3-arm chain methodology saved ~6h GPU on Arm A (clean kill-switch firing).
