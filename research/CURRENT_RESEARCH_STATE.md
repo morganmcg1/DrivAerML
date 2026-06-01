@@ -1,9 +1,55 @@
 # SENPAI Research State
 
-- **2026-06-01 08:30Z**
+- **2026-06-01 12:45Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
+
+## 12:45Z checkpoint — H188 fading at EP10; H190 borderline; H191 strong + still stable phase
+
+### Fleet status (12:45Z)
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | Δ vs H183 | Verdict |
+|---|---|---|---:|---:|---:|---:|---|
+| frieren | #1532 | H188: τ-yz 1.2/1.3 + lr=9e-5 | **EP9** | 6.815 | 6.06 | WSS +0.15pp | **FADING — EP10 likely fails 6.75 gate** |
+| nezuko | #1533 | H189: hidden_dim=640 | EP5+ (silent) | (10:53Z W&B: EP5 ABU=6.12) | 6.12 | ABU −0.43 vs H183 EP5 | pod alive but student reporting silent since 08:25Z |
+| tanjiro | #1534 | H190: width-factor=2.5 | **EP7** | 6.876 | 6.14 | WSS +0.04 vs H183 EP7 | descent stabilized ~0.03pp/EP — borderline |
+| fern | #1535 | H191: Sharper WSD | **EP3** (stable phase) | 6.98 | 6.31 | EP3 kill gate 7.60 PASSED with 0.62pp | **STRONGEST — sharper WSD early descent thesis confirmed** |
+
+### H188 (frieren, PR #1532) — fading at EP10
+
+EP9 val_WSS=6.815, gap to H183 stable at +0.15pp since EP3. Descent rate EP8→9 only −0.011pp (H183 at same boundary −0.006pp), so H188 closing but very slowly. **Projected EP10 ≈ 6.79-6.80, FAILS the 6.75 kill gate.**
+
+Per-axis read (positive evidence for mechanism, negative for magnitude): τ_x +0.17pp (most lag, unweighted), τ_y +0.12, τ_z +0.11 (weighted axes lagging less, but small). The mild tau weighting IS doing what we hypothesized but the effect is too small to overcome the lr=9e-5 (−10%) penalty.
+
+**Decision pending at EP10 (~13:10Z)** — if val_WSS > 6.75, kill. ABU at EP9 still 6.06 below H183 EP10 (6.20) by 0.14pp, so we'd be killing despite ABU lead. Worth considering: ABU is paper-facing primary; should we continue if WSS just over gate but ABU strongly ahead?
+
+**Counterfactual:** If we kill H188 at EP10, we lose the EP25-30 cosine descent that could close the WSS gap. If we continue and the gap doesn't close by EP15, we burn 6+ EPs of GPU time. Recommend: **continue past EP10 kill gate** ONLY IF EP10 val_WSS ≤ 6.80 AND EP10 ABU ≤ 6.05 (both lead H183 EP10 ref on ABU AND match WSS within reach).
+
+### H189 (nezuko, PR #1533) — pod alive but student reporting silent
+
+Student hasn't posted since 08:25Z (EP3). My own 10:53Z W&B query showed EP5 ABU=6.12 (run alive). Pod kubectl shows nezuko 1/1 Running, 0 restarts, 4d2h uptime — no infrastructure issue. **Posted 12:45Z heartbeat asking nezuko to confirm pod health + post EP6-7-8 boundaries.**
+
+If she responds with strong EP6-8 trajectory, H189 may overtake H188 as leading candidate. hidden_dim=640 is +25% width on H183 stack — if it works it opens up a width-direction follow-up.
+
+### H190 (tanjiro, PR #1534) — descent stabilizing, borderline
+
+EP7 val_WSS=6.876, ABU=6.14. Per-epoch deltas: EP5→6 −0.029pp, EP6→7 −0.027pp. **Descent rate plateaued at ~0.03pp/EP.** If sustained, EP10 ≈ 6.79, EP30 terminal ≈ 6.18 — would beat H183 SOTA 6.4427 by a healthy margin.
+
+Caveat: H183's own EP7→EP30 descent was only −0.10pp (6.689 → ~6.59) — most of H183's gain came after EP15 cosine ramp. H190's monotonic descent without LR drop is encouraging but extrapolating to EP30 from EP7 is uncertain.
+
+### H191 (fern, PR #1535) — strongest trajectory, still in stable phase
+
+EP3 val_WSS=6.98, ABU=6.31. EP3 kill gate ≤7.60 passed with 0.62pp margin. Descent EP1→2 was −2.50pp (warmup→stable transition), EP2→3 was −0.21pp. Currently in stable LR phase (lr=1e-4 until EP24), then sharp WSD decay EP25→30 → lr_min=1e-6 (true 100× drop).
+
+**This is the critical test.** If H191 can match H183 trajectory through EP24 (stable phase) AND get a 4-5× descent boost during EP25-30 decay, it could push test_WSS below 6.0%. If the decay descent fails (like H184 on H147 stack), it'll terminal around 6.5-6.7%.
+
+### Action plan
+
+- **Next wake ~13:30Z** for H188 EP10 decision + H189 nezuko response check + H191 EP4 read.
+- H188 EP10 boundary at ~13:10Z is the critical decision.
+- H191 EP5 at ~13:34Z is next checkpoint.
+- Keep monitoring closely — fleet is converging toward EP10-EP12 decision points across 3 of 4 runs.
 
 ## 08:30Z checkpoint — FLEET ALL AHEAD of H183 on ABU; H188 EP7 ALREADY past H183 EP10 reference
 
