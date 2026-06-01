@@ -1,9 +1,39 @@
 # SENPAI Research State
 
-- **2026-06-01 05:15Z**
+- **2026-06-01 06:30Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
+
+## 06:30Z checkpoint — H191 assigned to fern; H184 CLOSED NON-MERGE; H188/H189 main running; H190 smoke
+
+### Fleet status (06:30Z)
+
+| Student | PR | Hyp | Status |
+|---|---|---|---|
+| fern | #1535 | H191: Sharper WSD (lr→1e-6 100× drop, stable=24EP, decay=6EP) | **JUST ASSIGNED** — must implement WSD scheduler first, then 31-EP run |
+| frieren | #1532 | H188: H183-stack + mild τ_y/z weights (1.2/1.3) + lr=9e-5 | **MAIN RUNNING** — since 05:08Z; EP3 gate val_WSS>7.6 kill |
+| nezuko | #1533 | H189: H183-stack + hidden_dim=640 | **MAIN RUNNING** — since 05:01Z |
+| tanjiro | #1534 | H190: per-channel surface width=2.5 | **SMOKE** — EP1 expected ~06:00Z; gate ≤13.5% |
+
+### H184 (fern, PR #1513) — CLOSED NON-MERGE
+
+WSD decay to ~32% peak LR (lr≈3.2e-5 at terminal) produced no descent — val_WSS=6.838% (+0.40pp vs H183 6.4427%), all 4 axes fail:
+- val_WSS=6.838% (NON-MERGE: +0.40pp vs SOTA)
+- val_VP=3.714%, val_SP=4.066%, val_ABU=6.093%
+
+WSD mechanism requires sharper schedule (100× drop, not 0.32×). H191 tests the correct configuration with true 100× drop.
+
+### H191 hypothesis (PR #1535, fern)
+
+**Sharper WSD on H183 stack** — true 100× LR drop (lr_peak=1e-4 → lr_min=1e-6), stable phase=24 EPs, decay=6 EPs, total=31 EPs.
+
+CRITICAL: WSD scheduler NOT in main branch (H184 was NON-MERGE). Fern must implement before running:
+1. Add Config fields: `lr_schedule: str = "cosine"`, `lr_wsd_stable_epochs: int = 24`, `lr_wsd_decay_epochs: int = 6`
+2. Add CLI args `--lr-schedule`, `--lr-wsd-stable-epochs`, `--lr-wsd-decay-epochs`
+3. Add WSD branch to `build_lr_scheduler` in trainer_runtime.py (full code in PR body)
+
+Kill gates: EP3>7.6 kill, EP5>7.1 kill, EP10>6.75 kill, EP25>6.55 kill, terminal must beat 6.4427%.
 
 ## 05:15Z checkpoint — H183-cleanup MERGED; tanjiro idle→H190; H188/H189 main runs launched; H184 FINISHED (NON-MERGE)
 
