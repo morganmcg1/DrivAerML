@@ -1,3 +1,23 @@
+## 2026-06-01 00:16Z — PR #1520: H336 K=5 + Student-t ν=4 + 8-res + mirror + cal — MERGED NEW SOTA
+- Branch: nezuko/h336-compose-k5-studentt-cal
+- Hypothesis: Composing K=5 (one extra antithetic pair) on top of the H314 Student-t ν=4 + 8-res + mirror + cal recipe would compound due to structural independence of K-axis and noise-family axis.
+- W&B run: `348i3z1v` (nezuko/h336-K5-studentt-nu4-8res-cal)
+
+| metric | H336 | H314 (prior SOTA) | Δ |
+|---|---:|---:|---:|
+| val_cal | **5.8978%** | 5.8987% | **−0.9bp ✓** |
+| test_cal | **5.7379%** | 5.7387% | **−0.8bp ✓** |
+| test_VP | 3.3735% | 3.3739% | −0.4bp |
+| test_SP | 3.6133% | 3.6136% | −0.3bp |
+| test_WSS | 6.6382% | 6.6390% | −0.8bp |
+| test_WSS_x | 5.9014% | 5.9018% | −0.4bp |
+| test_WSS_y | 7.1841% | 7.1858% | −1.7bp |
+| test_WSS_z | 8.6175% | 8.6184% | −0.9bp |
+
+- **Analysis**: All 5 channels Pareto-improve over H314. K=5 stacking under Student-t ν=4 is mildly **superadditive** (observed −0.8bp test_cal vs linear-additive prediction of −0.4bp from independent K and ν gains). This finding revises H330's `K5-cal-redundant-at-h312-budget` finding: the K-axis closure was **noise-family-conditional** — K=5 is redundant under Gaussian (ν=∞) but beneficial under Student-t (ν=4). Cal coefficients match H312 to 1e-3 — cal axis is noise-family-invariant. Finding banked: `K5-studentt-superadditive`.
+- Wall time: 8h29m (30580s), 8×H100, within 9h hard wall. Wall: +25% over H336 K=4 arm.
+- **MERGED as new single-model SOTA** (PR #1520). Merge gate updated: val_cal < 5.8978 AND test_cal < 5.7379.
+
 ## 2026-05-31 22:01Z — PR #1507 thorfinn H307 CLOSED: weight-space model soup α-sweep on 2 EP15 seeds — 3 findings banked, AND-fail on H314 val gate by 3 milli-bp
 
 ### CLOSED — AND-fail on H314 strict gate (val_cal < 5.8987 AND test_cal < 5.7387)
