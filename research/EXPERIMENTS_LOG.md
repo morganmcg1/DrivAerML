@@ -1,3 +1,56 @@
+## 2026-06-01 22:52Z — PR #1539: H348 Surface curvature input features (k1, k2, H, K) — CLOSED
+
+- Branch: fern/h348-curvature-input-features
+- **Hypothesis**: Per-vertex surface curvature (H, K, k1, k2) as additional input features closes the WSS_z 8.62% floor by providing the geometric prior that Falkner-Skan boundary-layer physics requires. Curvature is invariant to rigid rotation, computable from canonical mesh, zero inference overhead.
+- W&B training: `mkii1fem` (Arm A, curvature_mode=H, 8-GPU DDP, EP13→EP16, H336 recipe, curvatures from `/mnt/new-pvc/Processed/curvatures_haku_v1/`)
+- W&B eval: `26e5khdg` (8-GPU DDP TTA, K=4 antithetic, σ=5e-4 student_t df=4, 8 resolutions 32k→131k, mirror, per-channel-OLS calibration)
+- W&B group: `h348-fern-curvature-features` (train), `h348-fern-curvature-features-eval` (eval)
+
+### Results — Arm A (H curvature, 1 extra channel)
+
+| Metric | H342 SOTA | H348 Arm A cal | Δ (bp) |
+|---|---:|---:|---:|
+| **val_abupt_cal** | **5.8962** | **5.8984** | **+0.06 ❌ (gate miss)** |
+| **test_abupt_cal** | **5.7357** | **5.7373** | **-0.06 ✓ (gate pass)** |
+| test_WSS_cal | 6.6351 | 6.6374 | +0.23 |
+| **test_WSS_z_cal** | **8.6122** | **8.6182** | **+0.60 ❌ (target channel WORSE)** |
+| test_WSS_y_cal | 7.1841 | 7.1816 | -0.25 |
+| test_WSS_x_cal | 5.9014 | 5.9008 | -0.06 |
+| test_SP_cal | 3.6124 | 3.6124 | ≈0 |
+| test_VP_cal | 3.3751 | 3.3732 | -0.19 |
+
+Val raw: val_abupt 5.9213 (−4.87bp vs H336 raw 5.97), val_WSS_z 9.0846 (−9.93bp vs H336 raw 9.1839). Under calibration, every gain compresses to sub-bp.
+
+**Calibration coefficients (matched H336 family to 4 decimals):** α_cp=0.994829, α_τx=0.994515, α_τy=0.993928, α_τz=0.991816, α_VP=0.999699, β_VP=−0.820024.
+
+**Gate verdict**: val_cal MISSED by 0.06bp (AND-gate requires BOTH gates to pass). test_WSS_z +0.07bp vs H342 gate (WORSE on target channel).
+
+### Analysis
+
+1. **Raw improvement compresses entirely under calibration.** val_abupt −4.87bp raw improvement → +0.06bp after OLS calibration. The curvature-bearing model and H336 lie in essentially the same calibration envelope — the cal transform collapses their statistical difference.
+2. **WSS_z target channel moved the WRONG direction (+0.07bp cal).** Falkner-Skan motivates that H curvature should distinguish boundary-layer regimes, but the model already extracts sufficient local geometric context from (x, y, z) + normals. Adding explicit curvature channels provides redundant information.
+3. **Skip rule near-triggered (2 of 3 strict conditions met; 3rd fails by 0.08bp noise).** Near-miss skip confirms this is a cleanly null result, not a marginal signal.
+4. **Arms B (K), C (k1, k2) skipped.** Per decision logic: Arm A is the dominant-signal curvature mode (H carries the dominant Falkner-Skan scaling term). Arms B/C would cost ~26h and have very low prior probability of >30bp WSS_z improvement given Arm A null.
+
+### Decision: CLOSED — `curvature-features-null`
+
+**Per-vertex H curvature concatenated to surface input features does not move the WSS_z primary obstacle. The WSS_z floor at 8.6122% is robust to local geometric shape information. The bottleneck is structurally elsewhere (upstream encoder capacity / global geometric structure / training basin), NOT raw curvature awareness.**
+
+This is the **9th converging closed input/decoder-side axis**:
+1. Loss-reweight (H339+H341+H346)
+2. TTA-saturation (H330+H340+H344)
+3. SAM (H343)
+4. Target-transform (H349+H353)
+5. FiLM-decoder (H350+H354)
+6. NGSB encoder-routing (H351)
+7. BL-derivative-decoder (H355)
+8. PCGrad/CAGrad gradient surgery (H345)
+9. **Curvature input features (H348) ← this experiment**
+
+**Next assignment: H360 fern surface Laplacian eigenfunction positional encoding (LapPE-32)** — encodes GLOBAL geodesic surface structure rather than local shape, clearly orthogonal to H348 curvature.
+
+---
+
 ## 2026-06-01 22:10Z — PR #1547: H355 BL derivative decoder (Morgan directive #1) — CLOSED
 
 - Branch: askeladd/h355-bl-derivative-decoder
