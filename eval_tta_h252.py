@@ -137,6 +137,12 @@ class EvalConfig:
     amp_mode: str = "bf16"
     debug: bool = False  # 2 val + 2 test cases
 
+    # H353: expansive signed-power target transform. Must match the values used
+    # in train.py for the checkpoint being evaluated, so the inverse is applied
+    # correctly before de-z-scoring. Default "none" preserves prior eval behaviour.
+    target_signed_power: str = "none"
+    signed_power_p: float = 1.25
+
 
 def parse_args(argv: Iterable[str] | None = None) -> EvalConfig:
     parser = argparse.ArgumentParser(description="H252 stacked weight-noise x multi-res x mirror eval")
@@ -998,6 +1004,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         surface_y_std=stats["surface_y_std"].to(device),
         volume_y_mean=stats["volume_y_mean"].to(device),
         volume_y_std=stats["volume_y_std"].to(device),
+        signed_power_mode=cfg.target_signed_power,
+        signed_power_p=cfg.signed_power_p,
     )
 
     model = build_model(cfg).to(device)

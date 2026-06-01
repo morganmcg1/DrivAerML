@@ -146,6 +146,9 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    # H353: signed power transform for loss-space target reshaping
+    target_signed_power: str = "none"
+    signed_power_p: float = 1.25
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -271,6 +274,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "target_signed_power": (
+            "H353: apply an expansive signed power transform y'=sign(y)*|y|^p "
+            "in loss space AFTER z-scoring. Choices: 'none' (disabled), "
+            "'wss_z' (tau_z only), 'wss' (tau_x/y/z), 'all' (all 4 surface "
+            "channels). Upweights heavy-tail samples in MSE: effective "
+            "gradient weight ~ p*|y|^(2p-1). Inverse applied at eval before "
+            "de-normalisation. Default: none."
+        ),
+        "signed_power_p": (
+            "H353: exponent p for the signed power transform. p=1 is identity; "
+            "p>1 is expansive (upweights tails). Arms to try: 1.25, 1.5, 2.0. "
+            "Default: 1.25."
         ),
     }
     for field in fields(Config):
@@ -865,6 +881,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             surface_y_std=stats["surface_y_std"].to(device),
             volume_y_mean=stats["volume_y_mean"].to(device),
             volume_y_std=stats["volume_y_std"].to(device),
+            signed_power_mode=config.target_signed_power,
+            signed_power_p=config.signed_power_p,
         )
 
         model: nn.Module = build_model(config).to(device)

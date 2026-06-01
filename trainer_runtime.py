@@ -169,6 +169,27 @@ class StridedDistributedSampler(Sampler[int]):
         return (len(self.dataset) - 1 - self.rank) // self.num_replicas + 1
 
 
+def signed_power_transform(y: torch.Tensor, p: float) -> torch.Tensor:
+    """Expansive signed power transform: y' = sign(y) * |y|^p (p > 1).
+
+    Applied in loss space after z-scoring.  Upweights heavy-tail samples in
+    MSE: effective per-sample gradient weight is p * |y|^(2p-1) relative to
+    vanilla MSE on raw z-scored targets.
+    """
+    return torch.sign(y) * torch.abs(y).clamp(min=1e-12).pow(p)
+
+
+def signed_power_inverse(z: torch.Tensor, p: float) -> torch.Tensor:
+    """Exact inverse of signed_power_transform: y = sign(z) * |z|^(1/p)."""
+    return torch.sign(z) * torch.abs(z).clamp(min=1e-12).pow(1.0 / p)
+
+
+# Surface channel indices (matches SURFACE_TARGET_NAMES order: cp, tau_x, tau_y, tau_z)
+_SURF_CH_TAU_X = 1
+_SURF_CH_TAU_Y = 2
+_SURF_CH_TAU_Z = 3
+
+
 class TargetTransform:
     def __init__(
         self,
@@ -179,6 +200,8 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        signed_power_mode: str = "none",
+        signed_power_p: float = 1.25,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -196,6 +219,29 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        valid_modes = ("none", "wss_z", "wss", "all")
+        if signed_power_mode not in valid_modes:
+            raise ValueError(
+                f"signed_power_mode must be one of {valid_modes}, got {signed_power_mode!r}"
+            )
+        if signed_power_p <= 0.0:
+            raise ValueError(f"signed_power_p must be positive, got {signed_power_p}")
+        self.signed_power_mode = signed_power_mode
+        self.signed_power_p = signed_power_p
+
+    def _surface_channels_to_transform(self) -> list[int]:
+        """Return which surface channel indices get the signed-power transform."""
+        mode = self.signed_power_mode
+        if mode == "none":
+            return []
+        if mode == "wss_z":
+            return [_SURF_CH_TAU_Z]
+        if mode == "wss":
+            return [_SURF_CH_TAU_X, _SURF_CH_TAU_Y, _SURF_CH_TAU_Z]
+        if mode == "all":
+            # all 4 channels: cp, tau_x, tau_y, tau_z
+            return [0, _SURF_CH_TAU_X, _SURF_CH_TAU_Y, _SURF_CH_TAU_Z]
+        return []
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -204,9 +250,37 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+        # Step 1: z-score
+        z = (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+        # Step 2: apply signed-power to selected channels (after z-scoring).
+        # Use out-of-place stack to avoid autograd in-place mutation errors.
+        channels = self._surface_channels_to_transform()
+        if channels:
+            channels_set = set(channels)
+            n_ch = z.shape[-1]
+            slices = []
+            for ch in range(n_ch):
+                s = z[..., ch : ch + 1]
+                if ch in channels_set:
+                    s = signed_power_transform(s, self.signed_power_p)
+                slices.append(s)
+            z = torch.cat(slices, dim=-1)
+        return z
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
+        # Step 1: invert signed-power from selected channels (out-of-place).
+        channels = self._surface_channels_to_transform()
+        if channels:
+            channels_set = set(channels)
+            n_ch = y.shape[-1]
+            slices = []
+            for ch in range(n_ch):
+                s = y[..., ch : ch + 1]
+                if ch in channels_set:
+                    s = signed_power_inverse(s, self.signed_power_p)
+                slices.append(s)
+            y = torch.cat(slices, dim=-1)
+        # Step 2: de-z-score
         return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
