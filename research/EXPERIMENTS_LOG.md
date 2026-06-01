@@ -13709,3 +13709,41 @@ Cal coefficients (OLS on Arm A val): α_cp=0.994976 α_τx=0.994615 α_τy=0.993
 
 **Next steps:** Architecture-tier attack now primary. Closed PRs assigned: H345 PCGrad gradient surgery, H346 focal EMA spatial residual, H347 boundary-layer physics priors, H348 curvature input features (newly assigned). DO NOT run H342/H343-style wz/wy/wx-only variants — Arm A channel decomposition closes the per-axis loss-reweight family conclusively.
 
+
+## 2026-06-01 12:10 — PR #1536: H345 frieren PCGrad/CAGrad gradient-conflict diagnostic
+
+- frieren/h345-pcgrad-cagrad-wss-pres
+- **Hypothesis:** WSS_z bottleneck caused by gradient-direction conflict between {τ_x, τ_y, τ_z} and {cp, VP} task groups; PCGrad projection should redirect capacity. Diagnostic gate first: if `mean cos(g_wss, g_pres) > −0.05` over 400 steps, hypothesis is FALSIFIED.
+- W&B run: diagnostic `7wrl3xca` (441 steps, EP14 cosine-tail)
+
+### Results (Step 1 diagnostic gate)
+
+| stat | value | gate verdict |
+|---|---:|---|
+| valid diag steps | 441 | ≥400 ✓ |
+| **mean cos(g_wss, g_pres)** | **+0.2976** | gate is `>−0.05` → **FALSIFIED** |
+| median cos | +0.2797 | |
+| min / max cos | −0.1429 / +0.7873 | |
+| steps with cos < 0 | 2 / 441 (0.45%) | |
+| steps with cos < −0.05 | 1 / 441 (0.23%) | |
+| **\|g_wss\|/\|g_pres\| (mean)** | **5.12** | WSS grad 5× larger |
+| ratio p10 / p90 | 3.21 / 7.68 | stable across batches |
+
+Per-quartile trajectory (Q1/Q2/Q3/Q4): mean cos = +0.3054 / +0.3050 / +0.2772 / +0.2986 — stable band, no drift toward conflict. Linear extrapolation to end of epoch (step 2720): +0.1521, still nowhere near −0.05.
+
+### Analysis and conclusions
+
+**Two findings banked:**
+
+1. **`pcgrad-no-conflict-falsifies`** — Mean cosine similarity between WSS and pressure gradients is **positive at +0.30**, with 99.55% of steps having positive cosine. PCGrad's projection would be a no-op in 99.55% of training steps; CAGrad's QP solver would barely move the direction. The gradient-conflict hypothesis is structurally falsified at this checkpoint. Arms B/C correctly skipped via pre-committed gate, saved ~30h GPU.
+
+2. **`wss-gradient-already-dominant`** — |g_wss|/|g_pres| = 5.12 (p10/p90 = 3.21/7.68). The WSS gradient is *already* 5× larger than the pressure gradient on the shared backbone. Mechanistically explains why H339 (uniform WSS up-weight) and H341 (wz-only up-weight) both regressed: those experiments tried to *further* upweight a task whose gradient was already dominant, destabilizing the trajectory. The loss-magnitude lever has no productive direction.
+
+**Combined with prior findings** (`wz-reweight-monotone-nogate` H341 + `wss-reweight-monotone-nogate` H339), the diagonal training-time loss/gradient family is now triply nulled. The WSS_z bottleneck is **not** a gradient budget, routing, or magnitude problem.
+
+**Implications for active fleet:**
+
+- Confirms the 3-axis WSS_z attack remains the right structural play: representation (H348 curvature), spatial concentration (H346 focal-batch), physical constraint (H347 physics priors).
+- Opens a 4th unexplored axis: **target-space pathology** — high-dynamic-range τ_z under linear-MSE puts gradient on high-|τ_z| regions while rel_l2 eval is dominated by low-|τ_z| regions. Assigned as H349 frieren arcsinh-target (PR #1540).
+- Excellent diagnostic execution by frieren: the 30-minute kill-switch worked as designed, saved 30h GPU, produced two new findings that sharpen our understanding of why the loss-weight family is structurally closed.
+
