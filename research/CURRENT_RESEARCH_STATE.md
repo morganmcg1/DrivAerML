@@ -1,10 +1,50 @@
 # SENPAI Research State
 
-- **2026-06-01 13:35Z**
+- **2026-06-01 15:20Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment. **Current fleet (H189/H190/H191/H192) tests capacity/width/schedule/loss weight — symptomatic. Next round should pivot toward architectural mechanisms.**
+
+## 15:20Z checkpoint — H191 leading WSS; H189 wins VP; H192 main launched
+
+### Fleet status (15:20Z) — full slate, zero idle, all 4 runs healthy
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | val_VP | val_SP | Δ vs H183 | Verdict |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
+| frieren | #1541 | **H192**: τ_z=1.5, lr=1e-4 | smoke done; main step 8814 (pre-EP1) | (smoke EP1 = 12.69) | — | — | — | — | smoke PASS, main launched, EP1 ETA 16:00Z |
+| nezuko | #1533 | H189: hidden_dim=640 | **EP10** (W&B direct, student silent since 08:25Z) | 6.802 | 6.011 | **3.570 ⭐** | 3.881 | WSS +0.16, **VP −0.06pp** | Hidden_dim helps VP; weak on WSS — capacity-direction trade-off |
+| tanjiro | #1534 | H190: width-factor=2.5 | **EP10** (15:08Z) | 6.831 | 6.089 | 3.765 | 3.980 | WSS +0.19 | EP10 PASSED kill gate; descent −0.03pp/EP plateau forming |
+| fern | #1535 | H191: Sharper WSD | **EP7** (15:16Z) | **6.790 ⭐** | 6.074 | 3.800 | 3.958 | WSS +0.10 vs H183 EP7 | **LEADING WSS** in fleet; 17 more stable EPs before EP25 WSD decay test |
+
+### Key finding (15:20Z): H189 hidden_dim=640 IMPROVES VP
+
+**First programme evidence of capacity-direction VP improvement.** H189 EP10 val_VP=3.570 vs H183 EP10 val_VP=3.6284 = **−0.058pp BELOW H183 reference**. This is in the per-channel surface decoder stack, so the +25% width is helping the trunk/volume coupling rather than just the surface heads. The downside: WSS/SP/ABU all slightly behind (+0.16/+0.03/+0.09 vs H183). The capacity boost is VP-biased, not WSS-biased.
+
+**Implication for next-round hypotheses:** if we want WSS improvement, hidden_dim=640 is the wrong lever. If we want VP improvement (paper floor protection), this is a strong direction. Could compound with a WSS-targeted intervention (Morgan's BL probe, tangent-basis decoder) on top of hidden_dim=640.
+
+### H191 (fern, PR #1535) — leading WSS in fleet at EP7 stable phase
+
+val_WSS=6.790 at EP7 is already lower than H189/H190 at EP10. The H183 EP7 reference was 6.6890, so H191 is +0.10pp behind H183 at this point. But the WSD decay phase (EP25-30, lr 1e-4 → 1e-6 over 6 EPs, 100× drop) is where the entire H191 thesis lives. If decay produces 4-5× descent rate boost (the sharp-WSD literature claim), terminal could push test_WSS sub-6.0. If decay fails like H184 did on the H147 stack, terminal ≈ 6.5-6.7.
+
+### H190 (tanjiro, PR #1534) — EP10 PASSED but width=2.5 underperforming
+
+EP10 val_WSS=6.831, EP9→10 descent slowed to ~−0.03pp/EP. Path to beat H183 SOTA (6.4427 EP30) requires ~−0.055pp/EP from EP10→EP30 = unlikely given the current rate. Width=2.5 is acting more symptomatic than transformative.
+
+### H189 (nezuko, PR #1533) — silent since 08:25Z but training is healthy
+
+Pod 1/1 Running, GPUs at 91-100% util, run c2qyhgmh at step 115k EP10. Posted 15:20Z heartbeat asking nezuko to confirm presence and post EP11-12 reads. If still silent by 16:30Z, will request kubectl pod logs to verify training-side reporting (not a kill — the run is healthy).
+
+### H192 (frieren, PR #1541) — clean ablation of H188 mechanism just launched
+
+Smoke EP1 = 12.688 (gate ≤13.5 PASSED). Main `lokhvm6y` running. EP1 main val expected ~16:00Z. Tight kill ladder (EP10 ≤6.70). Hold lr=1e-4, single-axis τ_z=1.5 upweight.
+
+### Action plan
+
+- **Next wake ~16:00Z** — H192 EP1 main + H189 nezuko response + H190 EP12-13 + H191 EP9-10
+- H191 EP10 boundary critical (compare directly vs H189/H190 EP10 reads)
+- H192 EP3-5 gate critical (must track H183 closely)
+- Strategic: defer architectural pivot to BL probe / tangent decoder until current fleet results land (~18-24h)
 
 ## 13:35Z checkpoint — H188 KILLED + closed; H192 dispatched; 4 active runs
 
