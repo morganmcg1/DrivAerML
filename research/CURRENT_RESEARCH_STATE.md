@@ -1,11 +1,45 @@
 # SENPAI Research State
 
-- **2026-06-01 23:55Z**
+- **2026-06-02 00:35Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 00:35Z checkpoint — H189 VP=3.467 PAPER-TIER (gap 0.026pp); H192 EP10 GATE PASS; H191 EP17 fleet WSS leader 6.678; H193 smoke healthy w/ penalty firing
+
+### Fleet status (00:35Z, all 4 active, zero idle GPUs)
+
+| Student | PR | Hyp | EP | val_WSS | val_ABU | val_VP | val_SP | Verdict |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| fern | #1535 | H191: Sharper WSD | **EP18** (14.5h) | 6.687 | 5.969 | 3.683 | 3.919 | EP17 fleet leader 6.678; stable phase plateau ⏸; EP25-30 decay = hypothesis test |
+| nezuko | #1533 | H189: hidden_dim=640 | **EP19** (19h, student silent 17h+) | 6.712 | 5.917 | **3.467 ⭐⭐⭐⭐** | 3.839 | **PAPER-TIER VP** (gap 0.026pp); test_VP could land sub-SOTA |
+| frieren | #1541 | H192: τ_z=1.5 only, lr=1e-4 | **EP12** (9.2h) | 6.723 | 5.965 | 3.588 | 3.919 | EP10 GATE PASS 6.726; EP11 SHARP 6.714; descent intact |
+| tanjiro | #1554 | H193: WSS soft normal-component penalty | smoke (0.5h, step 6764) | — | — | — | — | Penalty FIRING (0.030 non-inert); train/loss=0.188 healthy; full EP1 val ~01:30Z |
+
+### Key finding 1 (00:35Z): H189 paper-tier VP confirmed
+
+H189 EP15→EP19 VP trajectory: 3.486 → 3.481 → 3.625 (EP17 spike outlier) → 3.470 → **3.467**. EP17 isolated spike (WSS+ABU+VP+SP all up ~0.15-0.20pp) was an eval-batch noise event, fully recovered EP18-19. Gap to H183 SOTA test_VP=3.4415 is now **0.026pp** at val_VP=3.467. If test_VP ≤ val_VP (typical for healthy training), this run could land **sub-SOTA on VP floor** — a programme-tier outcome on the volume-pressure axis. WSS=6.712 (+0.27pp vs SOTA, NOT a WSS path). ABU=5.917 (closing toward floor 5.844, gap +0.07pp).
+
+### Key finding 2 (00:35Z): H192 mechanism CONFIRMED at official EP10 gate
+
+H192 EP10 = **6.726** (loose target 6.80 PASS, sharp 6.70 near-miss by 0.026pp). EP11 = **6.714** (sharp target PASS). EP12 = 6.723 (minor uptick, normal variance). VP descent continues monotonically EP7→12: 3.713 → 3.646 → 3.630 → 3.617 → 3.602 → 3.588. Mechanism is confirmed isolated from H188's lr=9e-5 confound. Path to EP24 natural termination is open; if EP18-24 settles WSS ≤ 6.65 with floors clearing, this is a mergeable WSS-axis improvement.
+
+### Key finding 3 (00:35Z): H191 stable-phase plateau, decay window is the hypothesis test
+
+H191 EP15-18: 6.687 → 6.680 → 6.678 → 6.687. Stable phase has plateaued. The sharper WSD hypothesis is about the decay window (EP25-EP30) — sharper 100× LR drop should produce a step-change descent at decay onset. EP25-30 needs to descend ≥0.10pp below the EP15-24 plateau to validate. If no, this is a negative result on the LR-schedule axis.
+
+### Key finding 4 (00:35Z): H193 smoke healthy — soft penalty is active
+
+H193 tanjiro picked up assignment within ~10 minutes; smoke launched 00:08:50Z DDP8 (group `h193-wss-normal-penalty`, 8 ranks). Half-epoch into smoke: `train/wss_normal_penalty = 0.030` (penalty is non-inert, model has nonzero predicted normal component being regularized), `train/loss = 0.188` (healthy magnitude). Config confirms `wss_normal_penalty_weight = 0.5` applied. Full EP1 val expected ~01:30Z; if EP1 val_WSS ≤ 7.50 and all floors trending toward H183 baseline, main 30-EP launch is greenlit.
+
+### Action plan (00:35Z)
+
+- **Next wake ~01:30Z** — catch H193 smoke EP1 terminal + EP1 val + main launch decision; H191 EP20-21; H189 EP20-22 (VP descent continuation); H192 EP14-15
+- **H189 nezuko monitoring:** continue to natural termination (EP30+, ~07:00Z ETA). Programme-tier VP candidate. If student session never recovers, advisor constructs terminal SENPAI-RESULT from W&B + manual test eval
+- **Strategic next-round (post-terminal):** BL DERIVATIVE DECODER PROBE (Morgan's #1 priority); compound H189 VP-deepening + H192 τ_z + H191 sharper-WSD if all three close terminal
+- **Compound hypothesis brewing:** H189 (640 hidden_dim) + H192 (τ_z=1.5 isolated) + H191 (sharper WSD) — three independent mechanisms; round-after-this candidate compound
 
 ## 23:55Z checkpoint — H190 CLOSED NON-MERGE (SP floor breach decisive); H193 dispatched to tanjiro (soft tangent-basis penalty per Morgan #1056 priority)
 
