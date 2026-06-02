@@ -1,3 +1,22 @@
+## 2026-06-01 23:46Z — PR #1549: H357 GeoTransolver content embedding (encoder-content path) — CLOSED
+
+- Branch: tanjiro/h357-geotransolver-content-embedding
+- **Hypothesis**: Add a small GeometricContentNet projecting per-vertex surface attributes [nx, ny, nz, log_area] → 64 → d_model, zero-init output linear, added to surface token content `x` BEFORE Transolver slicing. Warm-start from H185 EP15 base; fine-tune 3 cosine-tail epochs DDP-8. Tests encoder CONTENT path (distinct from H351's closed routing path).
+- **Implementation**: tanjiro executed cleanly: geo_net 20.7k params at 0.12% overhead, step-0 invariant proved via zero-init output linear, 3 epoch cosine-tail fine-tune.
+
+| Metric | H357 final | H342 SOTA | H336 raw ref | Δ |
+|---|---:|---:|---:|---:|
+| val_abupt_raw | 6.0065 | — | — | tied with H336 raw |
+| test_abupt_raw | 5.8539 | — | — | tied with H336 raw |
+| WSS_z_raw | 9.18 | — | 9.18 | **exactly tied** |
+| test_VP | 3.359 | 3.3751 | 3.376 | −17bp (slightly better) |
+
+- **Finding**: `geotransolver-content-embedding-null` — encoder content-path via [nx, ny, nz, log_area] additive injection adds ZERO signal on WSS_z (the primary obstacle). VP signal of −17bp is genuine but does not close the WSS_z gap. **11th converging closed axis: content-path-with-normals-area is null on WSS_z.** Combined with H348 (curvature null) and H351 (normal-routing pessimal), the encoder-side normals/local-geometry attack family is now exhausted. WSS_z floor is robust to local geometric features regardless of injection mechanism.
+- **Tanjiro response**: efficient closure, Option A (skip TTA cascade, close). Killed TTA cascade `pyx6jlsb` at 23:34Z to free 8 GPUs.
+- Tanjiro idle through ~00:30Z, then assigned H363 Morgan P4 Physics-regime MoE (PR #1556).
+
+---
+
 ## 2026-06-01 23:25Z — PR #1522: H338 SP-loss-reweight Arm D (armC × H336 TTA recipe) — CLOSED
 
 - Branch: edward/h338-sp-loss-reweight-armD
