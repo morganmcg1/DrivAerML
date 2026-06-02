@@ -1,5 +1,6 @@
 # SENPAI Research State
 
+- **2026-06-02 15:43Z** (H197 smoke EP1 PASS — main launch authorized; val_VP=12.5558 -1.65pp UNDER H183 EP1 ≈14.20 = MECHANISM PAYS OFF, w_vol_p clamped to floor 0.15 by design; H195 EP4 strong -0.10 descent but +0.13pp ABOVE H147 baseline gap WIDENING; H193 EP15 WSS slope POS again +0.0338 VP plateau exhausted at 3.68; H194 EP10 ETA ~16:14Z next cycle)
 - **2026-06-02 15:23Z** (H194 EP9 ALL 4 STILL DESCENDING WSS=6.7260 SAILED PAST EP10 gate at EP9 — fleet leader; H193 EP14 WSS slope REVERSED -0.0034 + VP fresh low 3.6844; H195 EP3 PASS gate ≤7.10 at 7.0573 but +0.0773 ABOVE H147 baseline first separation gate; H197 frieren smoke 31min in step=7248 ETA ~15:42Z; 4-PR boundary acks posted #1554 #1559 #1565)
 - **2026-06-02 14:42Z** (H196 CLOSED NON-MERGE — frieren pre-launch code trace found vol_p_charbonnier_weight is NO-OP under GradNorm; H197 reassigned to frieren with --volume-loss-weight=2.0 mechanism-faithful re-mapping PR #1573; H194 EP8 strongest fleet ALL 4 METRICS DESCENDING; H195 EP2 H147-match exactly; H193 EP13 8th uptick zone)
 - **2026-06-02 14:20Z** (H194 EP8 ALL 4 METRICS STILL DESCENDING fresh lows everywhere — strongest fleet candidate; H195 EP2 7.2661 matches H147 EP2=7.26 exactly; H196 frieren smoke launched 14:12Z EP1 ETA ~14:55Z; H193 EP13 8th uptick zone)
@@ -9,6 +10,14 @@
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → ∂u/∂n → WSS) as highest-leverage untried mechanism, TANGENT-BASIS OUTPUT HEAD as 2nd priority. Both require architectural changes larger than current fleet scope.
 - **Human check-in (issue #1056, 18:39Z):** No new messages since 19:27Z 2026-06-01.
+
+## 15:43Z checkpoint — **H197 smoke EP1 PASS main launch authorized (VP -1.65pp under H183 baseline = mechanism delivers); H195 EP4 -0.10 descent but H147 gap WIDENING +0.13pp; H193 EP15 WSS slope POS again VP exhausted at 3.68; H194 EP10 imminent ~16:14Z**
+
+### Actions taken this cycle (15:43Z)
+- **H197 smoke EP1 PASS posted on PR #1573 (frieren) — MAIN 30-EP LAUNCH AUTHORIZED**: rank-0 `umo09701` finished smoke EP1 at step 10975, rt=47.8min. EP1 vals: val_WSS=12.9079 (match H183 EP1 ~12.82), **val_VP=12.5558 vs H183 EP1 ≈14.20 = -1.65pp UNDER baseline**, val_AB=12.6879, val_SP=8.4171. Train health all green: train/loss=0.1096, train/nonfinite_grad=0. GradNorm allocator stable: w_vol_p=0.1500 clamped to floor (clamp_active=1.0 by design), all other w's bounded (w_cp=0.97, w_tau_y=1.33, w_tau_z=1.28). r_vol_p=3.2436 confirms doubled raw VP task signal IS reaching allocator. **Effective VP gradient under floor regime = 0.15 × raw × 2.0 = 2× H183**. task_loss_vol_p slope per-1k-steps = -0.0564 (steepest descent of all 5 channels) — mechanism delivers
+- **H195 EP4 boundary ack posted on PR #1565 (fern)** — rank-0 `7ergjfh4` step=44920, rt=3.26h: WSS=6.9555 (-0.1018 ↓ strong), VP=3.9526 (-0.2782 ↓ strong), AB=6.2102 (-0.1437 ↓), SP=3.9811 (-0.0604 ↓). All 4 metrics descending but H147 EP4 ≈6.83 → H195 EP4 +0.13pp ABOVE — **gap WIDENING from EP3 +0.08pp**. τ_y=1.3 producing proportional cross-axis descent, no differential τ_y advantage. EP5 gate ≤6.90 likely PASS at projected 6.86 but +0.11pp ABOVE H147 EP5=6.75; EP10 gate ≤6.70 will be the firm NON-MERGE decision
+- **H193 EP15 boundary ack posted on PR #1554 (tanjiro)** — rank-0 `vuvpegip` step=166013, rt=12.08h: WSS=7.7974 (+0.0338 ↑ **slope reverses POS again**), VP=3.6803 (-0.0041 ↔ plateau), AB=6.6152 (+0.0177 ↑), SP=3.9517 (-0.0027 ↔). Correction to 15:23Z note: the EP14 -0.0034 dip was 1-EP noise, NOT a sustained slope reversal. WSS uptick pattern now 9 of last 11 EPs POS slope. VP descent IS exhausted at 3.68 plateau. WSS NON-MERGE firmly confirmed (+1.36pp val); VP terminal projection ~3.45-3.55 test still UNDER H183 floor 3.4415 = no VP merge case either
+- H194 nezuko unchanged from 15:23Z (no new val row); EP10 ETA ~16:14Z based on ~3.0 steps/s rate
 
 ## 15:23Z checkpoint — **H194 EP9 fleet leader (ALL 4 STILL DESCENDING); H193 EP14 WSS slope reversal + VP fresh low; H195 EP3 PASS gate but +0.08pp ABOVE H147; H197 smoke EP1 ETA ~15:42Z**
 
