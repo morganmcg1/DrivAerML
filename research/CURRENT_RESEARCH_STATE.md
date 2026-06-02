@@ -1,11 +1,44 @@
 # SENPAI Research State
 
-- **2026-06-02 03:22Z**
+- **2026-06-02 03:39Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 03:39Z checkpoint — **H193 main 30EP DDP8 LAUNCHED** (group `h193-wss-normal-penalty-w020-main`, 8/8 ranks, rank-0 `vuvpegip`); **H191 VP RECOVERING in late cosine** 3.730 → 3.650 (just +0.007pp over floor); H192 EP15 6.692 paper-tier holds; H189 EP22 paper-tier VP=3.455 deepens
+
+### Fleet snapshot at 03:39Z
+
+| Student | PR | Hyp | EP/State | val_WSS | val_VP | val_SP | val_ABU | Δ vs 03:22Z |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| fern | #1535 | H191: Sharper WSD | EP21-22 (18.14h) | **6.668 ⭐fleet leader** | **3.650 → near floor** | 3.906 | 5.947 | WSS -0.010, **VP -0.080 (huge late-cosine recovery)** |
+| nezuko | #1533 | H189: hidden_dim=640 | EP22-23 (22.52h) | 6.702 | **3.455 ⭐deepening** | 3.838 | 5.907 | WSS -0.004 (improving slightly), VP -0.009 (deeper) |
+| frieren | #1541 | H192: τ_z compound | EP15-16 (12.85h) | 6.692 | 3.563 ⭐paper-tier | 3.918 | 5.942 | WSS +0.002 (flat), VP -0.004 |
+| tanjiro | #1554 | H193: WSS normal penalty | **MAIN 30EP step 469** (0.03h) | smoke PASS @13.063 | — | — | — | **main launched 03:38Z**, EP1 ~04:25Z |
+
+### Key event: H191 VP recovering in late cosine
+- 02:52Z: VP=3.730 (+0.087pp over 3.643 floor) — merge blocker
+- 03:39Z: VP=3.650 (+0.007pp over floor) — slope -0.080pp / 47min = -1.7×10⁻³ pp/min
+- At this rate VP crosses floor within ~5 min of 03:39Z — likely already cleared by next read
+- WSS still descending (6.678 → 6.668) — fleet lead extending
+- 5.86h to natural 24h cutoff (~09:30Z) → ~6 more EPs for trajectory to consolidate
+- **Action posted on PR #1535:** VP recovery flag + reminder to log test_VP separately at terminal
+
+### Key event: H193 main 30EP DDP8 launched at 03:38Z
+- 8/8 ranks confirmed in W&B (`dl24-tanjiro/h193-main-30ep-lambda02-rank0..7`)
+- λ=0.2 confirmed via train/wss_normal_penalty firing in smoke (~0.058)
+- ETA: ~24h for 30 EPs (47.9 min/EP from smoke), EP1 terminal ~04:25Z, EP10 ~12:18Z, EP30 ~03:38Z next day
+- Kill ladder enforced: EP3 ≤ 7.50% loose, **EP10 ≤ 6.78% HARD KILL** if >+0.20pp, EP20 ≤ 6.55%, EP30 terminal merge if test_WSS ≤ 6.443 + floors
+- **Action posted on PR #1554:** Main launch detection ACK + kill ladder reminder
+
+### Watch items for next ~6h
+1. **H193 main EP1 (~04:25Z)** — first val read on production run; expect ~13.0% (smoke was 13.063%), confirm penalty still firing
+2. **H189 nezuko natural termination (~05:07Z)** — 24h cap; student silent ~19h; advisor may need to construct terminal SENPAI-RESULT from W&B + test eval if student remains unresponsive
+3. **H191 fern VP next reading (~04:00-04:15Z)** — confirm VP crosses 3.643 floor and stays under
+4. **H192 frieren EP16-17 (~04:00Z and beyond)** — strongest non-H189 trajectory continues; cleanest merge path if WSS hits ≤6.443 by terminal
+5. **H193 main EP3 boundary (~06:38Z)** — loose gate ≤ 7.50%, first kill checkpoint
 
 ## 03:22Z checkpoint — **H193 λ=0.20 smoke EP1 PASS** (val_WSS=13.063, gap +0.273pp vs +0.71pp gate); 30EP main GREEN-LIT; H192 EP14 6.690 closing fleet leader; H189 EP21 paper-tier VP=3.464 holds
 
