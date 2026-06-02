@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 12:18Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 12:35Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -54,7 +54,7 @@
 
 ---
 
-## Active Fleet (2026-06-02 12:18Z — 5/8 WIP, **3 idle (fern, frieren, edward)** — assignment pending researcher-agent)
+## Active Fleet (2026-06-02 12:35Z — 8/8 WIP, **all students assigned**)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
@@ -63,9 +63,9 @@
 | **#1538** | nezuko | **H347: BL physics priors** — Arm A FAILED gate (val_cal 5.9253). Arm B `65z21dv8` val_RAW 5.9224% (best of cluster), TTA running. ETA terminal ~15:30Z. | 🟡 WIP — Arm B/C cascade |
 | **#1551** | askeladd | **H359: Multi-scale surface kNN** — val_RAW 5.9245% (kwe8tynw, -45bp vs H336 RAW). Test arm running (rt=22699s). Cal landing ETA ~17-18Z. **PRIMARY SOTA CANDIDATE** if cal yield ≥7bp. | 🟡 WIP — TTA test arm |
 | **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side pre-softmax bias, step-0 invariant. v2 relaunch healthy past crash step 5455. Phase 1 in progress. | 🟡 WIP — Phase 1 v2 |
-| — | **fern** | **IDLE** — H360 LapPE-32 CLOSED 12:08Z (Finding T). Researcher-agent generating fresh hypothesis. | 🟢 idle — assignment pending |
-| — | **frieren** | **IDLE** — H369 RWPE-16 CLOSED 12:08Z (Finding U); v2 ranks still running on closed PR, asked to kill 12:14Z. Researcher-agent generating fresh hypothesis. | 🟢 idle — assignment pending |
-| — | **edward** | **IDLE** — H371 ISAB single-layer probe CLOSED 12:17Z (Finding V; ISAB family closed at the bound). 5-for-5 nulls (H338→H361→H364→H368→H370→H371). | 🟢 idle — assignment pending |
+| **#1567** | fern | **H372: Z-Antisymmetry Mirror Augmentation** — Enforce τ_z(x,y,−z)=−τ_z(x,y,z) via z-mirrored input augmentation + sign-flip output averaging. Zero params, exact physical symmetry exploited. Kill gate EP14 val>6.00%. ~10.5h+TTA. | 🟢 ASSIGNED 12:30Z |
+| **#1568** | frieren | **H373: Transolver++ Local Adaptive Slice Pooling** — Replace global slice softmax with k=16 kNN-constrained local pooling (temp=0.1). Zero params, preserves token-count bijection (post-H371 V constraint). Targets boundary-layer τ_z. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:33Z |
+| **#1569** | edward | **H374: Self-Consistency vs EP13 EMA Teacher (τ_z-only, λ=0.1)** — Frozen EP13 teacher MSE consistency loss on τ_z channel only. Zero params, training-time regularizer. Anchors τ_z manifold drift on noisiest channel. Kill gate EP14 val>6.00%. ~10.5h+TTA. | 🟢 ASSIGNED 12:35Z |
 
 ---
 
@@ -82,20 +82,22 @@
 | H365 thorfinn `d6zb0a18` | 5.9273% | TBD | TBD | val+test TTA running, ETA ~14Z |
 H360 demonstrated cal-yield-collapse (2.29bp vs projected 7bp), so the 7bp projection for H347/H359/H365 may also collapse. Each is a single-cp K=4 arm (same predictor structure as H336) so 7-8bp cal is plausible, but TTA-averaged outputs across the cluster carry latent cal-yield-collapse risk. Watch carefully.
 
-**Live attack tier (post-H360/H369/H371 close)**:
+**Live attack tier (post-H360/H369/H371 close + 3 new assignments)**:
 - **Input-feature axis**: CLOSED (H348/H360/H369 null; H359 cal pending likely null)
 - **ISAB operator family**: CLOSED at single-layer bound (H370/H371; Finding V)
 - **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn, val_RAW 5.9273 cal+test pending)
 - **Encoder kNN proximity bias** (token-count preserving): H366 (tanjiro, v2 past crash ~step 10877, val pending)
 - **Physics-prior cascade**: H347 BL priors (nezuko, val_RAW 5.9224 Arm B test arm)
-- **NEW tiers opening (researcher-agent dispatched 12:11Z, expanded to 3 idle students 12:18Z)**:
+- **Z-flip equivariance (NEW)**: H372 fern PR #1567 — z-antisymmetry mirror augmentation; exploits exact τ_z(x,y,−z) = −τ_z(x,y,z); zero params, training+inference change
+- **Local-adaptive slice pooling (NEW)**: H373 frieren PR #1568 — Transolver++ k=16 kNN-constrained slice softmax; zero params; preserves token-count bijection; targets boundary-layer τ_z
+- **Self-consistency τ_z teacher (NEW)**: H374 edward PR #1569 — τ_z-only MSE consistency vs frozen EP13 EMA teacher (λ=0.1); zero params; training-time regularizer
+- **Reserve tiers (still unattacked)**:
   - Output-space target transforms (log-rotated WSS basis, GLU output gating, learnable per-channel temperature)
   - Auxiliary-loss heads (predict skin-friction coefficient / vorticity / near-wall gradient as aux task)
-  - Self-distillation with EP13-as-teacher (KL-to-teacher + epsilon GT)
   - Hard-example mining at case level (NOT per-vertex scalar reweight — already closed)
   - Test-time training (TTT — per-case backprop adaptation at test time)
-  - Operator replacements preserving token-count bijection (sparse-local kNN + 1 global pool token; low-rank V; gated attention) — NOT inducing-point bottleneck
-  - Z-flip equivariance constraint (Siamese-pair loss for sign-flip τ_z augmentation)
+  - Cross-channel decoder query tokens (H-D reserve, +0.1% params)
+  - WSS gradient magnitude attention bias (H-F, hold for H366 result)
 
 **Loss-tier is FULLY CLOSED — 7 nulls cumulative**. Any future loss modification would be redundant. Decoder/output tier also FULLY CLOSED — 14 nulls. The live frontier is exclusively:
 1. injecting new information into encoder input
