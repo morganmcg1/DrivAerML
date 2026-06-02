@@ -70,12 +70,21 @@
 
 **19 closed axes** all converge to: WSS_z floor is representational/upstream AND the H336 EP13 basin is brittle to perturbation under 3-epoch cosine tail. **Critical update post-H370**: ISAB middle-layer REPLACE (Finding S) is the worst single-epoch regression in the entire edward streak (+1.0pp), confirming that warm-start + 3-epoch cosine is insufficient for 60%-of-stack operator replacement. **H371 single-layer probe (idx 2 only)** is the current architectural bound.
 
+**SOTA CLUSTER FORMING (4 simultaneous single-cp TTA candidates, 11:28Z):**
+| Arm | val_RAW | Projected val_cal | Status |
+|---|---:|---:|---|
+| H347 Arm B nezuko `65z21dv8` | **5.9224%** | **~5.849%** | test arm running, ETA ~15:30Z |
+| H359 askeladd `kwe8tynw` | 5.9245% | ~5.851% | test arm running, ETA ~15Z |
+| H360 fern `8cqqpd9x` | 5.9258% | ~5.852% | val+test TTA running, ETA ~14Z |
+| H365 thorfinn `d6zb0a18` | 5.9273% | ~5.854% | val+test TTA running, ETA ~14Z |
+All four project to beat gate (5.8962%) after ~7bp single-cp cal yield. Test arms landing 14-16Z. Multiple merges possible today.
+
 **Live attack tier (post-H370)**:
-- **Input-feature axis** (3 in flight): H359 multi-scale local kNN (askeladd, val_RAW 5.9245% — PRIMARY SOTA CANDIDATE), H360 LapPE-32 global spectral (fern, eval running), H369 RWPE-16 local topology (frieren, Phase 1 just finishing ~step 8906)
-- **Non-capacity-additive architectural rewrite** (H371 edward): ISAB single-layer probe at idx 2 only — bounds operator family cheaply (~40min Phase 1); if EP14 also blows 6.05%, ISAB is closed at family level
-- **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn, Phase 1)
-- **Encoder kNN proximity bias**: H366 (tanjiro, v2 past crash)
-- **Physics-prior cascade**: H347 BL priors (nezuko, Arm B/C)
+- **Input-feature axis** (3 in flight): H359 multi-scale local kNN (askeladd, SOTA candidate), H360 LapPE-32 global spectral (fern, SOTA candidate), H369 RWPE-16 local topology (frieren, EP15 running ~decision 12Z)
+- **Non-capacity-additive architectural rewrite** (H371 edward): ISAB single-layer probe at idx 2 only — bounds operator family; if EP14 also blows 6.05%, ISAB closed at family level
+- **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn, SOTA candidate)
+- **Encoder kNN proximity bias**: H366 (tanjiro, v2 past crash ~step 10877, val pending)
+- **Physics-prior cascade**: H347 BL priors (nezuko, SOTA candidate Arm B)
 
 **Loss-tier is FULLY CLOSED — 7 nulls cumulative**. Any future loss modification would be redundant. Decoder/output tier also FULLY CLOSED — 14 nulls. The live frontier is exclusively:
 1. injecting new information into encoder input
