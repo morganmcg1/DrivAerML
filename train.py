@@ -146,6 +146,10 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    # H379: per-layer LR decay (PEFT-style) for fine-tune tails
+    use_layerwise_lr_decay: bool = False
+    backbone_lr_scale: float = 1.0
+    decoder_lr_scale: float = 1.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -272,6 +276,27 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
         ),
+        "use_layerwise_lr_decay": (
+            "H379: enable PEFT-style per-layer LR decay. When True, params "
+            "are partitioned into a backbone group (everything except "
+            "surface_out.*) and a decoder group (surface_out.* — the "
+            "4-channel surface head). Each group's base LR is scaled by "
+            "--backbone-lr-scale and --decoder-lr-scale respectively, then "
+            "passes through the standard cosine/warmup scheduler. Used to "
+            "test whether asymmetric LR preserves a well-pretrained "
+            "backbone while letting the surface decoder specialize during "
+            "a short fine-tune tail."
+        ),
+        "backbone_lr_scale": (
+            "H379: scale applied to --lr for the backbone param group when "
+            "--use-layerwise-lr-decay is True. Default 1.0 (no scaling). "
+            "Recommended 0.3 for PEFT-style fine-tune tails."
+        ),
+        "decoder_lr_scale": (
+            "H379: scale applied to --lr for the surface decoder param "
+            "group when --use-layerwise-lr-decay is True. Default 1.0 "
+            "(matches base LR)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -286,8 +311,95 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def _split_param_groups_for_lr_decay(
+    model: nn.Module,
+    config: Config,
+) -> tuple[list[dict], dict[str, int]]:
+    """H379: partition trainable params into backbone vs surface-decoder groups.
+
+    Decoder group = params under ``surface_out.*`` (the 4-channel surface
+    head: cp, tau_x, tau_y, tau_z). Backbone group = everything else,
+    including the volume head, the Transolver attention stack, slice
+    modules, RFF/string_sep encodings, bias MLPs, and the final LayerNorm.
+    """
+
+    decoder_params: list[nn.Parameter] = []
+    backbone_params: list[nn.Parameter] = []
+    decoder_names: list[str] = []
+    backbone_names: list[str] = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        # Strip DDP / OptimizedModule wrappers from the path.
+        cleaned = name.replace("module.", "").replace("_orig_mod.", "")
+        if cleaned.startswith("surface_out."):
+            decoder_params.append(param)
+            decoder_names.append(cleaned)
+        else:
+            backbone_params.append(param)
+            backbone_names.append(cleaned)
+
+    if not decoder_params:
+        raise RuntimeError(
+            "H379 layerwise LR decay: no parameters matched 'surface_out.*' — "
+            "model partition is empty. Check that the model exposes the "
+            "expected surface decoder prefix."
+        )
+
+    backbone_count = sum(p.numel() for p in backbone_params)
+    decoder_count = sum(p.numel() for p in decoder_params)
+    partition_info = {
+        "backbone_params": backbone_count,
+        "decoder_params": decoder_count,
+        "backbone_tensors": len(backbone_params),
+        "decoder_tensors": len(decoder_params),
+    }
+    groups = [
+        {
+            "params": backbone_params,
+            "lr": config.lr * config.backbone_lr_scale,
+            "name": "backbone",
+        },
+        {
+            "params": decoder_params,
+            "lr": config.lr * config.decoder_lr_scale,
+            "name": "decoder",
+        },
+    ]
+    return groups, partition_info
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    if config.use_layerwise_lr_decay:
+        groups, partition_info = _split_param_groups_for_lr_decay(model, config)
+        total = partition_info["backbone_params"] + partition_info["decoder_params"]
+        if total > 0:
+            decoder_frac = partition_info["decoder_params"] / total
+            print(
+                f"[H379] layerwise LR decay enabled: "
+                f"backbone={partition_info['backbone_params']:,} params "
+                f"({partition_info['backbone_tensors']} tensors) @ lr×{config.backbone_lr_scale}; "
+                f"decoder={partition_info['decoder_params']:,} params "
+                f"({partition_info['decoder_tensors']} tensors) @ lr×{config.decoder_lr_scale} "
+                f"(decoder fraction={decoder_frac:.4f})",
+                flush=True,
+            )
+        if optimizer_name == "adamw":
+            return torch.optim.AdamW(groups, weight_decay=config.weight_decay)
+        if optimizer_name == "lion":
+            from lion_pytorch import Lion
+
+            return Lion(
+                groups,
+                weight_decay=config.weight_decay,
+                betas=(config.lion_beta1, config.lion_beta2),
+                use_triton=False,
+            )
+        raise ValueError(
+            f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion."
+        )
+
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
             model.parameters(),
@@ -1233,7 +1345,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
-                current_lr = scheduler.get_last_lr()[0]
+                last_lrs = scheduler.get_last_lr()
+                current_lr = last_lrs[0]
                 loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
                 skip_step = distributed_any(state, loss_is_nonfinite, device)
                 should_log_model_telemetry = (
@@ -1257,6 +1370,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
+                if config.use_layerwise_lr_decay:
+                    for group_idx, group in enumerate(optimizer.param_groups):
+                        group_name = group.get("name", f"group{group_idx}")
+                        if group_idx < len(last_lrs):
+                            train_log[f"train/lr_{group_name}"] = float(last_lrs[group_idx])
+                        train_log[f"train/lr_{group_name}_current"] = float(group["lr"])
                 if not loss_is_nonfinite:
                     train_log.update(
                         {
@@ -1375,13 +1494,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                 or (timeout_hit and n_batches > 0)
             )
 
+            epoch_last_lrs = scheduler.get_last_lr()
             log_metrics: dict[str, object] = {
                 "train/epoch_loss": epoch_train_loss,
-                "train/lr": scheduler.get_last_lr()[0],
-                "lr": scheduler.get_last_lr()[0],
+                "train/lr": epoch_last_lrs[0],
+                "lr": epoch_last_lrs[0],
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
+            if config.use_layerwise_lr_decay:
+                for group_idx, group in enumerate(optimizer.param_groups):
+                    group_name = group.get("name", f"group{group_idx}")
+                    if group_idx < len(epoch_last_lrs):
+                        log_metrics[f"train/lr_{group_name}"] = float(epoch_last_lrs[group_idx])
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)
