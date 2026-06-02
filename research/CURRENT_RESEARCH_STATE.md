@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 12:35Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 13:00Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 22 total)
+## Closed axes (do NOT revisit — 23 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -51,10 +51,11 @@
 | **LapPE-32 surface Laplacian spectral input PE (Finding T)** | `lappe-spectral-input-null` — Top-32 eigenfunctions of normalized graph-Laplacian over kNN-8 surface mesh, injected as input PE via zero-pad surgery into project_surface_features (512,100→512,132). Wiring verified clean (lap_cols_norm=0.0e+00 post warm-load, no missing keys). Phase 1 raw NEUTRAL (-0.5bp vs source); TTA pre-cal val_RAW 5.9258 (+3bp before cal). Cal arm: **val_cal 5.9029 / test_cal 5.7427** — FAILS gate +6.7bp / +7.0bp. **Cal yield only 2.29bp** (4th cal-yield-collapse instance). val_WSS_z RAW TTA 9.0901% ≈ H336 raw — LapPE channels did not propagate signal to target channel through 3-epoch cosine tail. **20th closed axis.** | **H360 CLOSED 12:08Z** |
 | **RWPE-K16 Random Walk Positional Encoding (Finding U)** | `rwpe-surface-topology-pe-null` — Random-walk return probabilities up to K=16 hops on kNN-16 surface graph, 32-channel projection with zero-init. EP14 val_primary **6.0742%** (+5.7bp vs source, +2.4bp past 6.05% close rule). Per-channel: SP +18bp, VP +35bp, WSS_z +14bp (target channel WORSE), WSS ≈flat. Crashed mid-EP15 at step=8943 before grace-period evidence; original close rule applies. Joint with H348/H359/H360: **4 of 4 input-feature hypotheses null — input-feature axis CONCLUSIVELY EXHAUSTED on EP13 fine-tune basin**. **21st closed axis.** | **H369 CLOSED 12:08Z** |
 | **ISAB OPERATOR FAMILY CLOSED at single-layer bound (Finding V)** | `isab-single-layer-probe-null` — Single-layer ISAB at idx 2 (1-of-5 layers, M=32 inducing points). EP14 val_primary **6.7149%** (+70bp vs source, +66bp past 6.05% close rule). All 5 channels regressed broadly: SP +64bp, **VP +108bp (untouched-channel collapse)**, WSS +66bp, WSS_z +82bp. Same "basin lost calibrated slice-token interaction" signature as H370. **ISAB operator family CLOSED at the bound** — even one cold ISAB layer breaks token-count bijection enough to disrupt the pretrained surrounding layers under 3-epoch Lion cosine tail. **Implication: future operator replacements MUST preserve token-count bijection** — inducing-point/Perceiver-style bottleneck operators are empirically excluded from warm-start tier. **22nd closed axis.** | **H371 CLOSED 12:17Z** |
+| **kNN spatial-proximity attention bias (Finding W)** | `knn-spatial-proximity-attn-bias-null` — Zero-param additive pre-softmax attention bias from surface kNN proximity (k=32). EP14 val_primary **6.0752%** (>6.05% close rule, +1.6bp). Pre-committed close rule fired immediately; Phase 2 TTA skipped. 8 DDP ranks finished cleanly (rt~3.83h). **Geometric attention-bias signal fails.** Discriminator status: sets up H376 (physics-informed WSS-gradient magnitude bias) to distinguish geometry-only vs. physics-informed attention steering. If H376 also nulls, attention-steering tier is fully closed. **23rd closed axis.** | **H366 CLOSED 12:55Z** |
 
 ---
 
-## Active Fleet (2026-06-02 12:35Z — 8/8 WIP, **all students assigned**)
+## Active Fleet (2026-06-02 13:00Z — 8/8 WIP, **all students assigned**)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
@@ -62,16 +63,16 @@
 | **#1558** | thorfinn | **H365: FastSWA cyclic-LR cross-basin 3-cp output-avg** — val_RAW 5.9273 single-cp, TTA cal+test running. SOTA candidate if cal yield ≥6bp. | 🟡 WIP — TTA cal+test |
 | **#1538** | nezuko | **H347: BL physics priors** — Arm A FAILED gate (val_cal 5.9253). Arm B `65z21dv8` val_RAW 5.9224% (best of cluster), TTA running. ETA terminal ~15:30Z. | 🟡 WIP — Arm B/C cascade |
 | **#1551** | askeladd | **H359: Multi-scale surface kNN** — val_RAW 5.9245% (kwe8tynw, -45bp vs H336 RAW). Test arm running (rt=22699s). Cal landing ETA ~17-18Z. **PRIMARY SOTA CANDIDATE** if cal yield ≥7bp. | 🟡 WIP — TTA test arm |
-| **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side pre-softmax bias, step-0 invariant. v2 relaunch healthy past crash step 5455. Phase 1 in progress. | 🟡 WIP — Phase 1 v2 |
-| **#1567** | fern | **H372: Z-Antisymmetry Mirror Augmentation** — Enforce τ_z(x,y,−z)=−τ_z(x,y,z) via z-mirrored input augmentation + sign-flip output averaging. Zero params, exact physical symmetry exploited. Kill gate EP14 val>6.00%. ~10.5h+TTA. | 🟢 ASSIGNED 12:30Z |
+| **#1572** | tanjiro | **H376: WSS gradient-magnitude attention bias (EP13 EMA teacher, zero-param)** — Per-key additive attention bias proportional to ||∇τ_pred||₂ from frozen EP13 EMA teacher's WSS prediction over kNN-8 surface graph. Pre-compute once per sample; inject as static scalar into all slice-attention layers. Physics-informed successor to H366 (geometric kNN bias nulled as Finding W). Discriminator: if H376 also nulls, attention-steering tier CLOSED. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 13:00Z |
+| **#1570** | fern | **H375: Cross-Channel Decoder Query Tokens** — K=4 learnable query tokens, cross-attention from τ_x/τ_y context → τ_z decoder. +0.1% params (264K @ d_model=512). Channels verified: loader.py:42 [...,1]=τ_x, [...,2]=τ_y, [...,3]=τ_z. Replaces wrong-premise H372 (z-mirror, closed no-run). Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:45Z |
 | **#1568** | frieren | **H373: Transolver++ Local Adaptive Slice Pooling** — Replace global slice softmax with k=16 kNN-constrained local pooling (temp=0.1). Zero params, preserves token-count bijection (post-H371 V constraint). Targets boundary-layer τ_z. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:33Z |
 | **#1569** | edward | **H374: Self-Consistency vs EP13 EMA Teacher (τ_z-only, λ=0.1)** — Frozen EP13 teacher MSE consistency loss on τ_z channel only. Zero params, training-time regularizer. Anchors τ_z manifold drift on noisiest channel. Kill gate EP14 val>6.00%. ~10.5h+TTA. | 🟢 ASSIGNED 12:35Z |
 
 ---
 
-## Current Research Focus: INPUT-FEATURE TIER EXHAUSTED — PIVOT TO OPERATOR + OUTPUT-SPACE + AUXILIARY-TARGET TIERS
+## Current Research Focus: ATTENTION-STEERING TIER PARTIALLY CLOSED — GEOMETRIC NULL, PHYSICS-INFORMED PENDING
 
-**22 closed axes**. Critical post-H371 update: **ISAB OPERATOR FAMILY CLOSED at the single-layer bound (+66bp regression vs +97bp for 3-of-5 layers).** Both depths catastrophic; inducing-point/Perceiver-style operator-replacement families are empirically excluded under warm-start. With input-feature tier ALSO exhausted (3 of 4 nulls + likely 4th), **the conservative architecture-tweak attack surface is essentially closed**. Edward 5-for-5 nulls. Frontier narrows to (1) operator replacements that **preserve token-count bijection** (sparse-local + global-pool hybrid, low-rank V projection), (2) **output-space target transforms** / **auxiliary-loss heads** (untried), (3) **test-time training / case-level hard-example mining** (untried), (4) cross-basin TTA (H365 in flight).
+**23 closed axes**. H366 closed (Finding W): geometric kNN proximity attention bias null (EP14 val 6.0752%, close-by-rule). H376 now tests whether *physics-informed* attention bias (EP13 EMA ||∇WSS|| magnitude per key) succeeds where pure geometry failed. Alongside H373/H374/H375 in the current live round, this is the narrowed frontier: (1) operator-pool architecture changes that preserve token-count bijection, (2) attention bias with physics-derived signals, (3) decoder cross-channel conditioning, (4) training-time regularization via teacher. Input-feature, loss, decoder-capacity, and ISAB-operator tiers all exhausted.
 
 **SOTA CLUSTER UPDATE (post-H360 cal landing, 12:10Z):**
 | Arm | val_RAW | val_CAL | test_CAL | Status |
@@ -86,9 +87,9 @@ H360 demonstrated cal-yield-collapse (2.29bp vs projected 7bp), so the 7bp proje
 - **Input-feature axis**: CLOSED (H348/H360/H369 null; H359 cal pending likely null)
 - **ISAB operator family**: CLOSED at single-layer bound (H370/H371; Finding V)
 - **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn, val_RAW 5.9273 cal+test pending)
-- **Encoder kNN proximity bias** (token-count preserving): H366 (tanjiro, v2 past crash ~step 10877, val pending)
+- **Encoder attention bias — physics-informed** (kNN gradient magnitude from EMA teacher): H376 (tanjiro, PR #1572, ASSIGNED 13:00Z)
 - **Physics-prior cascade**: H347 BL priors (nezuko, val_RAW 5.9224 Arm B test arm)
-- **Z-flip equivariance (NEW)**: H372 fern PR #1567 — z-antisymmetry mirror augmentation; exploits exact τ_z(x,y,−z) = −τ_z(x,y,z); zero params, training+inference change
+- **Cross-channel decoder conditioning (NEW)**: H375 fern PR #1570 — K=4 cross-attention query tokens τ_x/τ_y → τ_z; +0.1% params; replaces wrong-premise H372 (z-axis is NOT bilateral axis; y is)
 - **Local-adaptive slice pooling (NEW)**: H373 frieren PR #1568 — Transolver++ k=16 kNN-constrained slice softmax; zero params; preserves token-count bijection; targets boundary-layer τ_z
 - **Self-consistency τ_z teacher (NEW)**: H374 edward PR #1569 — τ_z-only MSE consistency vs frozen EP13 EMA teacher (λ=0.1); zero params; training-time regularizer
 - **Reserve tiers (still unattacked)**:
@@ -97,7 +98,7 @@ H360 demonstrated cal-yield-collapse (2.29bp vs projected 7bp), so the 7bp proje
   - Hard-example mining at case level (NOT per-vertex scalar reweight — already closed)
   - Test-time training (TTT — per-case backprop adaptation at test time)
   - Cross-channel decoder query tokens (H-D reserve, +0.1% params)
-  - WSS gradient magnitude attention bias (H-F, hold for H366 result)
+  - ~~WSS gradient magnitude attention bias (H-F)~~ — ASSIGNED as H376 to tanjiro (discriminator vs H366 geometric null)
 
 **Loss-tier is FULLY CLOSED — 7 nulls cumulative**. Any future loss modification would be redundant. Decoder/output tier also FULLY CLOSED — 14 nulls. The live frontier is exclusively:
 1. injecting new information into encoder input
@@ -120,7 +121,8 @@ H360 demonstrated cal-yield-collapse (2.29bp vs projected 7bp), so the 7bp proje
 - INPUT TIER: **3 of 4 closed null; 4th likely null at cal landing → tier essentially EXHAUSTED**
 - OPERATOR (3-layer ISAB REPLACE): **CLOSED — H370 Finding S** (catastrophic +97bp mixed-init pathology)
 - OPERATOR (1-layer ISAB probe): H371 edward — current architectural bound; EP14 val landing ~12:35Z
-- ENCODER (attention-pattern: spatial proximity): H366 kNN proximity attention bias (tanjiro) — zero-param, learnable per-layer scalar
+- ENCODER (attention-pattern: spatial proximity): **CLOSED — H366 Finding W** (geometric kNN bias null, EP14 6.0752%)
+- ENCODER (attention-pattern: physics-informed gradient magnitude): **H376 tanjiro PR #1572** — discriminator; if null → attention-steering tier CLOSED
 - ENCODER (attention-pattern: anisotropic frame): CLOSED (H367, 17th axis)
 - ENCODER (content/routing): CLOSED (H357 + H351)
 - OUTPUT BASIS: CLOSED (H358 tangent-basis boundary-null, 15th axis)

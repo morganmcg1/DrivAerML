@@ -14525,3 +14525,25 @@ Edward's analysis (banked):
 **Next direction (H368)**: Structural edge-pair loss matching (zero-param). Different lever — acts on point-PAIR gradient differences, not per-point magnitudes. Addresses Edward's #3 hypothesis (high-frequency WSS_z error structure unfittable by current bottleneck width).
 
 ---
+
+---
+
+## 2026-06-02 12:55Z — PR #1560 CLOSED: tanjiro/h366-knn-proximity-attn-bias
+
+**H366: Hierarchical kNN proximity attention bias in Transolver slice-attention (encoder-side, zero-params)**
+- Student: tanjiro | W&B runs: wk433myn (rank0) + 7 DDP ranks
+- Hypothesis: Inject precomputed kNN-32 spatial proximity as additive zero-init pre-softmax bias in slice-attention. Provide explicit local-geometry prior for spatially-coherent slices in high-curvature regions (WSS_z hotspots).
+- Implementation: Per-point i bias = scaled sum of proximity indicators to kNN-32 neighbors; broadcast across Q axis; learnable per-layer scalar γ init=0.
+
+| W&B run | Phase | val_primary | val_WSS_z | Decision |
+|---|---|---:|---:|---|
+| wk433myn (8-rank DDP) | Phase 1 EP14 | **6.0752%** | — | CLOSE rule triggered (>6.05%) |
+| H342 SOTA gate | — | 5.8962% | 8.6122% | — |
+| Δ vs gate | — | +179bp | — | Close-by-rule |
+
+**Decision: CLOSED as Finding W — `knn-spatial-proximity-attn-bias-null` (23rd closed axis)**
+
+- Pre-committed close rule fired: val_primary 6.0752% > 6.05% threshold at EP14
+- 8 DDP ranks completed cleanly; wall-time ~3.83h/epoch
+- Phase 2 H342 TTA cascade correctly skipped
+- **Discriminator role**: H366 was *geometric* (spatial proximity). H376 (tanjiro, PR #1572) will test *physics-informed* (predicted ||∇WSS|| from EP13 EMA teacher). If H376 nulls too → attention-steering tier fully closed.
