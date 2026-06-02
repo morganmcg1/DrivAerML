@@ -142,6 +142,12 @@ class EvalConfig:
     drop_path_max: float = 0.1
 
     amp_mode: str = "bf16"
+
+    # H360: surface Laplacian eigenfunction PE (must match training-side flag)
+    lap_pe: bool = False
+    lap_pe_root: str = "/mnt/new-pvc/Processed/lap_pe_v1"
+    lap_pe_channels: int = 32
+
     debug: bool = False  # 2 val + 2 test cases
 
 
@@ -181,7 +187,11 @@ def parse_modes(spec: str) -> list[str]:
 
 
 def build_model(cfg: EvalConfig) -> SurfaceTransolver:
+    from data import SURFACE_X_DIM as _BASE_SURFACE_X_DIM
+
+    n_lap = int(cfg.lap_pe_channels) if cfg.lap_pe else 0
     return SurfaceTransolver(
+        surface_input_dim=_BASE_SURFACE_X_DIM + n_lap,
         n_layers=cfg.model_layers,
         n_hidden=cfg.model_hidden_dim,
         dropout=cfg.model_dropout,
@@ -426,20 +436,38 @@ def process_case_stacked(
         timing["perturb_seconds"] += time.time() - t_p
 
         for R in resolutions:
-            dataset = DrivAerMLSurfaceDataset(
-                case_ids=[case_id],
-                store=store,
-                max_surface_points=cfg.eval_surface_points,
-                max_volume_points=R,
-                sampling_mode="eval_chunk",
-            )
+            if cfg.lap_pe:
+                from lap_pe_dataset import (
+                    LapPeAugmentedDataset,
+                    pad_collate_variable_surface,
+                )
+
+                dataset = LapPeAugmentedDataset(
+                    case_ids=[case_id],
+                    store=store,
+                    max_surface_points=cfg.eval_surface_points,
+                    max_volume_points=R,
+                    sampling_mode="eval_chunk",
+                    lap_pe_root=cfg.lap_pe_root,
+                    n_channels=int(cfg.lap_pe_channels),
+                )
+                _collate = pad_collate_variable_surface
+            else:
+                dataset = DrivAerMLSurfaceDataset(
+                    case_ids=[case_id],
+                    store=store,
+                    max_surface_points=cfg.eval_surface_points,
+                    max_volume_points=R,
+                    sampling_mode="eval_chunk",
+                )
+                _collate = pad_collate
             loader_iter = torch.utils.data.DataLoader(
                 dataset,
                 batch_size=cfg.batch_size,
                 shuffle=False,
                 num_workers=cfg.num_workers,
                 pin_memory=cfg.pin_memory,
-                collate_fn=pad_collate,
+                collate_fn=_collate,
                 persistent_workers=False,
                 prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
             )

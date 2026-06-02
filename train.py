@@ -145,6 +145,10 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H360: surface Laplacian eigenfunction PE (LapPE) input features
+    lap_pe: bool = False
+    lap_pe_root: str = "/mnt/new-pvc/Processed/lap_pe_v1"
+    lap_pe_channels: int = 32
     debug: bool = False
 
 
@@ -271,6 +275,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "lap_pe": (
+            "H360: append per-vertex surface Laplacian eigenfunction PE "
+            "(LapPE-K) to surface_x. Reads precomputed per-case files "
+            "(<run>_lappe.npy + <run>_nnidx.npy) from --lap-pe-root. When "
+            "resuming from a non-LapPE checkpoint, the surface input "
+            "projection weight is zero-padded at the new LapPE columns so "
+            "predictions are identical at start."
+        ),
+        "lap_pe_root": (
+            "H360: directory containing per-case LapPE files. Each case "
+            "must have <case_id>_lappe.npy (8192, 32) and "
+            "<case_id>_nnidx.npy (n_full,) for NN interpolation."
+        ),
+        "lap_pe_channels": (
+            "H360: number of LapPE channels to append (1..32). Defaults to "
+            "all 32 modes."
         ),
     }
     for field in fields(Config):
@@ -414,8 +435,60 @@ def mirror_augment_batch(batch, p: float = 0.5):
     )
 
 
+def _n_lap_pe_channels(config: Config) -> int:
+    return int(config.lap_pe_channels) if config.lap_pe else 0
+
+
+def _pad_input_proj_for_lap_pe(
+    state_dict: dict[str, torch.Tensor],
+    model: nn.Module,
+    config: Config,
+) -> dict[str, torch.Tensor]:
+    """Zero-pad the surface input projection weight for new LapPE columns.
+
+    The SurfaceTransolver concatenates features as
+    ``[extra_features, positional_features]`` where
+    ``extra_features = surface_x[:, :, space_dim:]`` (the non-xyz columns:
+    nx, ny, nz, area, + appended LapPE). A non-LapPE checkpoint has the
+    surface projection weight at the old extra width (4 + rff); inserting
+    ``n_lap`` zero columns between ``area`` and the positional block produces
+    a weight that loads cleanly into the LapPE-aware model with identical
+    predictions on existing channels.
+    """
+    n_lap = _n_lap_pe_channels(config)
+    if n_lap == 0:
+        return state_dict
+    key = "project_surface_features.project.weight"
+    if key not in state_dict:
+        return state_dict
+
+    ckpt_w = state_dict[key]
+    model_w = dict(model.named_parameters())[key]
+    if ckpt_w.shape == model_w.shape:
+        return state_dict
+
+    old_in = ckpt_w.shape[1]
+    new_in = model_w.shape[1]
+    expected_new_in = old_in + n_lap
+    extra_old = model.surface_input_dim - model.space_dim - n_lap  # = 4
+    if new_in != expected_new_in:
+        raise RuntimeError(
+            f"Unexpected input projection shape mismatch: ckpt has {old_in} cols, "
+            f"model has {new_in} cols, n_lap={n_lap}; expected {expected_new_in}."
+        )
+
+    pad = torch.zeros(ckpt_w.shape[0], n_lap, dtype=ckpt_w.dtype)
+    new_w = torch.cat([ckpt_w[:, :extra_old], pad, ckpt_w[:, extra_old:]], dim=1)
+    state_dict[key] = new_w
+    return state_dict
+
+
 def build_model(config: Config) -> SurfaceTransolver:
+    from data import SURFACE_X_DIM as _BASE_SURFACE_X_DIM
+
+    n_lap = _n_lap_pe_channels(config)
     return SurfaceTransolver(
+        surface_input_dim=_BASE_SURFACE_X_DIM + n_lap,
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
         dropout=config.model_dropout,
@@ -901,6 +974,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             ck = torch.load(ckpt_path_str, map_location="cpu", weights_only=False)
             state_dict = ck["model"]
             state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
+            # H360: zero-pad surface input projection columns when resuming
+            # from a non-LapPE checkpoint, so predictions are identical at
+            # epoch boundary.
+            state_dict = _pad_input_proj_for_lap_pe(state_dict, model, config)
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
             resume_epoch_info = {
                 "resume_epoch": ck.get("epoch"),
@@ -916,6 +993,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"epoch={ck.get('epoch')} source={ck.get('checkpoint_source')} "
                     f"missing={len(missing)} unexpected={len(unexpected)}"
                 )
+                if config.lap_pe:
+                    proj = model.project_surface_features.project.weight
+                    n_lap = _n_lap_pe_channels(config)
+                    extra_old = model.surface_input_dim - model.space_dim - n_lap
+                    lap_cols = proj[:, extra_old : extra_old + n_lap]
+                    print(
+                        f"LapPE wiring: project_surface_features weight={tuple(proj.shape)} "
+                        f"surface_input_dim={model.surface_input_dim} n_lap={n_lap} "
+                        f"lap_cols_norm={lap_cols.norm().item():.4e} "
+                        f"(should be 0.0 right after warm-load)"
+                    )
 
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.

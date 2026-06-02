@@ -235,8 +235,13 @@ def resolve_num_workers(config) -> int:
 
 def loader_kwargs(config) -> dict[str, object]:
     num_workers = resolve_num_workers(config)
+    collate = pad_collate
+    if getattr(config, "lap_pe", False):
+        from lap_pe_dataset import pad_collate_variable_surface
+
+        collate = pad_collate_variable_surface
     kwargs: dict[str, object] = {
-        "collate_fn": pad_collate,
+        "collate_fn": collate,
         "num_workers": num_workers,
         "pin_memory": config.pin_memory and torch.cuda.is_available(),
     }
@@ -278,6 +283,21 @@ def full_eval_loaders_from(
     }
 
 
+def _wrap_lap_pe(dataset, *, lap_pe_root: str, n_channels: int):
+    """Replace a DrivAerMLSurfaceDataset with LapPeAugmentedDataset."""
+    from lap_pe_dataset import LapPeAugmentedDataset
+
+    return LapPeAugmentedDataset(
+        dataset.case_ids,
+        store=dataset.store,
+        max_surface_points=dataset.max_surface_points,
+        max_volume_points=dataset.max_volume_points,
+        sampling_mode=dataset.sampling_mode,
+        lap_pe_root=lap_pe_root,
+        n_channels=n_channels,
+    )
+
+
 def make_loaders(
     config,
     distributed_state: DistributedState | None = None,
@@ -291,6 +311,18 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    if getattr(config, "lap_pe", False):
+        lap_pe_root = config.lap_pe_root
+        n_channels = int(config.lap_pe_channels)
+        train_ds = _wrap_lap_pe(train_ds, lap_pe_root=lap_pe_root, n_channels=n_channels)
+        val_splits = {
+            k: _wrap_lap_pe(v, lap_pe_root=lap_pe_root, n_channels=n_channels)
+            for k, v in val_splits.items()
+        }
+        test_splits = {
+            k: _wrap_lap_pe(v, lap_pe_root=lap_pe_root, n_channels=n_channels)
+            for k, v in test_splits.items()
+        }
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
