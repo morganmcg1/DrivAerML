@@ -1,31 +1,5 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
-## 2026-06-02 14:42Z — PR #1571: H196 vol_p_charbonnier_weight=0.2 (frieren) CLOSED NON-MERGE — NO-OP UNDER GRADNORM (pre-launch)
-
-- dl24-frieren/h196-vp-charbonnier-0p2
-- W&B run: none — closed before main launch on student pre-launch code-trace finding
-- **Hypothesis**: Strengthen `--vol-p-charbonnier-weight` from 0.1 → 0.2 to directly amplify VP-Charbonnier task signal, testing if H192's clean test_VP under-floor signal was driven by gradient reallocation toward VP (not τ-axis routing specifically).
-
-### Student pre-launch code trace (PR comment 14:33Z)
-
-frieren identified the flag as a **no-op under `--use-gradnorm`** with full source citation:
-
-1. **Gate only**: train.py L390 `if vol_p_charbonnier_weight > 0.0:` — both 0.1 and 0.2 pass; `loss_vol_p_charb` computed identically
-2. **GradNorm slot uses raw Charbonnier** at L430: `volume_per_ch = loss_vol_p_charb.unsqueeze(0) * volume_loss_weight` — H19 advisor-fix comment explicitly notes the weight is NOT applied here (avoid double-count with w_vol_p)
-3. **Additive Charbonnier gated to no-GradNorm** at L484-486: `if gradnorm_weights is None: loss = loss + vol_p_charbonnier_weight * loss_vol_p_charb` — H183 stack uses `--use-gradnorm`, this branch skipped
-4. The flag value still appears in cosmetic diagnostic metric `loss_vol_p_charb_weighted` but does not affect training
-
-### Analysis
-
-- **Same class as H158 (PR #1420 closed 2026-05-29)**: flag works in no-GradNorm path but inert under H183/H189 stack
-- **Programme finding**: VP-channel flags must be verified under the active loss-allocation path (additive vs GradNorm slot) before dispatch — adding to advisor pre-dispatch checklist
-- **H159 (PR #1423, `vol_p_charbonnier=0.3` non-merge)** delta (+0.127pp WSS vs H147) now explainable as stochastic noise rather than a real Charbonnier-weight effect under GradNorm
-- **Hypothesis not retracted**: VP gradient-reallocation is still a real lever (H192 demonstrated it indirectly); just needs a flag that actually moves under GradNorm
-
-### Status — CLOSED NON-MERGE (2026-06-02 14:42Z), reassigned as **H197** to dl24-frieren with `--volume-loss-weight 2.0` (mechanism-faithful re-mapping — doubles raw VP task signal that GradNorm allocator sees at L430)
-
----
-
 ## 2026-06-02 13:46Z — PR #1541: H192 τ_z=1.5 only at lr=1e-4 (frieren) CLOSED NON-MERGE
 
 - dl24-frieren/h192-tau-z-isolate-lr
