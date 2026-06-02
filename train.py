@@ -146,6 +146,8 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    use_knn_attention_bias: bool = False
+    knn_attention_k: int = 32
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -271,6 +273,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "use_knn_attention_bias": (
+            "H366: Enable zero-init kNN proximity bias on Transolver slice-routing logits. "
+            "For each surface token, injects alpha * mean(neighbor_slice_logits) before softmax, "
+            "where neighbors are the k nearest surface tokens by 3D Euclidean distance. "
+            "alpha is a per-layer ReZero scalar (nn.Parameter, init=0) so behaviour is "
+            "bit-identical to baseline at step 0. kNN computed via chunked cdist each forward pass."
+        ),
+        "knn_attention_k": (
+            "H366: Number of nearest surface-token neighbors for the kNN proximity bias "
+            "(--use-knn-attention-bias). Default 32."
         ),
     }
     for field in fields(Config):
@@ -429,6 +442,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_knn_attention_bias=config.use_knn_attention_bias,
+        knn_attention_k=config.knn_attention_k,
     )
 
 

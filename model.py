@@ -260,6 +260,8 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_knn_bias: bool = False,
+        knn_k: int = 32,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -270,6 +272,8 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.use_knn_bias = use_knn_bias
+        self.knn_k = knn_k
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -284,12 +288,27 @@ class TransolverAttention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
+        # H366: ReZero scalar for kNN proximity bias on slice-routing logits.
+        # Zero-init ensures bit-identical baseline behaviour at step 0.
+        if use_knn_bias:
+            self.knn_bias_alpha = nn.Parameter(torch.zeros(1))
 
-    def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def create_slices(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        knn_idx: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
-        slice_logits = self.in_project_slice(x_mid) / self.temperature
+        slice_logits = self.in_project_slice(x_mid) / self.temperature  # (B, H, N, S)
+        # H366: inject kNN proximity bias into surface-token slice-routing logits.
+        # The bias application is extracted into _apply_knn_bias (decorated with
+        # @torch._dynamo.disable) to prevent the concrete n_surf value from leaking
+        # into inductor's symbolic shape graph and causing InductorError.
+        if self.use_knn_bias and knn_idx is not None:
+            slice_logits = _apply_knn_bias(slice_logits, knn_idx, self.knn_bias_alpha)
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
@@ -300,8 +319,13 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        knn_idx: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask, knn_idx=knn_idx)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -330,6 +354,8 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_prob: float = 0.0,
+        use_knn_bias: bool = False,
+        knn_k: int = 32,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -340,15 +366,24 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_knn_bias=use_knn_bias,
+            knn_k=knn_k,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
         self.drop_path_attn = DropPath(drop_path_prob)
         self.drop_path_mlp = DropPath(drop_path_prob)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        knn_idx: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path_attn(self.attention(self.norm1(x), attn_mask=attn_mask))
+        x = x + self.drop_path_attn(
+            self.attention(self.norm1(x), attn_mask=attn_mask, knn_idx=knn_idx)
+        )
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path_mlp(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
@@ -366,6 +401,8 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_max: float = 0.0,
+        use_knn_bias: bool = False,
+        knn_k: int = 32,
     ):
         super().__init__()
         if depth > 1:
@@ -383,15 +420,120 @@ class Transformer(nn.Module):
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
                     drop_path_prob=drop_path_probs[i],
+                    use_knn_bias=use_knn_bias,
+                    knn_k=knn_k,
                 )
                 for i in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        knn_idx: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, knn_idx=knn_idx)
         return x
+
+
+@torch._dynamo.disable
+def _compute_knn_idx_batched(
+    coords: torch.Tensor,
+    surface_mask: torch.Tensor,
+    k: int,
+    chunk_size: int = 16384,
+) -> torch.Tensor:
+    """Per-batch-item kNN indices for surface tokens (H366).
+
+    Runs eagerly — decorated with @torch._dynamo.disable so that
+    torch.compile never traces the Python-level chunk loop.  Without this,
+    dynamo traces range(0, symbolic_n_surf, 16384) as empty, which leaves
+    topk_idx_list == [] and makes torch.cat raise
+    "cat expects at least one tensor, but received zero!".
+
+    cdist runs in fp16 — distances are only used for top-k ordering and
+    fp16's 11-bit mantissa easily distinguishes the closest 33 neighbours
+    of a real point at the typical car-coord magnitudes (|x| <= ~5 m).
+    This roughly halves the kNN wall-time vs fp32 (~92 ms -> ~44 ms at
+    N=40k).
+
+    Padded positions (where surface_mask == 0) get their coordinates pushed
+    to a far-away point so that (a) real-point kNN never selects padding,
+    and (b) padded positions' kNN consists only of other padded positions —
+    harmless because the bias for padding rows is mask-zeroed downstream.
+
+    Args:
+        coords:       (B, N_surf, 3) float surface coordinates (possibly padded).
+        surface_mask: (B, N_surf) bool mask, True for real points.
+        k: number of nearest neighbours to return (self excluded).
+        chunk_size: rows per torch.cdist chunk (tunes peak VRAM).
+
+    Returns:
+        (B, N_surf, k) long tensor of kNN indices (self excluded).
+    """
+    B, n_surf, _ = coords.shape
+    out = torch.empty((B, n_surf, k), dtype=torch.long, device=coords.device)
+    for b in range(B):
+        coords_b = coords[b].to(torch.float16).clone()     # (N_surf, 3) fp16
+        coords_b[~surface_mask[b].bool()] = 1.0e3          # banish padding (fp16-safe)
+        topk_idx_list: list[torch.Tensor] = []
+        for start in range(0, n_surf, chunk_size):
+            end = min(start + chunk_size, n_surf)
+            chunk = coords_b[start:end]                    # (C, 3)
+            d = torch.cdist(chunk, coords_b)               # (C, N_surf) fp16
+            tk = torch.topk(d, k + 1, dim=1, largest=False)  # +1 to drop self
+            topk_idx_list.append(tk.indices)
+        topk_idx_all = torch.cat(topk_idx_list, dim=0)     # (N_surf, k+1)
+        # Column 0 is the self-index (distance = 0).  Drop it.
+        out[b] = topk_idx_all[:, 1:].contiguous()
+    return out
+
+
+@torch._dynamo.disable
+def _apply_knn_bias(
+    slice_logits: torch.Tensor,
+    knn_idx: torch.Tensor,
+    knn_bias_alpha: torch.Tensor,
+) -> torch.Tensor:
+    """Apply kNN proximity bias to slice-routing logits (H366).
+
+    Extracted into a @torch._dynamo.disable function so that the concrete
+    value of n_surf (= knn_idx.shape[1]) never leaks as a hardcoded integer
+    constant into inductor's symbolic-shape graph.  When this logic lives
+    inline inside create_slices, inductor sees an expression like
+    ``s24 + 40000`` where s24 is a symbolic variable, and raises:
+        AssertionError: For s24 + 40000, expected [s24] to have been codegen-ed.
+
+    Args:
+        slice_logits: (B, H, N, S) slice-routing logits before softmax.
+        knn_idx:      (B, N_surf, k) per-batch-item kNN indices (self excluded).
+        knn_bias_alpha: scalar Parameter (ReZero-init = 0.0).
+
+    Returns:
+        (B, H, N, S) logits with kNN bias applied to the first N_surf tokens.
+    """
+    B, H, N, S = slice_logits.shape
+    k = knn_idx.shape[2]
+    # Clamp n_surf to the number of surface tokens actually present in
+    # slice_logits.  In normal eval/train n_surf == surface_x.shape[1] and
+    # slice_logits[:, :, :n_surf, :] is the surface slice.  Defensive clamp
+    # protects against pathological eval-chunk batches where the surface
+    # token count fed into kNN exceeds the surface portion of the hidden
+    # stream (avoids CUDA "index out of bounds" inside torch.gather).
+    n_surf = min(knn_idx.shape[1], N)
+    if n_surf == 0:
+        return slice_logits
+    knn_idx_clamped = knn_idx[:, :n_surf, :].clamp(max=n_surf - 1)
+    surf_logits = slice_logits[:, :, :n_surf, :]            # (B, H, n_surf, S)
+    idx = knn_idx_clamped.unsqueeze(1).expand(B, H, n_surf, k)
+    idx_flat = idx.reshape(B, H, n_surf * k)
+    idx_exp = idx_flat.unsqueeze(-1).expand(B, H, n_surf * k, S)
+    gathered = torch.gather(surf_logits, dim=2, index=idx_exp)  # (B, H, n_surf*k, S)
+    neighbor_mean = gathered.view(B, H, n_surf, k, S).mean(dim=3)  # (B, H, n_surf, S)
+    biased_surf = surf_logits + knn_bias_alpha * neighbor_mean
+    return torch.cat([biased_surf, slice_logits[:, :, n_surf:, :]], dim=2)
 
 
 class SurfaceTransolver(nn.Module):
@@ -419,6 +561,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_knn_attention_bias: bool = False,
+        knn_attention_k: int = 32,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +578,8 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_knn_attention_bias = use_knn_attention_bias
+        self.knn_attention_k = knn_attention_k
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -511,6 +657,8 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             use_qk_norm=use_qk_norm,
             drop_path_max=drop_path_max,
+            use_knn_bias=use_knn_attention_bias,
+            knn_k=knn_attention_k,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
@@ -634,7 +782,32 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        # H366: compute per-batch-item kNN indices for surface tokens from 3D
+        # coordinates.  Each batch sees different random-subsampled coords
+        # (train_random per-step, eval_chunk per-view), so kNN must be
+        # recomputed every forward — no caching is valid.  Padding rows are
+        # banished to a far point via surface_mask inside the helper.
+        # _compute_knn_idx_batched is decorated @torch._dynamo.disable so the
+        # Python chunk loop runs eagerly and is never traced with symbolic
+        # shapes, avoiding "cat expects at least one tensor, but received zero!".
+        #
+        # Skip kNN when the batch has no surface tokens (volume-only eval view
+        # produced by eval_chunk when surface_view_count == 0 for some
+        # batched samples) — _compute_knn_idx_batched would otherwise call
+        # torch.cat on an empty list and crash mid-eval.
+        knn_idx: torch.Tensor | None = None
+        if (
+            self.use_knn_attention_bias
+            and surface_x is not None
+            and surface_x.shape[1] >= self.knn_attention_k + 1
+        ):
+            coords = surface_x[:, :, :3].detach()  # (B, N_surf, 3)
+            knn_idx = _compute_knn_idx_batched(
+                coords, surface_mask, self.knn_attention_k
+            )
+
+        hidden = self.backbone(hidden, attn_mask=attn_mask, knn_idx=knn_idx)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
