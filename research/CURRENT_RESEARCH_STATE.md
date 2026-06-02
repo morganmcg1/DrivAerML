@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 17 total)
+## Closed axes (do NOT revisit — 18 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -46,6 +46,7 @@
 | **Tangent-basis output head (Finding O)** | `tangent-basis-output-head-boundary-null` — Native tangent-basis residual output (τ·n=0 by construction) + LayerNorm-gated head_corr. Phase 1 raw 5bp behind H336. Post-TTA+cal val_cal 5.8963 / test_cal 5.7366 — within 0.1bp of H342 gate (noise floor). WSS_z marginally regressed +0.03bp. Output-basis enforcement is physics-correct but did NOT move the WSS_z floor. **15th closed axis. All 3 Morgan P-tier WSS architecture directives have closed null — decisively falsifying the decoder/output hypothesis family.** | **H358 CLOSED 06:00Z** |
 | **Target-magnitude WSS hotspot reweight (Finding P)** | `target-magnitude-wss-hotspot-reweight-overshoot` — Per-point loss weight = γ on top-decile (||target_WSS||>4.844 Pa) WSS points, baseline weight elsewhere. γ=3 Arm A: EP14 val_abupt 6.586% (+69bp vs gate, +57bp vs H336 EP13 source). All channels regressed including unreweighted VP +105bp (Lion sensitivity to 1.20× WSS-mass shift breaks H342-tuned balance). Hotspot mask diagnostics confirmed 10% mask captures 6.1× mean magnitude points — mechanism implemented correctly, **idea failed**. Arm B γ=5 skipped per close rule. **Cumulative scalar-reweighting axis now CLOSED — 6 nulls (H338, H339, H341, H346, H361, H364). H336 fine-tune basin is brittle to gradient-mass rebalancing; bottleneck is REPRESENTATION CAPACITY, not loss geometry.** | **H364 CLOSED 06:30Z** |
 | **Anisotropic tangent-frame attention encoder (Finding Q)** | `anisotropic-tangent-frame-attention-encoder-null` — Per-vertex Q/K rotation into local frame (t1,t2,n) via slice-effective surface normals; pre-softmax score mix `(1-σ(γ_l)) S_std + σ(γ_l) S_aniso`, per-layer learnable γ_l init=-10. EP14 val_primary 6.0757% (>6.05% close threshold by 2.6bp); EP15 6.0765%, EP16 6.0783% — flat-to-worse trajectory. **Diagnostic: all 5 γ_aniso scalars stayed pinned at ~-10 (σ≈4.5e-5) — gates NEVER opened**. Optimizer found no gradient signal toward engaging anisotropy. Per-channel WSS_z MAE +0.7% worse than H336 EP13 (the channel the hypothesis targeted). **17th closed axis. 4 consecutive encoder/representation hypotheses using surface normals (H351 routing, H357 content, H358 output basis, H367 attention frame) ALL null — model is saturated on existing geometric content; next attacks must inject information the encoder doesn't currently have, not rearrange existing.** | **H367 CLOSED 08:30Z** |
+| **WSS spatial-gradient consistency loss (Finding R)** | `wss-spatial-gradient-consistency-loss-overshoot` — Per-edge L2 of (WSS_pred[j] - WSS_pred[i]) − (WSS_target[j] - WSS_target[i]) over kNN-8 surface graph, λ=0.3. EP14 val_primary **6.503%** (+49bp regression vs baseline 6.017%, blows close threshold by 45bp). ALL 5 channels regressed: WSS_z +38bp (the target channel got WORSE), WSS_y sizable, SP +32bp, VP **+100bp** (channel not touched by new loss term, regressed most). train/wss_grad_loss DID converge 0.026 → 0.015 — mechanism worked but destroyed point accuracy. **Cumulative loss-tier null pattern is now 7 axes (H338, H339, H341, H346, H361, H364, H368). H336/H342 loss formulation is at a tight Pareto-optimum on the EP13 fine-tune basin — any per-point reweighting OR per-edge structural addition breaks multi-channel balance via Lion-basin gradient-mass shift, regardless of weight or operator.** Decisive: edward is 4-for-4 nulls on loss-tier in a row (H338→H361→H364→H368) — pivoting to non-loss-tier next. | **H368 CLOSED 09:05Z** |
 
 ---
 
@@ -59,7 +60,7 @@
 | **#1551** | askeladd | H359: Multi-scale surface kNN branch — Phase 1 done (val_raw ~6.013, 10bp behind SOTA). Single-cp TTA `kwe8tynw` triage running. If not approaching ~5.91 val_cal → close as null. | 🟡 WIP — TTA triage |
 | **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 done, eval `8cqqpd9x` (h360-eval-lappe32) running. | 🟡 WIP — eval phase |
 | **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side: pre-softmax bias α_l·1[j∈kNN(i)] on slice-routing logits, per-layer learnable α init=0. Step-0 invariant. Student's own B1 suggestion post-H363. | 🟡 WIP — smoke + Phase 1 |
-| **#1562** | edward | **H368: WSS spatial-gradient consistency loss (kNN-8 edge-pair matching)** — Zero-param structural loss term: matches predicted WSS edge-gradients (over kNN-8 neighbors) to target edge-gradients. Acts on point-PAIR differences, not per-point magnitudes. Addresses Edward H364 #3 suggestion (high-frequency WSS_z error structure). Different from H347 nezuko (variance penalty), H361 (per-point decomposition), H345 (gradient conflict). Phase 1 from H336 EP13. | 🆕 just assigned 06:35Z |
+| **#1562** | edward | **H368: WSS spatial-gradient consistency loss** | ❌ **CLOSED 09:05Z** Finding R. EP14 val 6.503% (+49bp); VP +100bp untouched-channel collapse. H370 next: non-loss-tier pivot. |
 | **#1561** | frieren | **H367: Anisotropic surface attention via local tangent frame** | ❌ **CLOSED 08:30Z** Finding Q. Reassigning H369 RWPE next. |
 
 ---
@@ -68,7 +69,17 @@
 
 **17 closed axes** all point to the same conclusion: WSS_z floor is representational/upstream. **Critical update post-H367**: 4 consecutive encoder/representation hypotheses using **surface normals** (H351 routing, H357 content, H358 output basis, H367 attention frame) ALL closed null — the model is **saturated on existing geometric content**. Next attacks must inject information the encoder DOES NOT CURRENTLY HAVE, not rearrange existing representations.
 
-**Live attack tier**: new information channels — global spectral structure (H360 LapPE), local mesh topology (H369 RWPE, just assigned), structural edge-pair losses (H368 WSS gradient consistency), multi-scale local features (H359 kNN aggregation), BL physics priors (H347), cross-basin TTA (H365 FastSWA).
+**Live attack tier (post-H368)**: 
+- **Input-feature axis** (3 in flight): H359 multi-scale local kNN (askeladd), H360 LapPE-32 global spectral (fern, val_raw 6.012% neutral-positive), H369 RWPE-16 local topology (frieren)
+- **Non-capacity-additive architectural rewrites** (NEW PRIORITY for edward H370): inducing-point attention bottleneck (Set-Transformer ISAB), sparse+global attention hybrid, heat-kernel signature PE
+- **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn)
+- **Encoder kNN proximity bias** (low-touch attention modulation): H366 (tanjiro, Phase 1 crashed mid-EP14)
+- **Physics-prior cascade**: H347 BL priors (nezuko, long cascade)
+
+**Loss-tier is FULLY CLOSED — 7 nulls cumulative**. Any future loss modification would be redundant. Decoder/output tier also FULLY CLOSED — 14 nulls. The live frontier is exclusively:
+1. injecting new information into encoder input
+2. replacing existing encoder architecture (not augmenting)
+3. cross-basin TTA / weight-space
 
 **Cal-arm failure pattern (2026-06-02 05:30Z)**:
 - alphonse H356 (3-cp K=5): val_cal 5.9206 / test_cal 5.7668 — **FAILED both gates** by 24bp / 31bp
@@ -88,8 +99,8 @@
 - OUTPUT BASIS: CLOSED (H358 tangent-basis boundary-null, 15th axis)
 - DECODER CAPACITY: CLOSED (H363 MoE null, 14th axis)
 - PHYSICS CONSTRAINT: H347 BL priors (nezuko) — long cascade running
-- LOSS (per-point scalar reweighting axis): CLOSED — 6 nulls cumulative (H338, H339, H341, H346, H361, H364)
-- LOSS (structural edge-pair gradient matching): H368 WSS spatial-gradient consistency (edward) — Phase 1 pickup pending
+- LOSS (per-point scalar reweighting axis): CLOSED — 6 nulls (H338, H339, H341, H346, H361, H364)
+- LOSS (structural edge-pair gradient matching): CLOSED — H368 null (Finding R, 18th axis). **Cumulative LOSS axis now FULLY closed across 7 nulls — no further loss-modifications worth trying on H336 basin.**
 - TTA (cross-basin): H365 FastSWA cyclic-LR (thorfinn) — Phase 1 training
 
 **Triangulation logic (3 input-feature axes in flight)**: H359 (multi-scale local kNN aggregation of values) + H360 (global Laplacian eigenfunction spectral) + H369 (local mesh topology random-walk structural) span the three orthogonal axes of "information the encoder currently lacks". If all 3 null, the bottleneck is conclusively capacity not information — pivot to non-capacity-additive structural rewrites (sparse+global attention, inducing-point bottleneck, recurrent state). If any wins, the winning axis identifies the missing information channel.

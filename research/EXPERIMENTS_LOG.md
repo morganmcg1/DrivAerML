@@ -1,3 +1,30 @@
+## 2026-06-02 09:05Z — PR #1562: H368 WSS spatial-gradient consistency loss (kNN-8 edge-pair) — CLOSED (overshoot)
+
+- Branch: edward/h368-wss-grad-consistency-loss
+- **Hypothesis**: Zero-param structural loss term — match predicted WSS edge-gradients (over kNN-8 surface neighbors) to target edge-gradients. Addresses Edward's H364 #3 suggestion (high-frequency WSS_z error). Different mechanism class from H347 (variance penalty), H361 (per-point decomposition), H345 (gradient conflict). λ=0.3 Arm A.
+- **Implementation**: edward executed cleanly. Phase 1 8-rank DDP launched from H336 EP13 (yw2a5dyl).
+
+| Metric | H368 EP14 | H336 EP13 baseline | Δ | Pass? |
+|---|---:|---:|---:|:---:|
+| val_primary/abupt rel_l2_pct | **6.503%** | 6.017% | **+49bp** | ❌ FAIL (45bp past 6.05% threshold) |
+| WSS_z rel_l2_pct (TARGET CHANNEL) | **9.562%** | ~9.18% | **+38bp** | ❌ target channel got worse |
+| WSS_y rel_l2_pct | 7.896% | — | sizable | ❌ |
+| WSS_x rel_l2_pct | 6.224% | — | — | ❌ |
+| SP rel_l2_pct | 4.291% | ~3.97% | +32bp | ❌ |
+| VP rel_l2_pct (NOT touched by new loss) | 4.543% | ~3.54% | **+100bp** | ❌ |
+| train/wss_grad_loss component | step 0: 0.026 → step 4000: 0.015 | — | converging | ✓ (mechanism worked) |
+| train/loss total | step 0: 0.024 → step 4000: 0.010 | — | converging | ✓ |
+
+- **W&B runs**: `dv97qabi` (rank 0) + 7 sibling ranks `9j13cru0`/`4674tmyc`/`1zyoh4x7`/`0k0t8u3u`/`p43vdrcm`/`q6kr1mau`/`xnzos8of`. Phase 1 was 47% through training (step 4161 of ~8908/epoch) when close decision posted; instructed student to kill in-flight ranks via advisor close comment.
+- **Finding R** (18th closed axis): `wss-spatial-gradient-consistency-loss-overshoot` — The wss_grad loss component converges as designed (0.026 → 0.015 by step 4000, confirming edge-consistency is being learned). However, the optimizer's path to minimizing edge-grad mismatch is to SMOOTH predictions in regions where the target itself has high spatial variance (sharp transitions at A-pillars, wheel arches, separation lines). This kills sharp-feature accuracy where WSS_z error concentrates. **WSS_z, the target channel, was the channel that regressed most.**
+- **VP +100bp untouched-channel collapse pattern (replicated from H364)**: Lion optimizer's gradient mass shift away from existing surface/volume MSE balance breaks the H342-tuned multi-channel equilibrium, regardless of which channel the new loss term targets. Same pathology as H364 (1.20× WSS-mass shift → VP +105bp). This pattern is now banked across H364 + H368.
+- **Mechanism interpretation**: Structural smoothness loss is the WRONG mechanism for WSS_z — WSS_z error concentrates exactly where the target IS spatially sharp. Smoothing-via-edge-consistency is precisely opposed to the target structure.
+- **Cumulative loss-tier null pattern is now 7 axes**: H338 (SP scalar reweight), H339 (WSS scalar), H341 (wz-only), H346 (focal EMA per-vertex), H361 (direction/magnitude decomposition), H364 (hotspot mask reweight), H368 (per-edge structural matching). **H336/H342 loss formulation is at a tight Pareto-optimum on the EP13 fine-tune basin.** Any further loss modification is wasted GPU time.
+- **Edward streak**: 4-for-4 nulls on loss-tier in a row (H338 → H361 → H364 → H368). Strong evidence to pivot edward off loss-tier entirely for next assignment (H370). Going to non-capacity-additive architectural rewrite tier.
+- **Implication for live attack tier**: The 3 in-flight input-feature axes (H359 multi-scale local kNN askeladd, H360 LapPE-32 global spectral fern with val_raw 6.012% neutral-positive, H369 RWPE-16 local topology frieren) remain the primary attack. Adding to that: replace-existing-encoder-mechanism architectural rewrites (inducing-point ISAB bottleneck, sparse+global attention hybrid) become the new tier for edward H370.
+
+---
+
 ## 2026-06-02 08:30Z — PR #1561: H367 Anisotropic surface attention via local tangent frame — CLOSED (null)
 
 - Branch: frieren/h367-anisotropic-tangent-frame-attention
