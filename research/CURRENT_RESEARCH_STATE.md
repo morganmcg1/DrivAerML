@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 13:00Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 13:15Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -52,10 +52,11 @@
 | **RWPE-K16 Random Walk Positional Encoding (Finding U)** | `rwpe-surface-topology-pe-null` — Random-walk return probabilities up to K=16 hops on kNN-16 surface graph, 32-channel projection with zero-init. EP14 val_primary **6.0742%** (+5.7bp vs source, +2.4bp past 6.05% close rule). Per-channel: SP +18bp, VP +35bp, WSS_z +14bp (target channel WORSE), WSS ≈flat. Crashed mid-EP15 at step=8943 before grace-period evidence; original close rule applies. Joint with H348/H359/H360: **4 of 4 input-feature hypotheses null — input-feature axis CONCLUSIVELY EXHAUSTED on EP13 fine-tune basin**. **21st closed axis.** | **H369 CLOSED 12:08Z** |
 | **ISAB OPERATOR FAMILY CLOSED at single-layer bound (Finding V)** | `isab-single-layer-probe-null` — Single-layer ISAB at idx 2 (1-of-5 layers, M=32 inducing points). EP14 val_primary **6.7149%** (+70bp vs source, +66bp past 6.05% close rule). All 5 channels regressed broadly: SP +64bp, **VP +108bp (untouched-channel collapse)**, WSS +66bp, WSS_z +82bp. Same "basin lost calibrated slice-token interaction" signature as H370. **ISAB operator family CLOSED at the bound** — even one cold ISAB layer breaks token-count bijection enough to disrupt the pretrained surrounding layers under 3-epoch Lion cosine tail. **Implication: future operator replacements MUST preserve token-count bijection** — inducing-point/Perceiver-style bottleneck operators are empirically excluded from warm-start tier. **22nd closed axis.** | **H371 CLOSED 12:17Z** |
 | **kNN spatial-proximity attention bias (Finding W)** | `knn-spatial-proximity-attn-bias-null` — Zero-param additive pre-softmax attention bias from surface kNN proximity (k=32). EP14 val_primary **6.0752%** (>6.05% close rule, +1.6bp). Pre-committed close rule fired immediately; Phase 2 TTA skipped. 8 DDP ranks finished cleanly (rt~3.83h). **Geometric attention-bias signal fails.** Discriminator status: sets up H376 (physics-informed WSS-gradient magnitude bias) to distinguish geometry-only vs. physics-informed attention steering. If H376 also nulls, attention-steering tier is fully closed. **23rd closed axis.** | **H366 CLOSED 12:55Z** |
+| **Self-consistency τ_z-only vs EP13 EMA teacher (Finding X)** | `self-consistency-ep13-ema-teacher-null` — Frozen EP13 EMA teacher MSE consistency loss on τ_z channel only (λ=0.1). EP14 val_primary **6.0700%** (>6.00% kill gate). **ROOT CAUSE: teacher itself has ~9% WSS_z error** — Mean Teacher / NoRD prior requires teacher to have *lower* error than student, which is violated. Consistency penalty also propagated through shared backbone to other channels: WSS_y **+388bp** (worse than random initialization shift). Training-time τ_z regularization via bad teacher = noisy-target overfitting. **24th closed axis.** | **H374 PR #1569 CLOSED 13:00Z** |
 
 ---
 
-## Active Fleet (2026-06-02 13:00Z — 8/8 WIP, **all students assigned**)
+## Active Fleet (2026-06-02 13:15Z — 8/8 WIP, **all students assigned**)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
@@ -66,13 +67,13 @@
 | **#1572** | tanjiro | **H376: WSS gradient-magnitude attention bias (EP13 EMA teacher, zero-param)** — Per-key additive attention bias proportional to ||∇τ_pred||₂ from frozen EP13 EMA teacher's WSS prediction over kNN-8 surface graph. Pre-compute once per sample; inject as static scalar into all slice-attention layers. Physics-informed successor to H366 (geometric kNN bias nulled as Finding W). Discriminator: if H376 also nulls, attention-steering tier CLOSED. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 13:00Z |
 | **#1570** | fern | **H375: Cross-Channel Decoder Query Tokens** — K=4 learnable query tokens, cross-attention from τ_x/τ_y context → τ_z decoder. +0.1% params (264K @ d_model=512). Channels verified: loader.py:42 [...,1]=τ_x, [...,2]=τ_y, [...,3]=τ_z. Replaces wrong-premise H372 (z-mirror, closed no-run). Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:45Z |
 | **#1568** | frieren | **H373: Transolver++ Local Adaptive Slice Pooling** — Replace global slice softmax with k=16 kNN-constrained local pooling (temp=0.1). Zero params, preserves token-count bijection (post-H371 V constraint). Targets boundary-layer τ_z. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:33Z |
-| **#1569** | edward | **H374: Self-Consistency vs EP13 EMA Teacher (τ_z-only, λ=0.1)** — Frozen EP13 teacher MSE consistency loss on τ_z channel only. Zero params, training-time regularizer. Anchors τ_z manifold drift on noisiest channel. Kill gate EP14 val>6.00%. ~10.5h+TTA. | 🟢 ASSIGNED 12:35Z |
+| **#1574** | edward | **H377: Z-antisymmetry mirrored augmentation (H-A)** — τ_z has strict algebraic antisymmetry τ_z(x,y,−z)=−τ_z(x,y,z) under lateral mirror. Train with z-mirrored batch copies (negate z-coord, nz, τ_z targets; batch_size=2 so mirror doubles back to 4 eff). Average τ_z at inference: 0.5×(pred_orig + (−pred_mirror)). Highest-priority unattacked symmetry axis. Zero params, zero architecture change. Kill gate EP14 val>6.00%. ~10.5h+TTA. | 🟢 ASSIGNED 13:15Z |
 
 ---
 
-## Current Research Focus: ATTENTION-STEERING TIER PARTIALLY CLOSED — GEOMETRIC NULL, PHYSICS-INFORMED PENDING
+## Current Research Focus: 24 CLOSED AXES — SYMMETRY AUGMENTATION NOW PRIMARY ATTACK (H377)
 
-**23 closed axes**. H366 closed (Finding W): geometric kNN proximity attention bias null (EP14 val 6.0752%, close-by-rule). H376 now tests whether *physics-informed* attention bias (EP13 EMA ||∇WSS|| magnitude per key) succeeds where pure geometry failed. Alongside H373/H374/H375 in the current live round, this is the narrowed frontier: (1) operator-pool architecture changes that preserve token-count bijection, (2) attention bias with physics-derived signals, (3) decoder cross-channel conditioning, (4) training-time regularization via teacher. Input-feature, loss, decoder-capacity, and ISAB-operator tiers all exhausted.
+**24 closed axes**. H374 closed (Finding X): self-consistency vs EP13 EMA teacher null — teacher has ~9% WSS_z error itself, violating the Mean Teacher premise. H366 (Finding W): geometric kNN proximity attention bias null. H376 now tests physics-informed attention bias; H377 (edward) tests z-antisymmetry mirrored augmentation — HIGHEST-priority remaining unattacked axis. H375/H373 in live round testing cross-channel decoder conditioning and local slice pooling. Narrowed frontier: (1) physical symmetry augmentation / equivariance constraints, (2) physics-informed attention bias, (3) decoder cross-channel conditioning, (4) operator replacements preserving token-count bijection. Training-time regularizer, input-feature, loss, decoder-capacity, and ISAB-operator tiers all exhausted.
 
 **SOTA CLUSTER UPDATE (post-H360 cal landing, 12:10Z):**
 | Arm | val_RAW | val_CAL | test_CAL | Status |

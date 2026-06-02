@@ -1,3 +1,23 @@
+## 2026-06-02 13:00Z — PR #1569: H374 Self-consistency τ_z-only vs frozen EP13 EMA teacher — CLOSED (pre-committed kill gate, Finding X)
+
+- Branch: edward/h374-self-consistency-ep13-ema-teacher
+- **Hypothesis**: Add a self-consistency regularization term L_consistency = λ × MSE(student_τ_z, teacher_τ_z.detach()) using a frozen EP13 EMA checkpoint as the teacher. Motivated by Mean Teacher / NoRD: a frozen good-epoch snapshot provides soft targets that can sharpen the student on the weakest channel (τ_z). λ=0.1, τ_z channel only, backbone unfrozen. Expected mechanism: regularization should reduce τ_z variance without perturbing the other channels.
+
+| Channel | H374 EP14 val | H336 EP13 baseline | Δ |
+|---|---:|---:|---:|
+| **val_abupt rel_l2_pct** | **6.0700%** | 6.017% | **+5.3bp** |
+| val_WSS_z | ~9.4% (est.) | ~9.06% | **+34bp** |
+| val_WSS_y | — | — | **+388bp regression** |
+
+- **Kill gate trigger**: EP14 val_primary 6.0700% > 6.00% hard kill gate → CLOSED immediately.
+- **Finding X** (24th closed axis): `self-consistency-ep13-ema-teacher-null`
+  - **Root cause**: EP13 EMA teacher has ~9% WSS_z error itself — the Mean Teacher / NoRD prior requires the teacher to have *lower* error than the student, which is violated here. The consistency target provides noisy supervision rather than regularization.
+  - **Backbone contamination**: Consistency penalty propagated through the shared backbone to untargeted channels. val_WSS_y **+388bp** regression — far worse than random initialization shift. This confirms the consistency gradient, despite targeting τ_z only, contaminated the entire backbone's internal representations via backprop.
+  - **Implication**: Training-time τ_z regularization via a bad teacher = noisy-target overfitting. Any Mean Teacher / NoRD variant requires a teacher with materially lower error on τ_z than the current student. Since EP13 is the best available checkpoint and the student is fine-tuning from EP13, no valid teacher exists within the current training protocol.
+  - **Closes "regularization via teacher"** hypothesis family: NoRD-style, EMA-soft-target, self-consistency on τ_z are all excluded under the current training protocol.
+
+---
+
 ## 2026-06-02 12:17Z — PR #1566: H371 ISAB single-layer probe at idx 2 — CLOSED (pre-committed close rule, Finding V) — ISAB OPERATOR FAMILY CLOSED at single-layer bound
 
 - Branch: edward/h371-isab-single-layer-idx2-probe
