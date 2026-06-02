@@ -1,3 +1,24 @@
+## 2026-06-02 04:09Z — PR #1553: H361 Direction-Magnitude Decomposed WSS Loss — CLOSED (null)
+
+- Branch: edward/wss-direction-magnitude-decoder-split
+- **Hypothesis**: Decompose WSS training gradient into cosine-similarity (direction) + relative-norm (magnitude) terms. Expected to target WSS_z vortex-shedding regions with geometrically appropriate gradient objects.
+- **Implementation**: edward added `--wss_dir_loss_alpha`/`--wss_dir_loss_beta` flags. 3-epoch cosine-tail fine-tune from H336 EP13, α=0.5 β=0.5.
+
+| Metric | H361 EP16 (best) | H336 EP13 baseline | Δ |
+|---|---:|---:|---:|
+| val_abupt_raw | 6.281 | 6.017 | **+26bp** (regression) |
+| val_WSS_z | 9.397 | 9.194 | **+20bp** (targeted axis got WORSE) |
+| val_SP | 4.200 | 3.967 | +23bp |
+| val_VP | 3.947 | 3.541 | +41bp |
+| EP14 close rule | >6.05% → close | 6.703% | **TRIPPED (+65bp)** |
+| EP16 close rule | >5.98% → close | 6.281% | **TRIPPED (+30bp)** |
+
+- **W&B runs**: `zjl03wit` (rank-0, "edward/h361-armA-a0.5b0.5-rank0"), DDP 8-GPU, 131 min
+- **Finding L** (12th decoder/input/loss-geometry axis closed): `wss-direction-magnitude-decomposed-loss-null`. Cosine `(1−cos_sim)` rewards direction-matching equally at high and low magnitude; relative-norm `MSE/||target||²` over-weights small-magnitude points. Both gradient fields pull optimizer AWAY from rel_l2 minimum. Per-channel MSE IS the right gradient object.
+- **Discriminator outcome** (as designed): H361 confirms WSS_z floor is NOT a loss-geometry problem. **The bottleneck is representation depth/architecture.** Combined with H357 GeoTransolver-content-embedding null: content-injection and loss-decomposition are both ruled out as easy WSS_z attacks.
+
+---
+
 ## 2026-06-01 23:46Z — PR #1549: H357 GeoTransolver content embedding (encoder-content path) — CLOSED
 
 - Branch: tanjiro/h357-geotransolver-content-embedding
