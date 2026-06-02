@@ -1,5 +1,6 @@
 # SENPAI Research State
 
+- **2026-06-02 15:23Z** (H194 EP9 ALL 4 STILL DESCENDING WSS=6.7260 SAILED PAST EP10 gate at EP9 — fleet leader; H193 EP14 WSS slope REVERSED -0.0034 + VP fresh low 3.6844; H195 EP3 PASS gate ≤7.10 at 7.0573 but +0.0773 ABOVE H147 baseline first separation gate; H197 frieren smoke 31min in step=7248 ETA ~15:42Z; 4-PR boundary acks posted #1554 #1559 #1565)
 - **2026-06-02 14:42Z** (H196 CLOSED NON-MERGE — frieren pre-launch code trace found vol_p_charbonnier_weight is NO-OP under GradNorm; H197 reassigned to frieren with --volume-loss-weight=2.0 mechanism-faithful re-mapping PR #1573; H194 EP8 strongest fleet ALL 4 METRICS DESCENDING; H195 EP2 H147-match exactly; H193 EP13 8th uptick zone)
 - **2026-06-02 14:20Z** (H194 EP8 ALL 4 METRICS STILL DESCENDING fresh lows everywhere — strongest fleet candidate; H195 EP2 7.2661 matches H147 EP2=7.26 exactly; H196 frieren smoke launched 14:12Z EP1 ETA ~14:55Z; H193 EP13 8th uptick zone)
 - **2026-06-02 13:50Z** (H192 CLOSED NON-MERGE — hypothesis FALSIFIED, upweighted τ_z largest regress +0.225pp; H196 frieren VP-Charbonnier=0.2 PR #1571 dispatched; H193 EP13 WSS 7th consec POS slope VP plateau; H194 EP8 + H195 EP2 boundaries imminent)
@@ -8,6 +9,16 @@
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → ∂u/∂n → WSS) as highest-leverage untried mechanism, TANGENT-BASIS OUTPUT HEAD as 2nd priority. Both require architectural changes larger than current fleet scope.
 - **Human check-in (issue #1056, 18:39Z):** No new messages since 19:27Z 2026-06-01.
+
+## 15:23Z checkpoint — **H194 EP9 fleet leader (ALL 4 STILL DESCENDING); H193 EP14 WSS slope reversal + VP fresh low; H195 EP3 PASS gate but +0.08pp ABOVE H147; H197 smoke EP1 ETA ~15:42Z**
+
+### Actions taken this cycle (15:23Z)
+- **H194 EP9 boundary ack posted on PR #1559 (nezuko)** — rank-0 `tne4wsap` step=100719, rt=9.08h: WSS=6.7260 (-0.0151 ↓), VP=3.5503 (-0.0362 ↓ strong), AB=5.9505 (-0.0188 ↓), SP=3.8703 (-0.0084 ↓). **ALL 4 metrics still descending at EP9, WSS already 0.07pp UNDER EP10 gate ≤6.80 at EP9 — fleet leader by wide margin**. Test_WSS projection if -0.015pp/EP slope holds: terminal val ~6.50 → test ~6.33-6.40 = **paper-tier sub-H183 SOTA territory**. Gap to SOTA 6.4427 closed to -0.28pp with 16 EPs remaining
+- **H193 EP14 boundary ack posted on PR #1554 (tanjiro)** — rank-0 `vuvpegip` step=161665, rt=11.76h: WSS=7.7636 (-0.0034 ↓ **slope reversal breaks 7-consec POS streak**), VP=3.6844 (-0.0204 ↓ **fresh low, descent resumed after EP12-13 pause**), AB=6.5975 (-0.0008 ↔ flat), SP=3.9544 (-0.0169 ↓). Correction: VP NOT exhausted at 3.70 — was just a 1-EP plateau. WSS NON-MERGE outcome locked but VP-research note strengthening
+- **H195 EP3 boundary ack posted on PR #1565 (fern)** — WSS=7.0573 PASSED gate ≤7.10 (-0.0427 under gate) but **+0.0773 ABOVE H147 EP3=6.98 at first separation gate**; per-axis τ_y dropped 14.10→7.88 (-0.39pp) — proportional to τ_x/τ_z descent, no clean differential mechanism payoff yet. EP5 gate ≤6.90 (~16:08Z) is the critical kill point
+- **H197 frieren smoke confirmed running** — 8 ranks in `h197-volume-loss-weight-2p0` group, age 31min, step=7248, val_WSS=? (smoke EP1 boundary at step 10975 ETA ~15:42Z based on H183-stack ~13.8k/h DDP8 rate)
+- Identified H193 main rank-0 = `vuvpegip` (multi-rank ambiguity resolved via summary._json_dict val key presence — only rank-0 logs val keys)
+- Probe efficiency note: `scan_history(keys=[...], min_step=N)` is SLOW (>20 min on 8 runs); `r.summary._json_dict` is INSTANT for latest val readings
 
 ## 14:42Z checkpoint — **H196 CLOSED NON-MERGE pre-launch** (frieren caught no-op under GradNorm); H197 reassigned with mechanism-faithful flag PR #1573; fleet otherwise unchanged from 14:20Z
 
