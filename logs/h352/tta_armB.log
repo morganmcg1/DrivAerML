@@ -1,0 +1,208 @@
+W0601 19:50:29.648000 1292853 torch/distributed/run.py:862] 
+W0601 19:50:29.648000 1292853 torch/distributed/run.py:862] *****************************************
+W0601 19:50:29.648000 1292853 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0601 19:50:29.648000 1292853 torch/distributed/run.py:862] *****************************************
+Device: cuda:0, DDP world_size=8
+Resolutions: [32768, 40960, 49152, 57344, 65536, 81920, 98304, 131072]
+Modes: ['weight_noise_mirror_res_avg']
+Weight-noise TTA: dist=student_t df=4 sigma_rel=0.0005 K_passes=5 antithetic=True K_eff=10 seed_base=42
+Checkpoint: outputs/h352/swa_armB.pt (source=local)
+Loaded checkpoint epoch=16 source=swa_last_n
+  missing=0 unexpected=0
+Snapshotted 136 fp tensors (17,413,721 elements)
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.27.0
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260601_195033-fgao25bk
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run thorfinn/h352-armB-late10-tta-cal
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/fgao25bk
+
+=== val_surface mode=weight_noise_mirror_res_avg resolutions=[32768, 40960, 49152, 57344, 65536, 81920, 98304, 131072] mirror=True K=5 antithetic=True K_eff=10 sigma=0.0005 calibration=True ===
+  [rank 2] val_surface/weight_noise_mirror_res_avg run_56 (1/4): n_passes=160 forwards=35780 forward=85.5s perturb=0.3s io=2134.6s total=2256.4s
+  [rank 6] val_surface/weight_noise_mirror_res_avg run_177 (1/4): n_passes=160 forwards=37720 forward=89.4s perturb=0.3s io=2270.3s total=2397.5s
+  [rank 4] val_surface/weight_noise_mirror_res_avg run_150 (1/4): n_passes=160 forwards=38000 forward=91.9s perturb=0.3s io=2287.5s total=2419.1s
+  [rank 0] val_surface/weight_noise_mirror_res_avg run_4 (1/5): n_passes=160 forwards=38380 forward=96.7s perturb=0.3s io=2305.2s total=2442.0s
+  [rank 7] val_surface/weight_noise_mirror_res_avg run_191 (1/4): n_passes=160 forwards=40340 forward=96.4s perturb=0.3s io=2425.0s total=2561.4s
+  [rank 1] val_surface/weight_noise_mirror_res_avg run_22 (1/5): n_passes=160 forwards=40860 forward=97.4s perturb=0.3s io=2468.0s total=2606.9s
+  [rank 5] val_surface/weight_noise_mirror_res_avg run_165 (1/4): n_passes=160 forwards=41760 forward=98.6s perturb=0.3s io=2540.1s total=2679.9s
+  [rank 3] val_surface/weight_noise_mirror_res_avg run_109 (1/4): n_passes=160 forwards=41680 forward=104.4s perturb=0.3s io=2547.4s total=2694.4s
+  [rank 2] val_surface/weight_noise_mirror_res_avg run_241 (2/4): n_passes=160 forwards=38060 forward=91.1s perturb=0.2s io=2295.1s total=2426.5s
+  [rank 6] val_surface/weight_noise_mirror_res_avg run_260 (2/4): n_passes=160 forwards=38160 forward=89.7s perturb=0.2s io=2301.9s total=2432.1s
+  [rank 4] val_surface/weight_noise_mirror_res_avg run_252 (2/4): n_passes=160 forwards=39260 forward=94.6s perturb=0.2s io=2356.4s total=2493.4s
+  [rank 0] val_surface/weight_noise_mirror_res_avg run_228 (2/5): n_passes=160 forwards=39820 forward=99.9s perturb=0.2s io=2399.7s total=2542.7s
+  [rank 3] val_surface/weight_noise_mirror_res_avg run_247 (2/4): n_passes=160 forwards=37000 forward=92.8s perturb=0.2s io=2201.9s total=2335.9s
+  [rank 7] val_surface/weight_noise_mirror_res_avg run_271 (2/4): n_passes=160 forwards=38820 forward=92.6s perturb=0.2s io=2358.2s total=2492.0s
+  [rank 1] val_surface/weight_noise_mirror_res_avg run_234 (2/5): n_passes=160 forwards=38660 forward=91.9s perturb=0.2s io=2317.3s total=2450.8s
+  [rank 5] val_surface/weight_noise_mirror_res_avg run_253 (2/4): n_passes=160 forwards=38080 forward=89.6s perturb=0.2s io=2302.3s total=2432.1s
+  [rank 1] val_surface/weight_noise_mirror_res_avg run_298 (3/5): n_passes=160 forwards=35320 forward=84.2s perturb=0.2s io=2127.7s total=2251.7s
+  [rank 4] val_surface/weight_noise_mirror_res_avg run_321 (3/4): n_passes=160 forwards=37860 forward=91.9s perturb=0.2s io=2286.8s total=2420.9s
+  [rank 2] val_surface/weight_noise_mirror_res_avg run_303 (3/4): n_passes=160 forwards=42220 forward=100.4s perturb=0.2s io=2542.3s total=2686.5s
+  [rank 7] val_surface/weight_noise_mirror_res_avg run_341 (3/4): n_passes=160 forwards=37460 forward=90.1s perturb=0.2s io=2223.8s total=2353.6s
+  [rank 5] val_surface/weight_noise_mirror_res_avg run_324 (3/4): n_passes=160 forwards=38000 forward=89.7s perturb=0.2s io=2251.0s total=2380.8s
+  [rank 3] val_surface/weight_noise_mirror_res_avg run_311 (3/4): n_passes=160 forwards=39320 forward=98.3s perturb=0.2s io=2351.2s total=2492.1s
+  [rank 6] val_surface/weight_noise_mirror_res_avg run_328 (3/4): n_passes=160 forwards=43020 forward=101.8s perturb=0.2s io=2633.3s total=2779.7s
+  [rank 0] val_surface/weight_noise_mirror_res_avg run_275 (3/5): n_passes=160 forwards=43360 forward=108.9s perturb=0.2s io=2620.9s total=2775.7s
+  [rank 7] val_surface/weight_noise_mirror_res_avg run_447 (4/4): n_passes=160 forwards=37160 forward=88.8s perturb=0.2s io=2233.9s total=2362.5s
+[rank 7] val_surface/weight_noise_mirror_res_avg complete: 4 cases in 9769.5s (forward=367.8s perturb=0.8s io=9240.8s n_forwards=153780)
+  [rank 4] val_surface/weight_noise_mirror_res_avg run_401 (4/4): n_passes=160 forwards=38940 forward=94.0s perturb=0.2s io=2324.0s total=2461.6s
+[rank 4] val_surface/weight_noise_mirror_res_avg complete: 4 cases in 9795.0s (forward=372.3s perturb=0.8s io=9254.7s n_forwards=154060)
+  [rank 1] val_surface/weight_noise_mirror_res_avg run_366 (4/5): n_passes=160 forwards=40080 forward=95.1s perturb=0.2s io=2430.8s total=2569.2s
+  [rank 6] val_surface/weight_noise_mirror_res_avg run_441 (4/4): n_passes=160 forwards=38180 forward=90.5s perturb=0.2s io=2301.2s total=2432.5s
+[rank 6] val_surface/weight_noise_mirror_res_avg complete: 4 cases in 10041.8s (forward=371.5s perturb=0.8s io=9506.6s n_forwards=157080)
+  [rank 0] val_surface/weight_noise_mirror_res_avg run_352 (4/5): n_passes=160 forwards=36120 forward=91.4s perturb=0.2s io=2155.2s total=2287.3s
+  [rank 3] val_surface/weight_noise_mirror_res_avg run_390 (4/4): n_passes=160 forwards=40180 forward=100.9s perturb=0.2s io=2405.7s total=2551.1s
+[rank 3] val_surface/weight_noise_mirror_res_avg complete: 4 cases in 10073.5s (forward=396.4s perturb=0.8s io=9506.2s n_forwards=158180)
+  [rank 5] val_surface/weight_noise_mirror_res_avg run_423 (4/4): n_passes=160 forwards=41180 forward=97.4s perturb=0.2s io=2520.7s total=2662.0s
+[rank 5] val_surface/weight_noise_mirror_res_avg complete: 4 cases in 10154.8s (forward=375.4s perturb=0.8s io=9614.0s n_forwards=159020)
+  [rank 2] val_surface/weight_noise_mirror_res_avg run_380 (4/4): n_passes=160 forwards=43820 forward=104.4s perturb=0.2s io=2690.2s total=2840.6s
+[rank 2] val_surface/weight_noise_mirror_res_avg complete: 4 cases in 10210.0s (forward=381.5s perturb=0.8s io=9662.2s n_forwards=159880)
+  [rank 1] val_surface/weight_noise_mirror_res_avg run_487 (5/5): n_passes=160 forwards=40680 forward=93.5s perturb=0.2s io=2449.9s total=2586.9s
+[rank 1] val_surface/weight_noise_mirror_res_avg complete: 5 cases in 12465.7s (forward=462.1s perturb=1.0s io=11793.6s n_forwards=195600)
+  [rank 0] val_surface/weight_noise_mirror_res_avg run_454 (5/5): n_passes=160 forwards=38640 forward=97.6s perturb=0.2s io=2291.7s total=2429.6s
+[rank 0] val_surface/weight_noise_mirror_res_avg complete: 5 cases in 12477.3s (forward=494.6s perturb=1.0s io=11772.8s n_forwards=196320)
+  total val_surface/weight_noise_mirror_res_avg: 12477.9s
+val_surface/weight_noise_mirror_res_avg loss=0.00442 abupt_axis_rel_l2_pct=5.9223 surface_p_mae=0.01043 volume_p_mae=6.84264 wall_shear_mae=0.05729 cases=34
+
+=== test_surface mode=weight_noise_mirror_res_avg resolutions=[32768, 40960, 49152, 57344, 65536, 81920, 98304, 131072] mirror=True K=5 antithetic=True K_eff=10 sigma=0.0005 calibration=True ===
+  [rank 0] test_surface/weight_noise_mirror_res_avg run_11 (1/7): n_passes=160 forwards=37400 forward=94.1s perturb=0.2s io=2230.6s total=2369.8s
+  [rank 4] test_surface/weight_noise_mirror_res_avg run_24 (1/6): n_passes=160 forwards=37440 forward=93.4s perturb=0.2s io=2241.2s total=2383.0s
+  [rank 3] test_surface/weight_noise_mirror_res_avg run_20 (1/6): n_passes=160 forwards=38880 forward=97.1s perturb=0.2s io=2343.8s total=2485.0s
+  [rank 5] test_surface/weight_noise_mirror_res_avg run_26 (1/6): n_passes=160 forwards=40020 forward=93.8s perturb=0.2s io=2436.8s total=2578.4s
+  [rank 2] test_surface/weight_noise_mirror_res_avg run_19 (1/6): n_passes=160 forwards=40500 forward=102.5s perturb=0.2s io=2443.4s total=2593.3s
+  [rank 7] test_surface/weight_noise_mirror_res_avg run_41 (1/6): n_passes=160 forwards=40780 forward=96.5s perturb=0.2s io=2478.3s total=2620.0s
+  [rank 1] test_surface/weight_noise_mirror_res_avg run_12 (1/7): n_passes=160 forwards=42440 forward=101.0s perturb=0.2s io=2608.0s total=2758.3s
+  [rank 6] test_surface/weight_noise_mirror_res_avg run_29 (1/6): n_passes=160 forwards=44180 forward=103.7s perturb=0.2s io=2695.0s total=2847.2s
+  [rank 4] test_surface/weight_noise_mirror_res_avg run_127 (2/6): n_passes=160 forwards=38360 forward=95.7s perturb=0.2s io=2293.6s total=2436.3s
+  [rank 3] test_surface/weight_noise_mirror_res_avg run_124 (2/6): n_passes=160 forwards=40280 forward=101.1s perturb=0.2s io=2454.4s total=2601.9s
+  [rank 1] test_surface/weight_noise_mirror_res_avg run_59 (2/7): n_passes=160 forwards=38540 forward=91.5s perturb=0.2s io=2319.5s total=2454.8s
+  [rank 0] test_surface/weight_noise_mirror_res_avg run_55 (2/7): n_passes=160 forwards=44140 forward=110.8s perturb=0.2s io=2696.8s total=2856.0s
+  [rank 6] test_surface/weight_noise_mirror_res_avg run_142 (2/6): n_passes=160 forwards=39320 forward=93.0s perturb=0.2s io=2415.9s total=2554.6s
+  [rank 2] test_surface/weight_noise_mirror_res_avg run_108 (2/6): n_passes=160 forwards=43940 forward=111.2s perturb=0.2s io=2681.4s total=2842.7s
+  [rank 5] test_surface/weight_noise_mirror_res_avg run_133 (2/6): n_passes=160 forwards=45200 forward=106.4s perturb=0.2s io=2773.0s total=2930.0s
+  [rank 7] test_surface/weight_noise_mirror_res_avg run_158 (2/6): n_passes=160 forwards=45260 forward=107.8s perturb=0.2s io=2780.2s total=2937.0s
+  [rank 3] test_surface/weight_noise_mirror_res_avg run_188 (3/6): n_passes=160 forwards=38000 forward=95.9s perturb=0.2s io=2295.6s total=2434.7s
+  [rank 4] test_surface/weight_noise_mirror_res_avg run_197 (3/6): n_passes=160 forwards=43380 forward=108.8s perturb=0.2s io=2641.8s total=2802.8s
+  [rank 0] test_surface/weight_noise_mirror_res_avg run_173 (3/7): n_passes=160 forwards=38360 forward=96.2s perturb=0.2s io=2292.2s total=2432.2s
+  [rank 1] test_surface/weight_noise_mirror_res_avg run_180 (3/7): n_passes=160 forwards=39300 forward=93.9s perturb=0.2s io=2360.2s total=2498.4s
+  [rank 5] test_surface/weight_noise_mirror_res_avg run_199 (3/6): n_passes=160 forwards=38360 forward=90.1s perturb=0.2s io=2316.2s total=2450.8s
+  [rank 2] test_surface/weight_noise_mirror_res_avg run_187 (3/6): n_passes=160 forwards=40820 forward=103.3s perturb=0.2s io=2447.3s total=2597.6s
+  [rank 7] test_surface/weight_noise_mirror_res_avg run_205 (3/6): n_passes=160 forwards=39200 forward=93.2s perturb=0.2s io=2353.5s total=2490.9s
+  [rank 6] test_surface/weight_noise_mirror_res_avg run_203 (3/6): n_passes=160 forwards=45560 forward=107.4s perturb=0.2s io=2789.9s total=2946.4s
+  [rank 3] test_surface/weight_noise_mirror_res_avg run_215 (4/6): n_passes=160 forwards=36880 forward=92.4s perturb=0.2s io=2192.0s total=2326.4s
+  [rank 0] test_surface/weight_noise_mirror_res_avg run_207 (4/7): n_passes=160 forwards=37620 forward=95.2s perturb=0.2s io=2262.7s total=2400.6s
+  [rank 7] test_surface/weight_noise_mirror_res_avg run_263 (4/6): n_passes=160 forwards=35740 forward=85.1s perturb=0.2s io=2138.0s total=2264.2s
+  [rank 4] test_surface/weight_noise_mirror_res_avg run_222 (4/6): n_passes=160 forwards=42660 forward=107.1s perturb=0.2s io=2618.2s total=2776.8s
+  [rank 1] test_surface/weight_noise_mirror_res_avg run_208 (4/7): n_passes=160 forwards=42860 forward=102.6s perturb=0.2s io=2629.6s total=2779.0s
+  [rank 2] test_surface/weight_noise_mirror_res_avg run_210 (4/6): n_passes=160 forwards=41880 forward=107.1s perturb=0.2s io=2542.4s total=2697.6s
+  [rank 5] test_surface/weight_noise_mirror_res_avg run_226 (4/6): n_passes=160 forwards=45800 forward=107.8s perturb=0.2s io=2794.2s total=2951.7s
+  [rank 6] test_surface/weight_noise_mirror_res_avg run_258 (4/6): n_passes=160 forwards=42460 forward=99.8s perturb=0.2s io=2559.0s total=2705.6s
+  [rank 3] test_surface/weight_noise_mirror_res_avg run_322 (5/6): n_passes=160 forwards=40820 forward=103.0s perturb=0.2s io=2474.3s total=2622.6s
+  [rank 0] test_surface/weight_noise_mirror_res_avg run_280 (5/7): n_passes=160 forwards=42260 forward=106.1s perturb=0.2s io=2558.0s total=2710.7s
+  [rank 7] test_surface/weight_noise_mirror_res_avg run_363 (5/6): n_passes=160 forwards=39040 forward=93.3s perturb=0.2s io=2350.3s total=2487.1s
+  [rank 4] test_surface/weight_noise_mirror_res_avg run_337 (5/6): n_passes=160 forwards=40200 forward=101.3s perturb=0.2s io=2432.9s total=2584.3s
+  [rank 1] test_surface/weight_noise_mirror_res_avg run_284 (5/7): n_passes=160 forwards=40260 forward=96.8s perturb=0.2s io=2466.1s total=2608.5s
+  [rank 2] test_surface/weight_noise_mirror_res_avg run_290 (5/6): n_passes=160 forwards=39800 forward=101.3s perturb=0.2s io=2407.2s total=2555.0s
+  [rank 5] test_surface/weight_noise_mirror_res_avg run_350 (5/6): n_passes=160 forwards=40620 forward=95.4s perturb=0.2s io=2459.8s total=2601.3s
+  [rank 6] test_surface/weight_noise_mirror_res_avg run_354 (5/6): n_passes=160 forwards=40140 forward=94.8s perturb=0.2s io=2434.9s total=2575.0s
+  [rank 3] test_surface/weight_noise_mirror_res_avg run_405 (6/6): n_passes=160 forwards=42300 forward=107.1s perturb=0.2s io=2567.6s total=2721.7s
+[rank 3] test_surface/weight_noise_mirror_res_avg complete: 6 cases in 15192.2s (forward=596.5s perturb=1.1s io=14327.6s n_forwards=237160)
+  [rank 0] test_surface/weight_noise_mirror_res_avg run_372 (6/7): n_passes=160 forwards=38540 forward=97.9s perturb=0.2s io=2310.5s total=2452.5s
+  [rank 7] test_surface/weight_noise_mirror_res_avg run_429 (6/6): n_passes=160 forwards=41000 forward=97.7s perturb=0.2s io=2474.2s total=2617.2s
+[rank 7] test_surface/weight_noise_mirror_res_avg complete: 6 cases in 15416.3s (forward=573.5s perturb=1.1s io=14574.5s n_forwards=241020)
+  [rank 4] test_surface/weight_noise_mirror_res_avg run_410 (6/6): n_passes=160 forwards=41120 forward=104.1s perturb=0.2s io=2496.3s total=2650.5s
+[rank 4] test_surface/weight_noise_mirror_res_avg complete: 6 cases in 15633.8s (forward=610.3s perturb=1.2s io=14724.1s n_forwards=243160)
+  [rank 1] test_surface/weight_noise_mirror_res_avg run_382 (6/7): n_passes=160 forwards=39760 forward=95.1s perturb=0.2s io=2396.1s total=2535.3s
+  [rank 2] test_surface/weight_noise_mirror_res_avg run_387 (6/6): n_passes=160 forwards=38160 forward=97.0s perturb=0.2s io=2264.5s total=2406.0s
+[rank 2] test_surface/weight_noise_mirror_res_avg complete: 6 cases in 15692.3s (forward=622.5s perturb=1.2s io=14786.2s n_forwards=245100)
+  [rank 5] test_surface/weight_noise_mirror_res_avg run_424 (6/6): n_passes=160 forwards=38720 forward=91.0s perturb=0.2s io=2338.2s total=2473.6s
+[rank 5] test_surface/weight_noise_mirror_res_avg complete: 6 cases in 15985.8s (forward=584.5s perturb=1.1s io=15118.3s n_forwards=248720)
+  [rank 6] test_surface/weight_noise_mirror_res_avg run_428 (6/6): n_passes=160 forwards=40040 forward=94.3s perturb=0.2s io=2424.4s total=2563.8s
+[rank 6] test_surface/weight_noise_mirror_res_avg complete: 6 cases in 16192.6s (forward=593.0s perturb=1.1s io=15319.2s n_forwards=251700)
+  [rank 0] test_surface/weight_noise_mirror_res_avg run_436 (7/7): n_passes=160 forwards=41460 forward=102.7s perturb=0.2s io=2485.5s total=2633.3s
+[rank 0] test_surface/weight_noise_mirror_res_avg complete: 7 cases in 17855.1s (forward=703.0s perturb=1.3s io=16836.4s n_forwards=279780)
+  [rank 1] test_surface/weight_noise_mirror_res_avg run_472 (7/7): n_passes=160 forwards=38100 forward=89.5s perturb=0.2s io=2315.1s total=2446.9s
+[rank 1] test_surface/weight_noise_mirror_res_avg complete: 7 cases in 18081.2s (forward=670.4s perturb=1.2s io=17094.6s n_forwards=281260)
+  total test_surface/weight_noise_mirror_res_avg: 18081.3s
+test_surface/weight_noise_mirror_res_avg loss=0.00411 abupt_axis_rel_l2_pct=5.7686 surface_p_mae=0.01046 volume_p_mae=6.78924 wall_shear_mae=0.05625 cases=50
+
+=== H300 calibration (fit on val, mode=weight_noise_mirror_res_avg) ===
+  surface[cp    ]  alpha=+0.994806 beta=-0.002413
+  surface[tau_x ]  alpha=+0.994154 beta=-0.007543
+  surface[tau_y ]  alpha=+0.993812 beta=-0.000236
+  surface[tau_z ]  alpha=+0.991680 beta=-0.000181
+  volume[volume_pressure]  alpha=+0.999754 beta=-0.818511
+  val  (raw -> cal)  abupt 5.9223 -> 5.8985
+  test (raw -> cal)  abupt 5.7686 -> 5.7383
+
+=== Summary (rel_l2_pct lower-is-better) ===
+
+[val_surface]
+  metric                               weight_noise_mirror_res_avg
+  abupt_axis_mean_rel_l2_pct                           5.9223
+  surface_pressure_rel_l2_pct                          3.9134
+  wall_shear_rel_l2_pct                                6.7179
+  wall_shear_x_rel_l2_pct                              5.8826
+  wall_shear_y_rel_l2_pct                              7.2700
+  wall_shear_z_rel_l2_pct                              9.0855
+  volume_pressure_rel_l2_pct                           3.4598
+  --- calibrated (alpha,beta fit on val) ---
+  abupt_axis_mean_rel_l2_pct                           5.8985
+  surface_pressure_rel_l2_pct                          3.8897
+  wall_shear_rel_l2_pct                                6.6918
+  wall_shear_x_rel_l2_pct                              5.8600
+  wall_shear_y_rel_l2_pct                              7.2445
+  wall_shear_z_rel_l2_pct                              9.0463
+  volume_pressure_rel_l2_pct                           3.4519
+
+[test_surface]
+  metric                               weight_noise_mirror_res_avg
+  abupt_axis_mean_rel_l2_pct                           5.7686
+  surface_pressure_rel_l2_pct                          3.6466
+  wall_shear_rel_l2_pct                                6.6738
+  wall_shear_x_rel_l2_pct                              5.9334
+  wall_shear_y_rel_l2_pct                              7.2245
+  wall_shear_z_rel_l2_pct                              8.6613
+  volume_pressure_rel_l2_pct                           3.3772
+  --- calibrated (alpha,beta fit on val) ---
+  abupt_axis_mean_rel_l2_pct                           5.7383
+  surface_pressure_rel_l2_pct                          3.6153
+  wall_shear_rel_l2_pct                                6.6381
+  wall_shear_x_rel_l2_pct                              5.9027
+  wall_shear_y_rel_l2_pct                              7.1824
+  wall_shear_z_rel_l2_pct                              8.6158
+  volume_pressure_rel_l2_pct                           3.3753
+wandb: updating run metadata
+wandb: uploading history steps 1-2, summary, console lines 20-68
+wandb: 
+wandb: Run history:
+wandb:                          full_val_extra/weight_noise_mirror_res_avg/loss ▁
+wandb:                       full_val_extra/weight_noise_mirror_res_avg/seconds ▁
+wandb:      full_val_primary/weight_noise_mirror_res_avg/abupt_axis_mean_rel_l2 ▁
+wandb:  full_val_primary/weight_noise_mirror_res_avg/abupt_axis_mean_rel_l2_pct ▁
+wandb:        full_val_primary/weight_noise_mirror_res_avg/surface_pressure_mae ▁
+wandb: full_val_primary/weight_noise_mirror_res_avg/surface_pressure_rel_l2_pct ▁
+wandb:         full_val_primary/weight_noise_mirror_res_avg/volume_pressure_mae ▁
+wandb:  full_val_primary/weight_noise_mirror_res_avg/volume_pressure_rel_l2_pct ▁
+wandb:              full_val_primary/weight_noise_mirror_res_avg/wall_shear_mae ▁
+wandb:       full_val_primary/weight_noise_mirror_res_avg/wall_shear_rel_l2_pct ▁
+wandb:                                                                      +46 ...
+wandb: 
+wandb: Run summary:
+wandb:              calibration/weight_noise_mirror_res_avg/alpha_cp 0.99481
+wandb:           calibration/weight_noise_mirror_res_avg/alpha_tau_x 0.99415
+wandb:           calibration/weight_noise_mirror_res_avg/alpha_tau_y 0.99381
+wandb:           calibration/weight_noise_mirror_res_avg/alpha_tau_z 0.99168
+wandb: calibration/weight_noise_mirror_res_avg/alpha_volume_pressure 0.99975
+wandb:               calibration/weight_noise_mirror_res_avg/beta_cp -0.00241
+wandb:            calibration/weight_noise_mirror_res_avg/beta_tau_x -0.00754
+wandb:            calibration/weight_noise_mirror_res_avg/beta_tau_y -0.00024
+wandb:            calibration/weight_noise_mirror_res_avg/beta_tau_z -0.00018
+wandb:  calibration/weight_noise_mirror_res_avg/beta_volume_pressure -0.81851
+wandb:                                                          +144 ...
+wandb: 
+wandb: 🚀 View run thorfinn/h352-armB-late10-tta-cal at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/fgao25bk
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260601_195033-fgao25bk/logs

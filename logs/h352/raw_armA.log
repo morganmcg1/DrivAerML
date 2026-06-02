@@ -1,0 +1,7 @@
+H352 raw eval: label=armA_uniform_all checkpoint=outputs/h352/swa_armA.pt splits=val,test world=1
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+Loaded checkpoint epoch=16 source=swa_uniform_all missing=0 unexpected=0
+  SWA provenance: {'mode': 'uniform_all', 'last_n': None, 'n_snapshots': 54, 'step_range': [100, 5400], 'snapshot_steps': [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000, 4100, 4200, 4300, 4400, 4500, 4600, 4700, 4800, 4900, 5000, 5100, 5200, 5300, 5400], 'snapshot_dir': 'outputs/h352/swa_snapshots_v2'}
+  val_surface: abupt_pct=6.0126
+  test_surface: abupt_pct=5.8588
+Appended 2 row(s) to logs/h352/raw_gate.jsonl

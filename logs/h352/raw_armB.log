@@ -1,0 +1,7 @@
+H352 raw eval: label=armB_last_10 checkpoint=outputs/h352/swa_armB.pt splits=val,test world=1
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+Loaded checkpoint epoch=16 source=swa_last_n missing=0 unexpected=0
+  SWA provenance: {'mode': 'last_n', 'last_n': 10, 'n_snapshots': 10, 'step_range': [4500, 5400], 'snapshot_steps': [4500, 4600, 4700, 4800, 4900, 5000, 5100, 5200, 5300, 5400], 'snapshot_dir': 'outputs/h352/swa_snapshots_v2'}
+  val_surface: abupt_pct=6.0104
+  test_surface: abupt_pct=5.8569
+Appended 2 row(s) to logs/h352/raw_gate.jsonl

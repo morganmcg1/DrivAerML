@@ -1,0 +1,6 @@
+H352 raw eval: label=ep16_ema checkpoint=outputs/h352/run-5cy70kau/checkpoint_ep16.pt splits=val,test world=1
+DrivAerML: train=87064 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+Loaded checkpoint epoch=16 source=ema missing=0 unexpected=0
+  val_surface: abupt_pct=6.0117
+  test_surface: abupt_pct=5.8582
+Appended 2 row(s) to logs/h352/raw_gate.jsonl

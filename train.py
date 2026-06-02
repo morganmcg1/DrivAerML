@@ -145,6 +145,11 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H352: Stochastic Weight Averaging (Izmailov et al., 2018)
+    save_swa_checkpoints: bool = False
+    swa_save_interval: int = 100
+    swa_save_from_step: int = 6000
+    swa_output_dir: str = ""
     debug: bool = False
 
 
@@ -271,6 +276,32 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "save_swa_checkpoints": (
+            "H352: save fine-grained raw-weight snapshots during the "
+            "cosine-tail for Stochastic Weight Averaging (Izmailov et al., "
+            "2018, arxiv:1803.05407). When enabled, the trainer writes "
+            "base_model.state_dict() to <swa_output_dir>/swa_step_<step>.pt "
+            "every --swa-save-interval steps from --swa-save-from-step "
+            "onward. Snapshots are written by rank 0 only; the raw "
+            "(non-EMA) weights are saved so that a downstream uniform "
+            "average matches the Izmailov SWA definition. Disabled by "
+            "default."
+        ),
+        "swa_save_interval": (
+            "H352: number of training steps between SWA snapshots. "
+            "Default 100 covers ~30 snapshots per cosine-tail epoch."
+        ),
+        "swa_save_from_step": (
+            "H352: global training step at which SWA snapshot saving "
+            "begins. Designed to skip the warmup portion of the resumed "
+            "cosine schedule and cover only the lowest-LR oscillation "
+            "region. Default 6000."
+        ),
+        "swa_output_dir": (
+            "H352: directory for SWA snapshot files. If empty, snapshots "
+            "are written to <output_dir>/run-<id>/swa_snapshots/. Created "
+            "automatically. Snapshot files are named swa_step_<step>.pt."
         ),
     }
     for field in fields(Config):
@@ -1054,6 +1085,21 @@ def main(argv: Iterable[str] | None = None) -> None:
         with config_path.open("w") as f:
             yaml.safe_dump(asdict(config), f)
 
+        swa_snapshot_dir: Path | None = None
+        if config.save_swa_checkpoints:
+            swa_snapshot_dir = (
+                Path(config.swa_output_dir)
+                if config.swa_output_dir
+                else output_dir / "swa_snapshots"
+            )
+            if state.is_main:
+                swa_snapshot_dir.mkdir(parents=True, exist_ok=True)
+                print(
+                    f"H352 SWA snapshot saving enabled: dir={swa_snapshot_dir} "
+                    f"from_step={config.swa_save_from_step} "
+                    f"interval={config.swa_save_interval}"
+                )
+
         if state.is_main:
             ss = getattr(base_model, "surface_string_sep", None)
             init_sigmas_for_log = (
@@ -1081,6 +1127,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["mirror_augmentation"] = config.mirror_augmentation
             wandb.summary["epochs_already_done"] = config.epochs_already_done
             wandb.summary["save_every_epoch"] = config.save_every_epoch
+            wandb.summary["h352/save_swa_checkpoints"] = config.save_swa_checkpoints
+            wandb.summary["h352/swa_save_interval"] = config.swa_save_interval
+            wandb.summary["h352/swa_save_from_step"] = config.swa_save_from_step
+            if swa_snapshot_dir is not None:
+                wandb.summary["h352/swa_snapshot_dir"] = str(swa_snapshot_dir)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1314,6 +1365,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                         optimizer.step()
                         if ema is not None:
                             ema.update(base_model)
+                        if (
+                            swa_snapshot_dir is not None
+                            and state.is_main
+                            and global_step >= config.swa_save_from_step
+                            and global_step % config.swa_save_interval == 0
+                        ):
+                            snapshot_path = swa_snapshot_dir / f"swa_step_{global_step}.pt"
+                            torch.save(
+                                {k: v.detach().cpu() for k, v in base_model.state_dict().items()},
+                                snapshot_path,
+                            )
+                            train_log["h352/swa_snapshot_saved"] = 1.0
+                            train_log["h352/swa_snapshot_step"] = float(global_step)
                         weight_metrics = (
                             collect_weight_metrics(
                                 model,
