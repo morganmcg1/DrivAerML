@@ -1,3 +1,26 @@
+## 2026-06-02 06:00Z — PR #1550: H358 Native tangent-basis residual output head (Morgan P2) — CLOSED (boundary-null)
+
+- Branch: frieren/h358-tangent-basis-output-head
+- **Hypothesis**: Replace single-head WSS output with `head_phys` (tangent-basis enforcement: τ·n=0 by construction) + `head_corr` (small residual). Physics-correct output basis should produce cleaner WSS_z gradients and improve test_WSS_z.
+- **Implementation**: frieren executed cleanly. LayerNorm-gated head_corr. Phase 1 (3 cosine-tail epochs from H336 EP13). Phase 2 K=5 antithetic Student-t ν=4 × 8-res × mirror TTA + per-channel affine cal.
+
+| Metric | H358 final | H342 SOTA gate | Δ | Strict pass? |
+|---|---:|---:|---:|:---:|
+| val_abupt_calibrated | **5.8963%** | <5.8962 | +0.01bp | ❌ FAIL |
+| test_abupt_calibrated | **5.7366%** | <5.7357 | +0.09bp | ❌ FAIL |
+| test_WSS_z_cal | 8.6154% | (research target) | +0.03bp | (slight regression) |
+| test_VP_cal | 3.3728% | ≤3.421 | **−0.23bp** | ✓ (modest improvement) |
+| test_SP_cal | 3.6125% | ≤3.577 | +0.01bp | ~tied |
+| Phase 1 val_raw EP16 | 6.0061% | — | (~5bp behind H336 raw 6.0118) | — |
+
+- **W&B runs**: `cglev6uu` (P1 rank0), `sdjphbl1` (P2 TTA val), `9non8q7j` (P2 cal val), `6fcumd8m` (P2 TTA+cal test), Phase 2 wall ~6h48m
+- **Finding O** (15th closed axis): `tangent-basis-output-head-boundary-null` — Output mathematically enforces τ·n=0 as physics-correct constraint. Phase 1 val_raw 5bp behind H336 raw. Post-TTA+cal sits within 0.1bp of H342 gate (noise floor) on primary metric, with WSS_z marginally regressed. The tangent-basis enforcement is physics-correct but did NOT move the WSS_z floor; the model's existing parameterization already approximates τ·n≈0 implicitly. **Output-basis is NOT the bottleneck.**
+- **Mechanism interpretation**: Per the 14-axis pattern, the WSS_z floor is upstream of the output stage. Closing H358 confirms the same conclusion for output-basis as H361 did for loss-geometry and H363 did for decoder-capacity. **The 3 Morgan P-tier WSS architecture ideas (BL-derivative H355, tangent-basis H358, Physics-regime MoE H363) have ALL closed null — decisive falsification of the decoder/output hypothesis family.**
+- **Implication**: The live attack surface is exclusively encoder/representation modifications. H367 frieren picks up immediately (anisotropic tangent-frame attention — uses the same tangent-plane intuition but at the ENCODER level, the right place per the discriminator pattern).
+- **Cal-yield collapse pattern (replicated)**: H358 raw 5.9191 → cal 5.8963 (~2.3bp yield), much lower than H342's 7-8bp yield. Same pattern as alphonse H356 (~0bp) and thorfinn H352 (2.4bp). Confirms `cal-yield-collapses-on-averaged-outputs` micro-finding.
+
+---
+
 ## 2026-06-02 05:30Z — PR #1556: H363 Physics-regime mixture-of-experts surface decoder (Morgan P4) — CLOSED (null)
 
 - Branch: tanjiro/h363-regime-moe-decoder
