@@ -32,6 +32,13 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+from case_cdf_sampler import (
+    CaseCDFState,
+    DistributedCaseCDFSampler,
+    case_to_view_weights,
+    compute_case_weights,
+    parse_channel_spec,
+)
 from data import DrivAerMLSurfaceDataset
 from model import SurfaceTransolver
 from trainer_runtime import (
@@ -145,6 +152,13 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H378: online hard-case mining (case-CDF reweighted sampling)
+    case_cdf_sampler_alpha: float = 0.0
+    case_cdf_sampler_init: str = "uniform"
+    case_cdf_sampler_channels: str = "wss_z"
+    case_cdf_sampler_eps: float = 1e-6
+    case_cdf_sampler_clip: float = 15.0
+    case_cdf_sampler_seed: int = 1378
     debug: bool = False
 
 
@@ -271,6 +285,45 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "case_cdf_sampler_alpha": (
+            "H378: enable case-CDF reweighted sampling for online hard-case "
+            "mining. 0.0 = uniform sampling (baseline). 1.0 = linear "
+            "priority (Arm A). 2.0 = squared priority (Arm B, aggressive). "
+            "Per-case sampling weights w_i are computed from per-case "
+            "MAE_i on --case-cdf-sampler-channels and applied to the next "
+            "epoch's WeightedRandomSampler. With drop-last DDP semantics, "
+            "the per-rank batch count matches the baseline DistributedSampler."
+        ),
+        "case_cdf_sampler_init": (
+            "H378: how to seed sampler weights for the first epoch. "
+            "'uniform' = start with uniform per-case weights (cheap; lets "
+            "the first epoch be a baseline-style EP14, with mining "
+            "kicking in for EP15+). 'prefix-eval' = run one eval-style "
+            "forward pass over the train set before the first training "
+            "epoch and seed weights from that per-case MAE (more faithful "
+            "to the hypothesis when only 3 epochs remain)."
+        ),
+        "case_cdf_sampler_channels": (
+            "H378: comma-separated list of channels used to compute "
+            "per-case MAE for sampling priority. Supported: 'wss_z' "
+            "(tau_z, the H378 default), 'wss_y', 'wss_x', 'surface_pressure', "
+            "'volume_pressure'. Multi-channel specs average the per-channel "
+            "MAE per case before exponentiation."
+        ),
+        "case_cdf_sampler_eps": (
+            "H378: numerical floor added to MAE before exponentiation, "
+            "so zero-MAE cases remain samplable. Default 1e-6."
+        ),
+        "case_cdf_sampler_clip": (
+            "H378: soft cap on per-case weight expressed as a multiple of "
+            "the mean raw weight. Bounds ESS collapse when one case "
+            "dominates. Set to <=0 to disable. Default 15.0."
+        ),
+        "case_cdf_sampler_seed": (
+            "H378: base seed for the multinomial RNG used to draw view "
+            "indices each epoch. The actual per-epoch seed is "
+            "seed + 100003*epoch."
         ),
     }
     for field in fields(Config):
@@ -442,7 +495,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    return_predictions: bool = False,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor] | None]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -467,13 +521,104 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    extras: dict[str, torch.Tensor] | None = None
+    if return_predictions:
+        extras = {
+            "surface_pred_norm": out["surface_preds"].detach(),
+            "surface_target_norm": surface_target.detach(),
+            "volume_pred_norm": out["volume_preds"].detach(),
+            "volume_target_norm": volume_target.detach(),
+        }
+    return loss, metrics, extras
+
+
+def prefix_eval_fill_case_mae(
+    *,
+    model: nn.Module,
+    base_model: nn.Module,
+    train_case_ids: list[str],
+    config: "Config",
+    transform: TargetTransform,
+    device: torch.device,
+    state,
+    case_cdf_state: CaseCDFState,
+) -> None:
+    """H378: run one eval-style forward pass over the training cases and
+    fill ``case_cdf_state`` with per-case |pred - target| in normalized
+    space. Used to seed the case-CDF sampler before the first training
+    epoch (init mode 'prefix-eval').
+
+    Uses ``eval_chunk`` deterministic strided sampling so every training
+    point contributes to MAE exactly once, distributed across DDP ranks.
+    Returns without modifying model state.
+    """
+
+    from data.loader import DEFAULT_MANIFEST, DrivAerMLCaseStore
+
+    store = DrivAerMLCaseStore(
+        manifest_path=config.manifest,
+        root=config.data_root or None,
+    )
+    eval_surface = config.eval_surface_points or config.train_surface_points
+    eval_volume = config.eval_volume_points or config.train_volume_points
+    train_eval_ds = DrivAerMLSurfaceDataset(
+        train_case_ids,
+        store=store,
+        max_surface_points=eval_surface,
+        max_volume_points=eval_volume,
+        sampling_mode="eval_chunk",
+    )
+    sampler = None
+    if state.enabled:
+        from trainer_runtime import StridedDistributedSampler
+
+        sampler = StridedDistributedSampler(
+            train_eval_ds,
+            num_replicas=state.world_size,
+            rank=state.rank,
+        )
+    train_eval_loader = DataLoader(
+        train_eval_ds,
+        batch_size=config.batch_size,
+        shuffle=False,
+        sampler=sampler,
+        **loader_kwargs(config),
+    )
+    was_training = model.training
+    model.eval()
+    eval_module = unwrap_model(model)
+    try:
+        with torch.no_grad():
+            for batch in train_eval_loader:
+                batch = batch.to(device)
+                surface_target_norm = transform.apply_surface(batch.surface_y)
+                volume_target_norm = transform.apply_volume(batch.volume_y)
+                with autocast_context(device, config.amp_mode):
+                    out = eval_module(
+                        surface_x=batch.surface_x,
+                        surface_mask=batch.surface_mask,
+                        volume_x=batch.volume_x,
+                        volume_mask=batch.volume_mask,
+                    )
+                case_cdf_state.accumulate(
+                    case_ids=batch.case_ids,
+                    surface_pred_norm=out["surface_preds"],
+                    surface_target_norm=surface_target_norm,
+                    surface_mask=batch.surface_mask,
+                    volume_pred_norm=out["volume_preds"],
+                    volume_target_norm=volume_target_norm,
+                    volume_mask=batch.volume_mask,
+                )
+    finally:
+        if was_training:
+            model.train()
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1082,6 +1227,104 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["epochs_already_done"] = config.epochs_already_done
             wandb.summary["save_every_epoch"] = config.save_every_epoch
 
+        # H378: optional online case-CDF reweighted sampling. Active only
+        # when --case-cdf-sampler-alpha > 0; otherwise the existing
+        # DistributedSampler path is preserved unchanged.
+        case_cdf_state: CaseCDFState | None = None
+        case_cdf_sampler: DistributedCaseCDFSampler | None = None
+        if config.case_cdf_sampler_alpha > 0.0:
+            train_ds_handle = train_loader.dataset
+            case_ids_list = list(train_ds_handle.case_ids)
+            cdf_channels = parse_channel_spec(config.case_cdf_sampler_channels)
+            case_cdf_state = CaseCDFState.init(
+                case_ids=case_ids_list,
+                channels=cdf_channels,
+                device=device,
+            )
+            init_mode = config.case_cdf_sampler_init.lower()
+            if init_mode == "prefix-eval":
+                if state.is_main:
+                    print(
+                        f"H378: prefix-eval seeding sampler from per-case MAE "
+                        f"on channels={config.case_cdf_sampler_channels}"
+                    )
+                prefix_eval_fill_case_mae(
+                    model=model,
+                    base_model=base_model,
+                    train_case_ids=case_ids_list,
+                    config=config,
+                    transform=transform,
+                    device=device,
+                    state=state,
+                    case_cdf_state=case_cdf_state,
+                )
+                case_cdf_state.all_reduce()
+                init_mae = case_cdf_state.per_case_mae()
+            elif init_mode == "uniform":
+                init_mae = torch.zeros(
+                    len(case_ids_list), device=device, dtype=torch.float64
+                )
+            else:
+                raise ValueError(
+                    f"Unknown --case-cdf-sampler-init '{config.case_cdf_sampler_init}'. "
+                    f"Supported: 'uniform', 'prefix-eval'."
+                )
+            case_weights, init_diag = compute_case_weights(
+                init_mae,
+                alpha=config.case_cdf_sampler_alpha if init_mode == "prefix-eval" else 0.0,
+                eps=config.case_cdf_sampler_eps,
+                clip_factor=config.case_cdf_sampler_clip,
+            )
+            view_weights = case_to_view_weights(
+                case_weights,
+                case_cdf_state.case_id_to_idx,
+                train_ds_handle.views,
+            )
+            world_size = state.world_size if state.enabled else 1
+            rank = state.rank if state.enabled else 0
+            case_cdf_sampler = DistributedCaseCDFSampler(
+                num_samples_total=len(train_ds_handle.views),
+                world_size=world_size,
+                rank=rank,
+                seed=config.case_cdf_sampler_seed,
+                view_weights=view_weights,
+            )
+            train_loader = DataLoader(
+                train_ds_handle,
+                batch_size=config.batch_size,
+                shuffle=False,
+                sampler=case_cdf_sampler,
+                drop_last=True,
+                **loader_kwargs(config),
+            )
+            # Reset accumulator: prefix-eval data was for sampler init only;
+            # actual EP14 training-time per-case MAE is a fresh accumulation.
+            case_cdf_state.reset()
+            if state.is_main:
+                init_log = {
+                    "case_cdf/init_mode_uniform": float(init_mode == "uniform"),
+                    "case_cdf/init_mode_prefix_eval": float(init_mode == "prefix-eval"),
+                    "case_cdf/alpha": config.case_cdf_sampler_alpha,
+                    "case_cdf/eps": config.case_cdf_sampler_eps,
+                    "case_cdf/clip_factor": config.case_cdf_sampler_clip,
+                    "case_cdf/num_views_total": float(len(train_ds_handle.views)),
+                    "case_cdf/per_rank_views_per_epoch": float(len(case_cdf_sampler)),
+                    **{f"case_cdf/init/{k.split('/', 1)[-1]}": v for k, v in init_diag.items()},
+                }
+                wandb.summary["case_cdf/alpha"] = config.case_cdf_sampler_alpha
+                wandb.summary["case_cdf/init_mode"] = init_mode
+                wandb.summary["case_cdf/channels"] = config.case_cdf_sampler_channels
+                wandb.summary["case_cdf/eps"] = config.case_cdf_sampler_eps
+                wandb.summary["case_cdf/clip_factor"] = config.case_cdf_sampler_clip
+                wandb.log(init_log)
+                print(
+                    f"H378: case-CDF sampler enabled "
+                    f"(alpha={config.case_cdf_sampler_alpha}, init={init_mode}, "
+                    f"channels={config.case_cdf_sampler_channels}, "
+                    f"ESS={init_diag['case_cdf/ess']:.1f}/"
+                    f"{int(init_diag['case_cdf/n_cases'])})"
+                )
+
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
         best_checkpoint_source = "ema" if ema is not None else "raw"
@@ -1110,6 +1353,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                     current_train_vol_points = desired_vol_points
             if isinstance(train_loader.sampler, DistributedSampler):
+                train_loader.sampler.set_epoch(epoch)
+            elif isinstance(train_loader.sampler, DistributedCaseCDFSampler):
                 train_loader.sampler.set_epoch(epoch)
             timeout_hit = distributed_any(
                 state,
@@ -1221,7 +1466,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
-                    loss, batch_loss_metrics = train_loss(
+                    loss, batch_loss_metrics, train_loss_extras = train_loss(
                         model,
                         batch,
                         transform,
@@ -1230,7 +1475,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        return_predictions=case_cdf_state is not None,
                     )
+                    if case_cdf_state is not None and train_loss_extras is not None:
+                        case_cdf_state.accumulate(
+                            case_ids=batch.case_ids,
+                            surface_pred_norm=train_loss_extras["surface_pred_norm"],
+                            surface_target_norm=train_loss_extras["surface_target_norm"],
+                            surface_mask=batch.surface_mask.to(device),
+                            volume_pred_norm=train_loss_extras["volume_pred_norm"],
+                            volume_target_norm=train_loss_extras["volume_target_norm"],
+                            volume_mask=batch.volume_mask.to(device),
+                        )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1375,6 +1631,40 @@ def main(argv: Iterable[str] | None = None) -> None:
                 or (timeout_hit and n_batches > 0)
             )
 
+            # H378: build the next-epoch case-CDF sampler from this epoch's
+            # per-case MAE accumulator, then reset for the next epoch.
+            case_cdf_epoch_log: dict[str, float] = {}
+            if case_cdf_state is not None and case_cdf_sampler is not None:
+                case_cdf_state.all_reduce()
+                per_case_mae = case_cdf_state.per_case_mae()
+                next_case_weights, weight_diag = compute_case_weights(
+                    per_case_mae,
+                    alpha=config.case_cdf_sampler_alpha,
+                    eps=config.case_cdf_sampler_eps,
+                    clip_factor=config.case_cdf_sampler_clip,
+                )
+                next_view_weights = case_to_view_weights(
+                    next_case_weights,
+                    case_cdf_state.case_id_to_idx,
+                    train_loader.dataset.views,
+                )
+                case_cdf_sampler.set_view_weights(next_view_weights)
+                if state.is_main:
+                    per_case_mae_cpu = per_case_mae.detach().cpu()
+                    case_cdf_epoch_log.update(weight_diag)
+                    case_cdf_epoch_log.update(
+                        {
+                            "case_cdf/mae_min": float(per_case_mae_cpu.min().item()),
+                            "case_cdf/mae_max": float(per_case_mae_cpu.max().item()),
+                            "case_cdf/mae_mean": float(per_case_mae_cpu.mean().item()),
+                            "case_cdf/mae_median": float(per_case_mae_cpu.median().item()),
+                            "case_cdf/n_cases_seen": float(
+                                (case_cdf_state.count.sum(dim=1) > 0).sum().item()
+                            ),
+                        }
+                    )
+                case_cdf_state.reset()
+
             log_metrics: dict[str, object] = {
                 "train/epoch_loss": epoch_train_loss,
                 "train/lr": scheduler.get_last_lr()[0],
@@ -1382,6 +1672,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
+            if case_cdf_epoch_log:
+                log_metrics.update(case_cdf_epoch_log)
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)
