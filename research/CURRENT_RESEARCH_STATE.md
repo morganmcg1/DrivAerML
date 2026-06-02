@@ -1,11 +1,61 @@
 # SENPAI Research State
 
-- **2026-06-02 00:35Z**
+- **2026-06-02 02:15Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 02:15Z checkpoint — H193 smoke FAIL @ weight=0.5 (EP1 WSS=14.00 vs target ≤7.50), HOLD main launch + re-smoke at weight=0.25; H192 EP14 6.696 closing on fleet leader; H189 EP21 VP=3.472 holds paper-tier; H191 stable
+
+### Fleet status (02:15Z, 4 active, zero idle GPUs)
+
+| Student | PR | Hyp | EP/State | val_WSS | val_ABU | val_VP | val_SP | Δ since 00:35Z |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| fern | #1535 | H191: Sharper WSD | **EP20** (16.7h) | 6.681 | 5.969 | 3.687 | 3.926 | WSS −0.006pp (stable); VP +0.004 (noise) |
+| nezuko | #1533 | H189: hidden_dim=640 | **EP21** (21.2h) | 6.703 | 5.915 | **3.472** | 3.843 | WSS −0.009pp (still descending); VP +0.005 (microvariance, paper-tier holds) |
+| frieren | #1541 | H192: τ_z=1.5 only | **EP14** (11.4h) | **6.696 ⭐** | **5.942** | **3.565** | 3.909 | WSS −0.027pp (strong descent!); ALL floors improved; closing fleet leader gap to 0.015pp |
+| tanjiro | #1554 | H193: WSS soft normal penalty w=0.5 | smoke EP1 done | **14.003 ❌** | 13.677 | 13.906 | 8.769 | SMOKE FAIL — penalty crowds out primary task at w=0.5 |
+
+### Key finding (02:15Z): H193 SMOKE FAIL at penalty weight=0.5 — HOLD main launch, re-smoke at w=0.25
+
+H193 smoke EP1 completed (47min, ~10,975 steps DDP8 across 8 ranks). EP1 val readings (rank0 `qixpxwtf` and consistent across all 8 ranks):
+
+| Metric | Smoke EP1 | Target | Floor (SOTA) | Status |
+|---|---:|---:|---:|---|
+| **val_WSS** | **14.003** | ≤ 7.50 | 6.443 | **BREACH +6.50pp** |
+| val_WSS_x | 12.600 | — | — | high |
+| val_WSS_y | 15.357 | — | — | high |
+| val_WSS_z | **17.756** | — | — | **worst axis** (penalty fights z-coupling) |
+| val_ABU | 13.677 | — | 5.844 | high (EP1) |
+| val_VP | 13.906 | — | 3.4415 | high (EP1) |
+| val_SP | 8.769 | — | 3.5187 | high (EP1) |
+| train/wss_normal_penalty | 0.034-0.043 | non-zero | — | ✓ firing (mechanism confirmed) |
+| train/loss | 0.14-0.20 | healthy | — | ✓ |
+
+**Interpretation:** Penalty IS implemented correctly (`train/wss_normal_penalty` non-zero and stable across 8 ranks), but at weight=0.5 the term dominates gradient at EP1 and the model can't simultaneously learn the vector field + satisfy tangent-basis constraint. WSS_z=17.756 (worst axis) suggests the penalty pushes predictions away from physically-meaningful z-component while per-channel heads haven't yet aligned. 14.00% is ~2× off the H183 EP1 trajectory (which lands ~7-8% with per-channel heads at EP1).
+
+**Action:** PR #1554 comment posted requesting student re-smoke at **weight=0.25** (single-axis halving, fast diagnostic). If EP1 lands 9-10%, proceed to w=0.1 or w=0.05. If still ≥12%, soft-tangent-basis mechanism is decisive negative at this scale and we move to hard tangent-basis output head (Morgan's preferred form, issue #1056 priority #2 native form).
+
+### Key finding (02:15Z): H192 strong descent continues, closing fleet leader
+
+H192 EP12→EP14: WSS 6.723 → 6.696 (−0.027pp), VP 3.588 → 3.565 (−0.023pp), ABU 5.965 → 5.942 (−0.023pp), SP 3.919 → 3.909 (−0.010pp). All metrics descending strongly past official EP10 gate. Gap to fleet WSS leader (H191 6.681) closed to 0.015pp. With 12.6h remaining in 24h budget, EP18-EP22 should determine if H192 takes fleet lead.
+
+### Key finding (02:15Z): H189 paper-tier VP still holds, microvariance only
+
+H189 EP19→EP21: WSS 6.712 → 6.703 (−0.009pp), VP 3.467 → 3.472 (+0.005, noise), SP 3.839 → 3.843 (+0.004, noise), ABU 5.917 → 5.915 (stable). VP holding at paper-tier (gap 0.030pp). EP30+ ETA ~07:00Z. Student session still silent — advisor will construct terminal SENPAI-RESULT from W&B at natural termination + manual test eval.
+
+### Key finding (02:15Z): H191 stable phase plateau confirmed — decay window still pending
+
+H191 EP18→EP20: WSS 6.687 → 6.681 (−0.006pp). Stable phase plateau confirmed; descent rate ~0.003pp/EP, consistent with H183 stable-phase trajectory. EP25-30 sharper-WSD decay window is still the hypothesis-defining test — need ≥0.10pp step-change descent at decay onset to validate the sharper-WSD mechanism.
+
+### Action plan (02:15Z)
+
+- **Next wake ~03:15Z** — catch H193 student response to re-smoke request (if launched ~02:30Z, EP1 ~03:15Z); also catch H192 EP15-16, H189 EP22-23, H191 EP21-22
+- **H189 nezuko monitoring:** continue to natural termination (EP30+, ~07:00Z ETA). Programme-tier VP candidate. Student session still silent (>19h); advisor will construct terminal SENPAI-RESULT from W&B + manual test eval if needed
+- **Strategic next-round (post-terminal):** BL DERIVATIVE DECODER PROBE (Morgan's #1 priority); compound H189 VP-deepening + H192 τ_z + H191 sharper-WSD if all three close terminal
+- **H193 escalation path:** If w=0.25 smoke also fails (EP1 ≥ 12%), soft tangent-basis is a decisive negative — pivot to hard tangent-basis output head (native form, Morgan's #2 priority issue #1056). The H358 student on the ddp8 branch is already exploring native tangent basis (#1550); we'd be the dl24 analog.
 
 ## 00:35Z checkpoint — H189 VP=3.467 PAPER-TIER (gap 0.026pp); H192 EP10 GATE PASS; H191 EP17 fleet WSS leader 6.678; H193 smoke healthy w/ penalty firing
 
