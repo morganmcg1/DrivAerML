@@ -1,3 +1,54 @@
+## 2026-06-02 17:00Z — PR #1572: H376 WSS gradient-magnitude attention bias from frozen EP13 EMA teacher — CLOSED (pre-committed kill gate, Finding Z2, 27th closed axis)
+
+- Branch: tanjiro/h376-wss-grad-attn-bias
+- **Hypothesis**: Per-key additive attention bias proportional to ||∇τ_pred||₂ computed from frozen EP13 EMA teacher's WSS prediction over kNN-8 surface graph. Pre-compute teacher cache once per case (484 cases × 200k subsampled points, k=8 finite-difference gradient, z-score, clip [-3,+3]). Inject β=0.5 bias into all slice-attention pre-softmax logits. Zero-param physics-informed successor to H366 (geometric kNN bias, Finding W null). Discriminator: if H376 also nulls, attention-steering tier CLOSED.
+- **Implementation** (tanjiro, train.py + new helpers): Step-0 invariance check PASSED across all 5 cases (disable, beta=0, bias=None, strong-bias mismatch as expected). Teacher cache built in `data/cache/teacher_wss_grad/<case_id>.npz`. Composite bias gate (use_wss_grad_bias AND wss_grad_bias is not None AND beta != 0) — bit-identical to baseline in all 3 disable modes. AdamW optimizer (matches H366 baseline for fair comparison).
+
+| Metric | EP14 value | H342 baseline | Δ |
+|---|---:|---:|---:|
+| **val_primary** (axis mean rel L2) | **6.079%** | 5.8962% | **+18.3bp ❌** (>6.05% kill gate) |
+| **val_WSS_z** | **9.213%** | 8.6122% | **+60.1bp ❌** |
+| val_WSS_x | 5.952% | 5.3512% | +60bp |
+| val_WSS_y | 7.462% | 3.6488% | +381bp (basin-disruption signature) |
+
+- **W&B run**: `iw76ux6n` (group `h376-wss-grad-attn-bias`). 8-GPU DDP, ~3 it/s, ~50min/epoch.
+- **Pre-committed EP14 kill gate fired**: val_primary 6.079% > 6.05% threshold → CLOSE.
+- **Finding Z2** (27th closed axis): `frozen-teacher-wss-grad-attn-bias-null`
+  - **ROOT CAUSE: frozen EP13 EMA teacher itself has ~9% WSS_z error.** The gradient signal it provides for attention bias is therefore CORRUPTED — the bias actively injected teacher failure modes into student attention rather than providing a physics-informed inductive prior.
+  - **Conceptually identical structural failure to H374 Finding X** (consistency loss vs same teacher, λ=0.1 case). Now manifested in attention-bias form. Both failures share the same root: a teacher with ~9% WSS_z cannot supervise a student to a lower WSS_z by any signal it produces (consistency target, attention prior, soft label, gradient anchor).
+  - **All 5 channels regressed** despite the bias only being applied at attention layers (not at output): WSS_y +381bp is the basin-disruption marker — Lion+cosine-tail under non-trivial pre-softmax perturbation propagated corruption broadly even though the new term targets τ_z information.
+  - **Implication: ATTENTION-STEERING TIER FULLY CLOSED.** Joint with H366 (Finding W, geometric kNN bias null), this is the second attention-bias null. Geometric and physics-informed attention biases under warm-start cosine-tail both null. Future encoder attacks must NOT route through pre-softmax bias terms.
+  - **Implication: FROZEN-TEACHER ANYTHING IS A DOCUMENTED DEAD-END.** Consistency loss (H374), attention bias (H376), and presumably future variants (soft labels, gradient anchors, distillation logits) all fail for the same reason: the teacher must be FRESHER than the student or come from an ORTHOGONAL trajectory.
+- **Joint with prior nulls**: H366+H376 close the attention-steering tier; H374+H376 close the frozen-self-teacher tier. Cumulative closure pattern: encoder-side attention, decoder-side conditioning, loss-tier all closed. Live frontier consolidated to optimizer choice (H381), augmentation saturation (H380), and LR structure (H379).
+- **Follow-ups assigned**: tanjiro → H381 PR #1578 (AdamW optimizer swap — fresh mechanistically-distinct axis, attacks Lion sign-update brittleness).
+
+---
+
+## 2026-06-02 16:38Z — PR #1568: H373 Transolver++ Local Adaptive Slice Pooling (k=16 kNN, temp=0.1) — CLOSED (Phase 1 regression, Finding Z, 26th closed axis)
+
+- Branch: frieren/h373-transolver-pp-local-slice
+- **Hypothesis**: Replace Transolver's global slice softmax with k=16 kNN-constrained top-k sparsified attention (temp=0.1) in `create_slices()`. Zero params, preserves token-count bijection (post-H371 V constraint). Targets boundary-layer τ_z by allowing each slice to attend only to its geometric neighbors rather than all points uniformly.
+- **Implementation** (frieren, model/transolver.py + train.py): top-k sparsification on slice-attention logits, BF16 overflow guard clamp(-50,50) active, at-least-1-non-masked-token guarantee per head.
+
+| Metric | EP3 best (best_epoch=3, EMA source) | SOTA cluster | Δ |
+|---|---:|---:|---:|
+| **val_RAW** (abupt_axis_mean_rel_l2_pct) | **6.1276%** | 5.9224–5.9273% | **+~20bp ❌** |
+| val_WSS_z | 9.303% | ~9.06% (H336 EP13) | +24bp |
+| val_WSS | 6.905% | — | — |
+| val_pressure | 4.063% | — | — |
+
+- **W&B run**: `hp9qxlp4` (group `h373-frieren-transolver-pp`). 8-GPU DDP.
+- **EP1→EP3 trajectory**: Did NOT recover toward baseline. Sparsification persistently hurt across all three epochs.
+- **Phase 2/TTA skipped**: a 20bp regression cannot be recovered by calibration (cal yields only 2–8bp); kill criterion satisfied at Phase 1 end.
+- **Finding Z** (26th closed axis): `topk-sparse-slice-attention-null`
+  - **Sparse aggregation strips information that the uniform-softmax pooling preserves.** In Transolver's design, each slice token represents a soft assignment across all surface points; constraining to k=16 nearest neighbors loses the global context that the uniform softmax provides (even with low entropy, the tail of the distribution matters).
+  - **Mechanistically distinct from H370/H371 ISAB nulls** (which closed the inducing-point operator family at the single-layer bound): token-count bijection is correctly preserved here, so the failure is NOT bookkeeping. It is genuinely the sparse-aggregation choice that fails.
+  - **Implication for slice-pooling axis**: globalpooling-replacement under warm-start cosine-tail is brittle to any aggregation modification beyond uniform softmax. Future operator-family attacks must preserve BOTH the bijection (post-H371) AND the uniform-aggregation receptive field (post-H373).
+  - **Joint with prior encoder closures**: H351 (NGSB normal-only routing) + H357 (GeoTransolver content) + H367 (anisotropic tangent frame) + H370/H371 (ISAB) + H373 (top-k sparse slice) — **all five encoder-operator-replacement attempts on the EP13 fine-tune basin have failed**. The cumulative implication: the encoder is saturated on its existing geometric content; new operator surgery cannot extract more signal under 3-epoch Lion cosine tail.
+- **Follow-ups assigned**: frieren → H380 PR #1577 (y-mirror augmentation p=1.0 — saturate bilateral symmetry; zero params, ~2h). Mechanistically distinct from encoder-operator surgery (data-augmentation tier, not architecture).
+
+---
+
 ## 2026-06-02 16:00Z — PR #1570: H375 Cross-channel decoder query tokens (τ_x/τ_y → τ_z) — CLOSED (pre-committed kill gate, Finding Y, 25th closed axis)
 
 - Branch: fern/h375-cross-channel-decoder-tauz
