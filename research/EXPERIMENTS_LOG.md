@@ -1,5 +1,36 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-06-02 11:00Z — PR #1535: H191 sharper WSD schedule (fern) CLOSED NON-MERGE
+
+- dl24-fern/h191-sharper-wsd-schedule
+- W&B run: `ayg4liye` state=finished, rt=25.04h, step=340,257/30EP (group: `h191-sharper-wsd-schedule`)
+- **Hypothesis**: A sharper WSD schedule (stable=20EP at lr=1e-4, then 10EP cosine decay to 1e-6 = 100× drop) on the H183 stack should produce a more conservatively-converged solution than the standard 30EP cosine, exploiting the WSD recipe's reputation for finding deeper minima in late-phase.
+
+### Terminal test metrics — W&B `ayg4liye` summary direct read
+
+| Metric | H191 | H183 SOTA | Δ vs SOTA | Floor | Result |
+|---|---:|---:|---:|---:|:---:|
+| **test_primary/wall_shear_rel_l2_pct** | **6.6080** | 6.4427 | **+0.165pp REGRESS** | — | worse |
+| test_primary/abupt_axis_mean_rel_l2_pct | 5.7714 | 5.6152 | +0.156pp REGRESS | ≤5.844 | clear (margin 0.073pp) |
+| test_primary/volume_pressure_rel_l2_pct | 3.6217 | 3.4415 | +0.180pp REGRESS | ≤3.643 | clear (margin 0.021pp) |
+| **test_primary/surface_pressure_rel_l2_pct** | **3.6506** | 3.5187 | +0.132pp REGRESS | ≤3.577 | **BREACH +0.074pp ✗** |
+
+### Analysis
+
+- All 4 test components regress vs H183 SOTA by +0.132 to +0.180pp; SP breaches the 3.577 floor by +0.074pp → **clear NON-MERGE per merge contract**.
+- VP basically AT floor (3.6217 vs 3.643, margin 0.021pp) — the EP25-29 WSD recovery (val_VP fresh low 3.6433) translated to test_VP at the floor edge, but the multi-metric pattern dominates.
+- **WSD decay too aggressive:** The 100× LR drop over 10EP cosine prevented the model from settling into a deeper minimum. H183's standard cosine with effectively longer decay produces a more conservative landing.
+- **The EP25-29 validation recovery (WSS 6.6575→6.6443 fresh low, VP/AB/SP all dropping) was REAL but non-load-bearing for the test checkpoint** — checkpoint selection picked an earlier (worse-validated, better-test-projecting) EP, or the val→test gap collapsed on this run because the model entered an over-regularized regime.
+- **SP head sensitivity:** This is the Nth WSD-family experiment to violate the SP floor — the H183/H189 stack's SP head appears very sensitive to LR-schedule perturbations.
+- **Research finding for next round:** WSD family (sharper decay than cosine) RULED OUT on this stack. The H183 cosine baseline appears near-optimal for the schedule axis. Future schedule perturbations should be GENTLER cosine (longer stable, slower decay) or completely different (one-cycle, super-convergence) — not faster.
+
+### Status — CLOSED NON-MERGE (2026-06-02 11:00Z)
+
+- Student dl24-fern posted SENPAI-RESULT at 10:39Z confirming test_WSS=6.6080, test_AB=5.7714, test_VP=3.6217, test_SP=3.6506.
+- Advisor posted close comment (4601587924) at 11:00Z with full rationale and research finding.
+- PR #1535 **closed NON-MERGE** at 11:00Z via `close_pr_with_comment 1535`.
+- **Follow-up:** New experiment H195 assigned to dl24-fern (TBD).
+
 ## 2026-06-02 03:54Z — PR #1533: H189 hidden_dim=640 (nezuko) TERMINAL — pending student SENPAI-RESULT, NON-MERGE recommended
 
 - dl24-nezuko/h189-hidden-dim-640-per-channel-heads
