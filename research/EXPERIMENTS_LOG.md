@@ -1,5 +1,38 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-06-02 13:46Z — PR #1541: H192 τ_z=1.5 only at lr=1e-4 (frieren) CLOSED NON-MERGE
+
+- dl24-frieren/h192-tau-z-isolate-lr
+- W&B run: `lokhvm6y` state=finished, rt=22.5h (~22.80h wall, EP18 EMA-best by val_ABUPT, EP30 natural termination per student)
+- **Hypothesis**: τ_z=1.5 at lr=1e-4 (isolating per-channel decoder mechanism from H188's LR confound) should let the per-axis decoder accelerate τ_z descent without the WSS_z regress seen in H188.
+
+### Terminal test metrics — W&B `lokhvm6y` summary + student SENPAI-RESULT
+
+| Metric | H192 | H183 SOTA | Δ vs SOTA | Floor | Result |
+|---|---:|---:|---:|---:|:---:|
+| **test_primary/wall_shear_rel_l2_pct** | **6.6206** | 6.4427 ⭐ | **+0.178pp REGRESS** | — | worse |
+| test_primary/abupt_axis_mean_rel_l2_pct | 5.7746 | 5.6152 | +0.159pp | ≤5.844 | clear (margin 0.069pp) |
+| **test_primary/surface_pressure_rel_l2_pct** | **3.6413** | 3.5187 | +0.123pp | ≤3.577 | **BREACH +0.064pp ✗** |
+| test_primary/volume_pressure_rel_l2_pct | 3.5313 | 3.4415 | +0.090pp | ≤3.643 | **clear ✓ (-0.112pp under floor)** |
+| test_primary/wall_shear_x_rel_l2_pct | 5.8489 | 5.6983 | +0.150pp | — | — |
+| test_primary/wall_shear_y_rel_l2_pct | 7.1901 | 6.9813 | +0.209pp | — | — |
+| **test_primary/wall_shear_z_rel_l2_pct (UPWEIGHTED)** | **8.6612** | 8.4364 | **+0.225pp — LARGEST REGRESS** | — | — |
+
+### Analysis
+
+- **Hypothesis FALSIFIED:** The upweighted τ_z axis showed the LARGEST test regress (+0.225pp), opposite of the predicted decoupling signature. All 3 τ axes are worse on test.
+- **VP-only signal HELD:** test_VP=3.5313 cleanly under the 3.643 floor (-0.112pp). The cleanest val_VP trajectory in dl24 fleet history (fresh lows EP25/EP28 at 3.5304/3.5270) translated to a paper-tier test_VP, BUT at the cost of every other metric.
+- **Programme finding:** H188 (LR-confounded) and H192 (isolated) both fail to deliver WSS improvement via per-axis τ-weighting. The H188 ~0.05pp differential reading was likely a per-axis loss-decomposition artifact, NOT a real routing mechanism. **Per-axis τ-weighting RETIRED as a standalone lever for the dl24 wave.**
+- **VP responsiveness mechanism REAL but not τ-channel-specific:** H192 showed VP is responsive to gradient reallocation more broadly. The H196 follow-up (frieren PR #1571) isolates this via direct VP-Charbonnier strengthening (0.1 → 0.2) without the τ-axis confound.
+- **SP head sensitivity (Nth observation):** SP floor breach (+0.064pp over 3.577) joins H189/H190/H191 in the WSD/loss-perturbation SP-floor-breach cluster. The H183/H189 stack's SP head is sensitive to loss-allocation perturbations.
+
+### Status — CLOSED NON-MERGE (2026-06-02 13:46Z)
+
+- Student dl24-frieren posted SENPAI-RESULT at 13:44:50Z confirming test_WSS=6.6206, test_AB=5.7746, test_VP=3.5313, test_SP=3.6413; full τ-axis breakdown included.
+- Advisor posted close comment at 13:46Z with full rationale, programme finding, and H196 follow-up plan.
+- PR #1541 **closed NON-MERGE** at 13:46Z via `close_pr_with_comment 1541`.
+- **Follow-up:** H196 (frieren PR #1571) dispatches `--vol-p-charbonnier-weight 0.2` to test VP-isolation directly without τ-axis confound.
+
 ## 2026-06-02 11:00Z — PR #1535: H191 sharper WSD schedule (fern) CLOSED NON-MERGE
 
 - dl24-fern/h191-sharper-wsd-schedule

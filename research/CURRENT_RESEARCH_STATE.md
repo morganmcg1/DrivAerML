@@ -1,19 +1,27 @@
 # SENPAI Research State
 
-- **2026-06-02 13:42Z** (H192 TERMINAL at EP28.2 rt=22.80h — test metrics landed: WSS=6.6206 +0.18pp REGRESS, VP=3.5313 −0.11pp UNDER FLOOR ✓, ABUPT=5.7746 −0.07pp UNDER FLOOR ✓, SP=3.6413 +0.06pp BREACH ✗ — NON-MERGE aggregate; awaiting student SENPAI-RESULT to close)
+- **2026-06-02 13:50Z** (H192 CLOSED NON-MERGE — hypothesis FALSIFIED, upweighted τ_z largest regress +0.225pp; H196 frieren VP-Charbonnier=0.2 PR #1571 dispatched; H193 EP13 WSS 7th consec POS slope VP plateau; H194 EP8 + H195 EP2 boundaries imminent)
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → ∂u/∂n → WSS) as highest-leverage untried mechanism, TANGENT-BASIS OUTPUT HEAD as 2nd priority. Both require architectural changes larger than current fleet scope.
 - **Human check-in (issue #1056, 18:39Z):** No new messages since 19:27Z 2026-06-01.
 
-## 13:42Z checkpoint — **H192 TERMINATED EARLY at EP28.2** (NON-MERGE on test); 3/4 students active; H192 student SENPAI-RESULT pending; H194 EP7 boundary leader (all 4 descending, below EP10 gate); H193 EP12 + H195 EP1 unchanged
+## 13:50Z checkpoint — **H192 CLOSED NON-MERGE**, H196 frieren dispatched; H193 EP13 WSS 7th consec POS slope VP plateau; 4/4 students active again; H194/H195 boundaries imminent
 
-### Actions taken this cycle (13:39–13:42Z)
-- W&B probe: H192 lokhvm6y state=**finished** step=309459 rt=22.80h (terminated mid-EP28→29 before natural EP30; cause unknown, likely wall-clock or scheduler kill)
-- **H192 test metrics retrieved**: test_WSS=6.6206 (+0.18pp REGRESS vs SOTA 6.4427), test_VP=3.5313 (under floor 3.643 ✓), test_ABUPT=5.7746 (under floor 5.844 ✓), test_SP=3.6413 (+0.06pp floor BREACH ✗) → NON-MERGE aggregate
-- Posted ADVISOR test-results ack on PR #1541 with full metric table; awaiting student SENPAI-RESULT before formal close
-- frieren next assignment design: **H196 τ_z=1.3 milder** (between H183 default 1.0 and H192's 1.5, find sweet spot where VP win is preserved without WSS regress); dispatch when H192 closes
+### Actions taken this cycle (13:42–13:50Z)
+- Student SENPAI-RESULT confirmed at 13:44:50Z: test_WSS=6.6206 +0.18pp REGRESS, test_VP=3.5313 −0.11pp UNDER FLOOR, test_ABUPT=5.7746 −0.07pp UNDER FLOOR, test_SP=3.6413 +0.06pp BREACH; **τ_z (UPWEIGHTED axis) showed LARGEST test regress at +0.225pp** — opposite of predicted decoupling signature. Student suggests retiring per-axis τ-weighting + pursuing VP-isolated investigation directly.
+- **PR #1541 closed NON-MERGE** at 13:46Z with full programme finding (per-axis τ-weighting RETIRED for this wave) and H196 follow-up plan
+- **H196 frieren PR #1571 created** at 13:48Z: `--vol-p-charbonnier-weight 0.2` (double H183 default 0.1) — direct VP-isolation hypothesis, single-variable change, smoke-then-30EP-main
+- **H192 entry appended to EXPERIMENTS_LOG.md** with full test-metric table + analysis
+- **H193 EP13 boundary ack posted on PR #1554:** WSS=7.7670 (+0.0505 ↑ 7th consec POS slope), VP=3.7048 (+0.0034 ~plateau, fresh-low ±noise), AB=6.5983 (+0.0274 ↑), SP=3.9713 (+0.0073 ↑) — VP descent appears exhausted at 3.70 plateau, broader uptick at EP13 confirms WSS NON-MERGE on H193 firmly
+- H194 EP8 + H195 EP2 boundaries pending (within ~15 min)
+
+### Previous cycle (13:00–13:22Z)
+- Posted ADVISOR EP7 ack on PR #1559 (H194 nezuko) — **ALL 4 metrics descending**, WSS=6.7870 already below EP10 gate ≤6.80 at EP7 (3 EPs ahead), VP=3.6040 (-0.0630 STRONG)
+- Posted ADVISOR EP28 ack on PR #1541 (H192 frieren) — VP fresh low 3.5270 (slope -0.0036), WSS 6.7042 (6th consec POS slope), terminal ~14:30-14:50Z
+- Posted ADVISOR EP12 ack + stale_wip heartbeat on PR #1554 (H193 tanjiro) — VP fresh low 3.7014 (-0.0123), WSS uptick continues, decoupled descent persists
+- Posted ADVISOR main EP1 ack on PR #1565 (H195 fern) — val_WSS=12.8412 matches H183 EP1 baseline 12.82 exactly, mechanism on-shape, kill ladder activates at EP3
 
 ### Previous cycle (13:00–13:22Z)
 - Posted ADVISOR EP7 ack on PR #1559 (H194 nezuko) — **ALL 4 metrics descending**, WSS=6.7870 already below EP10 gate ≤6.80 at EP7 (3 EPs ahead), VP=3.6040 (-0.0630 STRONG)
@@ -36,8 +44,8 @@
 |---|---|---|---|---:|---:|---:|---:|---:|---|
 | nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | EP7 (7.06h) | **6.7870 ↓ (-0.0150)** | **3.6040 ↓ (-0.0630 STRONG)** | **6.0072 ↓ (-0.0258)** | **3.8886 ↓ (-0.0136)** | **ALL 4 DESCENDING — already BELOW EP10 gate ≤6.80 at EP7, strongest in fleet** |
 | fern | #1565 | H195 tau_y=1.3 on H183 stack | 7ergjfh4 main | EP1 (0.91h) | **12.8412** | 14.2048 | 13.0318 | 8.7329 | ON-SHAPE H183 EP1=12.82 match, mechanism non-disruptive at init, kill ladder activates EP3 |
-| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | **TERMINAL EP28.2 (22.80h)** | val 6.7042 / **test 6.6206 +0.18pp REGRESS** | val 3.5270 / **test 3.5313 −0.11pp UNDER FLOOR ✓** | val 5.9433 / **test 5.7746 −0.07pp UNDER FLOOR ✓** | val 3.9221 / **test 3.6413 +0.06pp BREACH ✗** | **NON-MERGE aggregate (WSS regress + SP breach); VP+ABUPT hold floors; awaiting student SENPAI-RESULT to close** |
-| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP12 (9.73h) | **7.7165 ↑ (+0.0065)** | **3.7014 ↓ FRESH LOW (-0.0123)** | 6.5709 ↑ | 3.9640 ↓ | Decoupled descent continues — VP slope moderated, WSS NON-MERGE locked in, observation only |
+| frieren | #1571 | **H196 vol_p_charbonnier=0.2 (NEW)** | (pending) | smoke launch (post-13:50Z) | — | — | — | — | Direct VP-isolation hypothesis (double H183 default 0.1); single-var change; smoke-then-30EP-main. Replaces H192 (PR #1541 closed NON-MERGE 13:46Z). |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP13 (10.40h) | **7.7670 ↑ (+0.0505)** 7th POS | 3.7048 ↔ (+0.0034 plateau) | 6.5983 ↑ (+0.0274) | 3.9713 ↑ (+0.0073) | VP descent EXHAUSTED at 3.70 plateau; broader uptick at EP13; WSS NON-MERGE firmly locked in. Continue mid-train. |
 
 ### H191 fern — CLOSED NON-MERGE (2026-06-02 11:00Z)
 - run `ayg4liye`, rt=25.04h, test_WSS=6.6080, test_ABUPT=5.7714, test_VP=3.6217, test_SP=3.6506
@@ -51,16 +59,19 @@
 - **Kill ladder:** EP3 ≤7.10%, EP5 ≤6.90%, EP10 ≤6.75%, EP15 ≤6.60%, EP20 ≤6.52%
 - ETA smoke ~12:00Z if student picks up quickly, main EP1 ~12:45Z
 
-### H192 frieren — TERMINAL EP28.2 (NON-MERGE on aggregate, VP+ABUPT floors held)
-- Run state=finished at step=309459, rt=22.80h (terminated mid-EP28→29, before natural EP30)
-- **Test metrics:**
-  - test_WSS=6.6206 vs SOTA 6.4427 = **+0.178pp REGRESS** (NON-MERGE driver)
-  - test_VP=3.5313 vs SOTA 3.4415 = +0.090pp regress; **−0.112pp under floor 3.643 ✓** (paper-tier VP win held)
-  - test_ABUPT=5.7746 vs SOTA 5.6152 = +0.159pp regress; **−0.069pp under floor 5.844 ✓** (held floor)
-  - test_SP=3.6413 vs SOTA 3.5187 = +0.123pp regress; **+0.064pp over floor 3.577 ✗** (BREACH)
-  - test_WSS_x=5.85, test_WSS_y=7.19, test_WSS_z=8.66 — τ_z=1.5 did NOT improve WSS_z (still 8.66, paper SOTA 8.61 is similar)
-- **Finding:** τ_z=1.5 reproducibly produces VP advantage (3.53 < floor 3.64) but WSS_z is unchanged → the mechanism shifts attention to volume-pressure coupling rather than the wall-shear axis as hypothesized. Confirms H192 + H156 + H188 line of evidence: per-axis τ-weighting only helps VP/AB, never WSS.
-- **Next:** frieren H196 = lighter τ_z=1.3 (split the difference); confirms if WSS regress scales with weight magnitude or is binary onset
+### H192 frieren — CLOSED NON-MERGE (2026-06-02 13:46Z)
+- Run `lokhvm6y` state=finished, rt=22.5h, EP18 EMA-best by val_ABUPT
+- **Hypothesis FALSIFIED:** test_τ_z (UPWEIGHTED) +0.225pp = LARGEST test regress (opposite of predicted decoupling)
+- **Test metrics confirmed:** test_WSS=6.6206 +0.18pp REGRESS, test_ABUPT=5.7746 −0.069pp under floor ✓, test_SP=3.6413 +0.064pp BREACH ✗, test_VP=3.5313 −0.112pp under floor ✓ (paper-tier VP win held); test_WSS_x=5.85, test_WSS_y=7.19, test_WSS_z=8.66
+- **Programme finding:** Per-axis τ-weighting RETIRED as standalone lever (H188 confounded + H192 isolated both failed; H188 differential reading was loss-decomposition artifact, not routing mechanism)
+- **VP-responsiveness mechanism REAL but not τ-channel-specific** → H196 follow-up isolates this directly via VP-Charbonnier strengthening
+
+### H196 frieren — ASSIGNED (PR #1571)
+- **Hypothesis:** Strengthen `--vol-p-charbonnier-weight` from 0.1 → 0.2 on H183 stack. Tests if H192's VP improvement was driven by gradient reallocation toward VP (not τ-axis routing). Direct VP isolation.
+- **Single-variable change** vs H183 SOTA reproduce. Orthogonal to current fleet (H193 wss_normal_penalty, H194 lr ceiling, H195 τ_y axis).
+- **Kill ladder:** EP3 ≤4.20/≤7.20, EP5 ≤3.95/≤7.00, EP10 ≤3.65/≤6.85, EP15 ≤3.55/≤6.75, EP20 ≤3.50/≤6.65, EP25 ≤3.48/≤6.55 (val_VP/val_WSS).
+- **Target:** test_VP < 3.40 (beat H183 SOTA 3.4415) AND test_WSS < 6.60 (no WSS regress at floor breach)
+- ETA: smoke ~14:00Z, main EP1 ~14:35Z
 
 ### H193 tanjiro — 30-EP run (NOT 10-EP terminal as previously noted)
 - W&B config confirms `num_epochs=30` — EP10 is mid-train, NOT terminal
@@ -96,10 +107,10 @@
 2. τ_y + τ_z compound (after H195 and H192 terminals confirm axis mechanisms)
 3. Tangent-basis output head reformulation (2nd human priority)
 
-### Watch items next 2h (from 13:42Z)
-1. **H192 student SENPAI-RESULT landing** ETA ~5-15 min (run already finished + test eval complete in W&B); close PR #1541 NON-MERGE on arrival + dispatch frieren H196
-2. **H194 EP8 boundary** ETA ~13:55Z (step=82119 vs EP8 boundary ~87808, ~5.7k steps @11.1k/h = 31 min) — continued ALL-4-DESCENT expected, full-fleet leader
-3. **H195 main EP2 boundary** ETA ~14:05Z (step=17439 vs EP2 boundary ~21950, ~4.5k steps @13.8k/h = 20 min)
-4. **H193 EP13 boundary** ETA ~14:18Z (step=138466 vs EP13 boundary ~143688, ~5.2k steps @12.8k/h = 25 min) — VP descent watch
+### Watch items next 2h (from 13:50Z)
+1. **H196 frieren smoke launch** ETA ~14:00Z (PR #1571 assigned 13:48Z, student polls then launches DDP8 smoke 1EP ~12 min)
+2. **H194 EP8 boundary** ETA ~14:05Z (step=85695 vs EP8 boundary ~87808, ~2.1k steps @11.1k/h ≈ 11 min) — continued ALL-4-DESCENT expected, full-fleet leader
+3. **H195 main EP2 boundary** ETA ~14:00Z (step=21876 vs EP2 boundary ~21950, ~75 steps @13.8k/h ≈ <1 min — IMMINENT)
+4. **H193 EP14 boundary** ETA ~14:30Z — VP plateau watch, WSS uptick continues
 5. **H194 EP10 gate** ETA ~16:20Z — pre-passed at EP7 (val_WSS=6.7870 < 6.80 gate), focus shifts to EP15 ≤6.65 (~19:25Z)
-6. **frieren idle once H192 closes** — H196 τ_z=1.3 prepared, dispatch on SENPAI-RESULT
+6. **H196 frieren main launch** ETA ~14:35Z (post-smoke-PASS); EP1 ~15:25Z first val read
