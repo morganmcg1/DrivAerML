@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 13:15Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 16:00Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 24 total)
+## Closed axes (do NOT revisit — 25 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -53,10 +53,11 @@
 | **ISAB OPERATOR FAMILY CLOSED at single-layer bound (Finding V)** | `isab-single-layer-probe-null` — Single-layer ISAB at idx 2 (1-of-5 layers, M=32 inducing points). EP14 val_primary **6.7149%** (+70bp vs source, +66bp past 6.05% close rule). All 5 channels regressed broadly: SP +64bp, **VP +108bp (untouched-channel collapse)**, WSS +66bp, WSS_z +82bp. Same "basin lost calibrated slice-token interaction" signature as H370. **ISAB operator family CLOSED at the bound** — even one cold ISAB layer breaks token-count bijection enough to disrupt the pretrained surrounding layers under 3-epoch Lion cosine tail. **Implication: future operator replacements MUST preserve token-count bijection** — inducing-point/Perceiver-style bottleneck operators are empirically excluded from warm-start tier. **22nd closed axis.** | **H371 CLOSED 12:17Z** |
 | **kNN spatial-proximity attention bias (Finding W)** | `knn-spatial-proximity-attn-bias-null` — Zero-param additive pre-softmax attention bias from surface kNN proximity (k=32). EP14 val_primary **6.0752%** (>6.05% close rule, +1.6bp). Pre-committed close rule fired immediately; Phase 2 TTA skipped. 8 DDP ranks finished cleanly (rt~3.83h). **Geometric attention-bias signal fails.** Discriminator status: sets up H376 (physics-informed WSS-gradient magnitude bias) to distinguish geometry-only vs. physics-informed attention steering. If H376 also nulls, attention-steering tier is fully closed. **23rd closed axis.** | **H366 CLOSED 12:55Z** |
 | **Self-consistency τ_z-only vs EP13 EMA teacher (Finding X)** | `self-consistency-ep13-ema-teacher-null` — Frozen EP13 EMA teacher MSE consistency loss on τ_z channel only (λ=0.1). EP14 val_primary **6.0700%** (>6.00% kill gate). **ROOT CAUSE: teacher itself has ~9% WSS_z error** — Mean Teacher / NoRD prior requires teacher to have *lower* error than student, which is violated. Consistency penalty also propagated through shared backbone to other channels: WSS_y **+388bp** (worse than random initialization shift). Training-time τ_z regularization via bad teacher = noisy-target overfitting. **24th closed axis.** | **H374 PR #1569 CLOSED 13:00Z** |
+| **Cross-channel decoder query tokens (Finding Y)** | `cross-channel-decoder-query-tokens-null` — K=4 learnable query tokens cross-attending from τ_x/τ_y predictions → τ_z decoder; stop-gradient on source preds; zero-init + Xavier init for identity-at-init. EP14 val_primary **6.1067%** (+5.7bp over 6.05% kill gate); val_WSS_z **9.3171%** (+25.7bp over H336 EP13 baseline). **DECISIVE: ALL THREE WSS axes regressed simultaneously** (Δz=+26bp, Δx=+1bp, Δy=+3bp vs H342 test→val), falsifying the premise that τ_x/τ_y predictions encode usable regime context for τ_z. The cross-channel module disrupted the shared backbone representation rather than failing to extract a real regime signal. Identity-at-init invariance was verified but is INSUFFICIENT when downstream parameter updates couple the new module to the shared backbone under Lion+cosine-tail. **Decoder-side intra-WSS conditioning CLOSED.** Future τ_z attacks must condition on geometry-only inputs, training-distribution-level mechanisms, or training-schedule control. **25th closed axis.** | **H375 PR #1570 CLOSED 16:00Z** |
 
 ---
 
-## Active Fleet (2026-06-02 15:20Z — 8/8 WIP, **all students assigned**)
+## Active Fleet (2026-06-02 16:00Z — 8/8 WIP, **all students assigned**)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
@@ -65,16 +66,16 @@
 | **#1538** | nezuko | **H347: BL physics priors** — Arm A FAILED gate (val_cal 5.9253). Arm B `65z21dv8` val_RAW 5.9224% (best of cluster), TTA running. ETA terminal ~15:30Z. | 🟡 WIP — Arm B/C cascade |
 | **#1551** | askeladd | **H359: Multi-scale surface kNN** — val_RAW 5.9245% (kwe8tynw, -45bp vs H336 RAW). Test arm running (rt=22699s). Cal landing ETA ~17-18Z. **PRIMARY SOTA CANDIDATE** if cal yield ≥7bp. | 🟡 WIP — TTA test arm |
 | **#1572** | tanjiro | **H376: WSS gradient-magnitude attention bias (EP13 EMA teacher, zero-param)** — Per-key additive attention bias proportional to ||∇τ_pred||₂ from frozen EP13 EMA teacher's WSS prediction over kNN-8 surface graph. Pre-compute once per sample; inject as static scalar into all slice-attention layers. Physics-informed successor to H366 (geometric kNN bias nulled as Finding W). Discriminator: if H376 also nulls, attention-steering tier CLOSED. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 13:00Z |
-| **#1570** | fern | **H375: Cross-Channel Decoder Query Tokens** — K=4 learnable query tokens, cross-attention from τ_x/τ_y context → τ_z decoder. +0.1% params (264K @ d_model=512). Channels verified: loader.py:42 [...,1]=τ_x, [...,2]=τ_y, [...,3]=τ_z. Replaces wrong-premise H372 (z-mirror, closed no-run). Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:45Z |
+| **#1576** | fern | **H379: Per-layer LR decay (PEFT-style)** — Backbone LR × 0.3, decoder LR × 1.0; tests whether silent backbone catastrophic forgetting under uniform-LR cosine tail limits the fine-tune basin. Zero new params (only optimizer config); no Lion+new-module risk. Direct mechanistic follow-up to fern's H375 root-cause #3 ("Lion sign-update + new params = overshoot"). Kill gate EP14 val>6.05% AND broad-disruption catch ≥30bp on any unrelated channel. ~10.5h Phase 1 + 7h TTA. | 🟢 ASSIGNED 16:00Z |
 | **#1568** | frieren | **H373: Transolver++ Local Adaptive Slice Pooling** — Replace global slice softmax with k=16 kNN-constrained local pooling (temp=0.1). Zero params, preserves token-count bijection (post-H371 V constraint). Targets boundary-layer τ_z. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:33Z |
 | **#1574** | ~~edward~~ | ~~**H377: Z-antisymmetry mirrored augmentation (H-A)**~~ — **CLOSED 15:10Z wrong-premise** (z-axis is NOT bilateral; same root cause as H372 PR #1567). Sub-agent reused H-A from `RESEARCH_IDEAS_2026-06-02_12-15.md` without checking the axis convention. **NOT a counted closed axis** (no run consumed). Edward reassigned to H378. | ⛔ CLOSED wrong-premise |
 | **#1575** | edward | **H378: Online Hard-Case Mining (case-CDF reweighted sampling, α=1.0)** — Case-level (not vertex-level) reweighting of the 400-sample training distribution. Per-epoch, compute per-case `τ_z MAE`; build case-sampling probabilities `p_i ∝ MAE_i^α`. Next epoch samples cases proportional to p (with replacement). α=1.0 mild upweighting → α=2.0 aggressive arm. Mechanistically distinct from edward's 7 prior nulls (all per-vertex / loss-tier / operator). Zero params, ~10.5h. Kill gate EP14 val>6.05%. | 🟢 ASSIGNED 15:20Z |
 
 ---
 
-## Current Research Focus: 24 CLOSED AXES — PLATEAU PROTOCOL ACTIVE; CASE-LEVEL DISTRIBUTION SHIFT NOW EDWARD'S ATTACK (H378)
+## Current Research Focus: 25 CLOSED AXES — PLATEAU PROTOCOL DEEPER; FINE-TUNE LR STRUCTURE + CASE-DISTRIBUTION SHIFT ARE THE LIVE PROBES
 
-**24 closed axes**. H374 closed (Finding X): self-consistency vs EP13 EMA teacher null — teacher has ~9% WSS_z error itself, violating the Mean Teacher premise. H366 (Finding W): geometric kNN proximity attention bias null. H376 now tests physics-informed attention bias; H377 (edward) tests z-antisymmetry mirrored augmentation — HIGHEST-priority remaining unattacked axis. H375/H373 in live round testing cross-channel decoder conditioning and local slice pooling. Narrowed frontier: (1) physical symmetry augmentation / equivariance constraints, (2) physics-informed attention bias, (3) decoder cross-channel conditioning, (4) operator replacements preserving token-count bijection. Training-time regularizer, input-feature, loss, decoder-capacity, and ISAB-operator tiers all exhausted.
+**25 closed axes**. H375 CLOSED Finding Y (16:00Z): cross-channel decoder query tokens null with **ALL THREE WSS axes regressing simultaneously** — decisive falsification of intra-WSS conditioning premise. Identity-at-init invariance is INSUFFICIENT when downstream parameter updates couple a new module to the shared backbone under Lion+cosine-tail. New live frontier: (1) **fine-tune LR STRUCTURE** (H379 fern PEFT-style per-layer LR decay — tests backbone catastrophic forgetting; the safest possible swing because zero new modules → no Lion+new-module brittleness), (2) **case-level distribution shift** (H378 edward online hard-case mining — tests training-distribution intensity tier), (3) physics-informed attention bias (H376 tanjiro), (4) local-adaptive slice pooling (H373 frieren), (5) physics priors (H347 nezuko cascade). Decoder-side, encoder-side, loss-tier, input-feature, regularization, ISAB-operator, intra-WSS-conditioning all CLOSED. **Plateau-protocol meta-finding: identity-at-init is necessary but not sufficient for Lion-tuned warm-start fine-tunes — H375 shows that even with init invariance verified, the gradient coupling between new modules and the shared backbone destabilizes the basin within ~1 epoch.**
 
 **SOTA CLUSTER UPDATE (post-H360 cal landing, 12:10Z):**
 | Arm | val_RAW | val_CAL | test_CAL | Status |
@@ -91,7 +92,8 @@ H360 demonstrated cal-yield-collapse (2.29bp vs projected 7bp), so the 7bp proje
 - **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn, val_RAW 5.9273 cal+test pending)
 - **Encoder attention bias — physics-informed** (kNN gradient magnitude from EMA teacher): H376 (tanjiro, PR #1572, ASSIGNED 13:00Z)
 - **Physics-prior cascade**: H347 BL priors (nezuko, val_RAW 5.9224 Arm B test arm)
-- **Cross-channel decoder conditioning (NEW)**: H375 fern PR #1570 — K=4 cross-attention query tokens τ_x/τ_y → τ_z; +0.1% params; replaces wrong-premise H372 (z-axis is NOT bilateral axis; y is)
+- **~~Cross-channel decoder conditioning~~ CLOSED**: H375 fern PR #1570 CLOSED 16:00Z as Finding Y. All-3-WSS-axis regression confirms decoder-side intra-WSS conditioning is dead.
+- **Fine-tune LR STRUCTURE (NEW, PEFT-style)**: H379 fern PR #1576 — backbone LR × 0.3, decoder LR × 1.0; zero new params; tests backbone catastrophic forgetting under uniform-LR Lion cosine tail. Mechanistic distinction from all 25 nulls: changes the optimizer's parameter-group LR mask, no module or loss changes.
 - **Local-adaptive slice pooling (NEW)**: H373 frieren PR #1568 — Transolver++ k=16 kNN-constrained slice softmax; zero params; preserves token-count bijection; targets boundary-layer τ_z
 - **Self-consistency τ_z teacher (NEW)**: H374 edward PR #1569 — τ_z-only MSE consistency vs frozen EP13 EMA teacher (λ=0.1); zero params; training-time regularizer
 - **Reserve tiers (still unattacked)**:

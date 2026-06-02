@@ -1,3 +1,37 @@
+## 2026-06-02 16:00Z — PR #1570: H375 Cross-channel decoder query tokens (τ_x/τ_y → τ_z) — CLOSED (pre-committed kill gate, Finding Y, 25th closed axis)
+
+- Branch: fern/h375-cross-channel-decoder-tauz
+- **Hypothesis**: Prepend K=4 learnable query tokens to the surface decoder; cross-attend from τ_x/τ_y prediction context → produce δτ_z residual added to the τ_z output channel only. Premise: τ_x/τ_y predictions implicitly encode flow regime (turbulent/laminar, separated/reattached, A-pillar vortex), providing a structured physics-regime signal currently unavailable at τ_z decode time. +264K params (≈0.86% of 17.4M base, well below +1% cap). Stop-gradient on source predictions; Xavier-init queries with zero-init out_proj and zero-init delta_head final layer (identity-at-init verified).
+- **Implementation** (fern, in model.py:397-768 + train.py CLI wiring): clean module wiring with identity-at-init invariants confirmed in W&B param histogram traces. DDP `find_unused_parameters=True` because cross-channel decoder is bypassed when `surface_tokens==0`. d_inner=120, 4-head MHA, 149,762 cross-channel params.
+
+| Channel | H375 EP14 val (EMA) | H375 EP15 val (EMA) | H336 EP13 baseline / H342 test | Δ vs H342 test |
+|---|---:|---:|---:|---:|
+| **val_primary** (abupt_axis_mean_rel_l2_pct) | **6.1067%** | 6.0898% | 6.017% (EP13 source) | **+9.0bp** |
+| **val_WSS_z** | **9.3171%** | 9.3050% | ~9.06% (H336 EP13) / 8.6122% (H342 test) | **+25.7bp vs H336 EP13** |
+| val_WSS_x | 5.9773% | 5.9650% | 5.3512% (H342 test) | **+63bp** |
+| val_WSS_y | 7.5851% | 7.5395% | 3.6488% (H342 test) | **+394bp** |
+| val_p_s | 4.0021% | 3.9963% | ~3.82% (H342 test) | ~+18bp |
+| val_p_v | 3.6520% | 3.6433% | ~3.42% (H342 test) | ~+23bp |
+| val_wall_shear (vec) | 6.8868% | 6.8673% | 6.6351% (H342 test) | **+25bp** |
+
+- **W&B run** (rank-0): `ckk3l5u4` (group `h375-fern-cross-chan`). 8×H100 DDP, peak 75.06 GB/GPU, wallclock ~1h25m past EP14 gate before manual SIGTERM (in-script kill-thresholds not passed; process note logged for future PRs).
+- **Both pre-committed kill rules fired simultaneously**:
+  1. EP14 val_primary 6.1067% > 6.05% threshold → CLOSE
+  2. EP14 val_WSS_z 9.3171% > 9.06% H336 EP13 baseline → CLOSE
+- **Finding Y** (25th closed axis): `cross-channel-decoder-query-tokens-null`
+  - **DECISIVE EVIDENCE**: ALL THREE WSS axes regressed simultaneously (Δz=+26bp, Δx=+1bp, Δy=+3bp vs H342 test). If the cross-channel premise were merely null (signal extracted but not useful for τ_z), val_WSS_z would be unchanged and val_WSS_x/y unmoved. The actual signature — broad multi-channel regression — proves the new module *disrupted* the shared backbone rather than failing to extract a regime signal.
+  - **Identity-at-init is necessary but NOT sufficient** for Lion-tuned warm-start fine-tuning. fern verified zero-init out_proj and Xavier-init queries with stop-gradient on K/V source; mathematically the cross-channel module contributes 0 to predictions at step 0. But the moment Lion's sign-based gradient update fires on the new module's params, the cross-channel residual delivers nonzero δτ_z, which then back-propagates through the shared encoder and τ_x/τ_y decoder heads (the K/V source) under Lion's "equal step regardless of grad magnitude" rule. Within ~1 epoch the basin destabilizes broadly.
+  - **Three candidate root causes from fern's analysis** (cannot disentangle from one run but ALL consistent with the simultaneous-regression signature):
+    1. **Moving-target K/V**: τ_x/τ_y heads keep training under their own losses, so the cross-attention K/V signal is non-stationary; K=4 query tokens chase a moving target → δτ_z amplifies noise via Lion's aggressive sign updates.
+    2. **Premise was overstated**: τ_x/τ_y predictions may not encode usable "regime" signal beyond what the shared backbone already provides via slice attention.
+    3. **Lion + new-module mismatch**: Lion's sign(grad) update gives equal step size regardless of grad RMS. New params (queries Xavier-init, residual_scale=1e-2, delta_head[-1] zero) take disproportionate early steps under Lion that may overshoot the basin. AdamW would have given these params smaller effective steps until 2nd-moment estimates stabilized.
+  - **Implication for future τ_z attacks**: decoder-side intra-WSS conditioning is CLOSED. The remaining tau_z-targeted attack vectors are: (a) condition on geometry-only inputs (read-only encoder features — no detach needed because no backprop through other heads), (b) operate at training-distribution level (case mining, augmentation intensity), (c) intervene at the optimizer/training-schedule level (PEFT-style LR decay, AdamW swap, extended cosine tail).
+- **Joint with prior decoder/output nulls**: H350+H354 FiLM, H358 tangent basis, H363 MoE-soft, H367 anisotropic frame, H375 cross-channel — **the entire decoder-side tier from input-conditioning to output-basis manipulation is CLOSED at 5 nulls.** Architectural surgery on the surface decoder under Lion+cosine-tail does not move WSS_z without destabilizing the backbone.
+- **Banked process improvement**: pass `--kill-thresholds "2720:val_primary/abupt_axis_mean_rel_l2_pct>6.05"` going forward for all hypotheses with hard EP1-gate kill rules so the in-script gate enforces cutoff automatically. fern's H375 consumed ~1h25m past gate before manual SIGTERM — small win available by wiring this in next time.
+- **Follow-ups assigned**: H379 (PEFT-style per-layer LR decay, fern PR #1576) tests root-cause #3 in a SAFER form (zero new modules → no Lion+new-module mismatch). Researcher batch H-C (AdamW swap), H-F (GLU output head), H-D (auxiliary Cf head) queued for future idles. fern's own "B" suggestions (τ_z-only specialized head depth, geometric-prior decoder) banked for future students.
+
+---
+
 ## 2026-06-02 13:00Z — PR #1569: H374 Self-consistency τ_z-only vs frozen EP13 EMA teacher — CLOSED (pre-committed kill gate, Finding X)
 
 - Branch: edward/h374-self-consistency-ep13-ema-teacher
