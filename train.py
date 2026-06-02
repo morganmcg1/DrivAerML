@@ -57,6 +57,7 @@ from trainer_runtime import (
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
+    weighted_per_point_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -106,6 +107,9 @@ class Config:
     drop_path_max: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    wss_hotspot_gamma: float = 1.0
+    wss_hotspot_quantile: float = 0.90
+    max_steps: int = 0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -272,6 +276,27 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
         ),
+        "wss_hotspot_gamma": (
+            "H364: static per-point reweighting for top-decile WSS hotspots. "
+            "Surface points whose denormalized ||target_wss|| is at or above "
+            "the wss_hotspot_quantile of the in-batch distribution receive "
+            "this multiplicative weight (applied only to WSS channel MSE "
+            "terms, i.e. tau_x/tau_y/tau_z; cp and volume_pressure are left "
+            "unchanged). 1.0 disables the reweight (default; identical to "
+            "the legacy weighted_channel_mse path)."
+        ),
+        "wss_hotspot_quantile": (
+            "H364: quantile threshold used to define top-decile WSS hotspots "
+            "for --wss-hotspot-gamma reweighting. Computed per-batch over "
+            "valid (unmasked) surface points using ||target_wss|| in "
+            "physical (denormalized) space. Default 0.90 selects the top "
+            "10% of points by WSS magnitude."
+        ),
+        "max_steps": (
+            "Optional cap on total optimizer steps. 0 (default) disables. "
+            "Used for smoke tests: training breaks out of the epoch loop "
+            "once global_step >= max_steps, before validation."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -432,6 +457,71 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+WSS_CHANNEL_INDICES = (1, 2, 3)
+
+
+def compute_wss_hotspot_weight(
+    surface_target_normalized: torch.Tensor,
+    surface_mask: torch.Tensor,
+    transform: TargetTransform,
+    gamma: float,
+    quantile: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Compute the per-point WSS hotspot multiplicative weight tensor.
+
+    H364: top-decile by physical (denormalized) ``||target_wss||`` receive
+    weight ``gamma`` (applied to WSS channels only); other valid points and
+    padded entries receive weight ``1.0``. The quantile is computed per-batch
+    over valid surface points; per-rank batches are independent but the WSS
+    magnitude distribution is dense enough that local q90 is a stable
+    estimator without a cross-rank reduce.
+
+    Returns ``(point_weight_bn, diagnostics)`` where ``point_weight_bn`` has
+    shape ``[B, N]`` and ``diagnostics`` reports the threshold, the hotspot
+    fraction, and the mean ||WSS|| inside/outside the mask. Computed in
+    float32 outside autocast so the quantile is numerically stable.
+    """
+    target = surface_target_normalized.detach().float()
+    mask_bool = surface_mask.detach().bool()
+    surface_y_std = transform.surface_y_std.to(target.device).float()
+    surface_y_mean = transform.surface_y_mean.to(target.device).float()
+    wss_indices = torch.tensor(
+        list(WSS_CHANNEL_INDICES), device=target.device, dtype=torch.long
+    )
+    wss_target_norm = target.index_select(-1, wss_indices)
+    wss_std = surface_y_std.index_select(-1, wss_indices)
+    wss_mean = surface_y_mean.index_select(-1, wss_indices)
+    wss_target_unnorm = wss_target_norm * wss_std + wss_mean
+    wss_norm = wss_target_unnorm.norm(dim=-1)
+    flat = wss_norm[mask_bool]
+    if flat.numel() > 0:
+        threshold = torch.quantile(flat, quantile)
+    else:
+        threshold = torch.zeros((), device=target.device, dtype=torch.float32)
+    hotspot = (wss_norm >= threshold) & mask_bool
+    point_weight = torch.where(
+        hotspot,
+        torch.full_like(wss_norm, float(gamma)),
+        torch.ones_like(wss_norm),
+    )
+    valid_count = mask_bool.sum().clamp_min(1)
+    hotspot_count = hotspot.sum()
+    hotspot_norm_sum = (wss_norm * hotspot.float()).sum()
+    cold_count = (mask_bool & ~hotspot).sum().clamp_min(1)
+    cold_norm_sum = (wss_norm * (mask_bool & ~hotspot).float()).sum()
+    diagnostics = {
+        "wss_hotspot/threshold": float(threshold.item()),
+        "wss_hotspot/fraction": float((hotspot_count.float() / valid_count.float()).item()),
+        "wss_hotspot/mean_norm_in": float(
+            (hotspot_norm_sum / hotspot_count.clamp_min(1).float()).item()
+        ),
+        "wss_hotspot/mean_norm_out": float(
+            (cold_norm_sum / cold_count.float()).item()
+        ),
+    }
+    return point_weight, diagnostics
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -442,10 +532,22 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    wss_hotspot_gamma: float = 1.0,
+    wss_hotspot_quantile: float = 0.90,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    hotspot_diagnostics: dict[str, float] = {}
+    hotspot_point_weight: torch.Tensor | None = None
+    if wss_hotspot_gamma != 1.0:
+        hotspot_point_weight, hotspot_diagnostics = compute_wss_hotspot_weight(
+            surface_target,
+            batch.surface_mask,
+            transform,
+            gamma=wss_hotspot_gamma,
+            quantile=wss_hotspot_quantile,
+        )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -453,7 +555,45 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        if hotspot_point_weight is not None:
+            channel_weights = (
+                surface_channel_weights
+                if surface_channel_weights is not None
+                else torch.ones(
+                    surface_target.shape[-1],
+                    device=surface_target.device,
+                    dtype=surface_target.dtype,
+                )
+            )
+            channel_weights = channel_weights.to(
+                device=surface_target.device, dtype=surface_target.dtype
+            )
+            point_weight = hotspot_point_weight.to(
+                device=surface_target.device, dtype=surface_target.dtype
+            )
+            # Build per-(B, N, C) weight tensor: WSS channels get
+            # channel_weight × hotspot_point_weight; non-WSS channels (cp at
+            # index 0) get channel_weight × 1.0.
+            per_channel_point = point_weight.unsqueeze(-1).expand(
+                -1, -1, surface_target.shape[-1]
+            ).clone()
+            non_wss = [
+                c for c in range(surface_target.shape[-1])
+                if c not in WSS_CHANNEL_INDICES
+            ]
+            if non_wss:
+                non_wss_idx = torch.tensor(
+                    non_wss, device=per_channel_point.device, dtype=torch.long
+                )
+                per_channel_point.index_fill_(-1, non_wss_idx, 1.0)
+            bnc_weights = per_channel_point * channel_weights
+            surface_loss = weighted_per_point_channel_mse(
+                out["surface_preds"],
+                surface_target,
+                batch.surface_mask,
+                bnc_weights,
+            )
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
@@ -467,13 +607,15 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    diagnostics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    diagnostics.update(hotspot_diagnostics)
+    return loss, diagnostics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1033,6 +1175,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.wss_hotspot_gamma != 1.0:
+                print(
+                    f"H364 WSS hotspot reweight: gamma={config.wss_hotspot_gamma} "
+                    f"quantile={config.wss_hotspot_quantile} "
+                    f"(applies only to WSS channels tau_x/tau_y/tau_z)"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -1064,6 +1212,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/wss_hotspot_gamma"] = config.wss_hotspot_gamma
+            wandb.summary["loss/wss_hotspot_quantile"] = config.wss_hotspot_quantile
             backbone = getattr(base_model, "backbone", None)
             if backbone is not None and hasattr(backbone, "blocks"):
                 drop_path_schedule = [
@@ -1230,6 +1380,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        wss_hotspot_gamma=config.wss_hotspot_gamma,
+                        wss_hotspot_quantile=config.wss_hotspot_quantile,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1268,8 +1420,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/wss_hotspot_gamma": config.wss_hotspot_gamma,
+                            "train/wss_hotspot_quantile": config.wss_hotspot_quantile,
                         }
                     )
+                    for key in (
+                        "wss_hotspot/threshold",
+                        "wss_hotspot/fraction",
+                        "wss_hotspot/mean_norm_in",
+                        "wss_hotspot/mean_norm_out",
+                    ):
+                        if key in batch_loss_metrics:
+                            train_log[f"train/{key}"] = batch_loss_metrics[key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
@@ -1362,6 +1524,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             f"Train timeout ({train_timeout_minutes:.1f} min) mid-epoch "
                             f"at step {global_step}. Forcing validation and stopping."
                         )
+                    break
+                if config.max_steps > 0 and global_step >= config.max_steps:
+                    if state.is_main:
+                        print(
+                            f"max_steps reached ({global_step} >= {config.max_steps}). "
+                            "Stopping training loop for smoke test."
+                        )
+                    timeout_hit = True
                     break
 
             scheduler.step()
