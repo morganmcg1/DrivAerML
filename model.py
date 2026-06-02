@@ -435,35 +435,39 @@ class MoESurfaceDecoder(nn.Module):
         self.num_experts = num_experts
         expert_hidden = expert_hidden or (hidden_dim // 2)
         self.expert_hidden = expert_hidden
-        self.experts = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Linear(hidden_dim, expert_hidden),
-                    nn.GELU(),
-                    nn.Linear(expert_hidden, out_dim),
-                )
-                for _ in range(num_experts)
-            ]
-        )
-        # Hidden Linear: trunc_normal init for stable forward dynamics.
-        # Output Linear: zero-init weight and bias so each expert contributes
-        # exactly zero at init, preserving the base-head step-0 prediction.
-        for expert in self.experts:
-            nn.init.trunc_normal_(expert[0].weight, std=0.02)
-            nn.init.zeros_(expert[0].bias)
-            nn.init.zeros_(expert[-1].weight)
-            nn.init.zeros_(expert[-1].bias)
+        # Batched expert parameters: shape [num_experts, in_dim, out_dim].
+        # We use einsum-style batched linears (rather than a ModuleList of
+        # nn.Sequential) so the forward graph has no per-expert Python loop;
+        # this keeps torch.compile / Inductor happy on dynamic shapes (a
+        # stacked-list approach trips a CantSplit tiling failure on the
+        # fused MoE+pos-embed kernel).
+        self.W1 = nn.Parameter(torch.empty(num_experts, hidden_dim, expert_hidden))
+        self.b1 = nn.Parameter(torch.zeros(num_experts, expert_hidden))
+        self.W2 = nn.Parameter(torch.zeros(num_experts, expert_hidden, out_dim))
+        self.b2 = nn.Parameter(torch.zeros(num_experts, out_dim))
+        nn.init.trunc_normal_(self.W1, std=0.02)
+        # W2 / b2 / b1 already zero — zero-init residual preserves step-0
+        # surface_preds == base_head(h) (verified in tools/h363_step0_check.py).
         self.router = nn.Linear(hidden_dim, num_experts)
         nn.init.normal_(self.router.weight, std=0.01)
         nn.init.zeros_(self.router.bias)
 
+    # Inductor's tile-splitting (CantSplit) fails on the batched expert einsum
+    # when surface_tokens is a dynamic dim, deadlocking DDP. Skip torch.compile
+    # for this module only — the rest of the graph still compiles normally.
+    @torch._dynamo.disable
     def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # h: [..., hidden_dim]
         logits = self.router(h)
         probs = F.softmax(logits, dim=-1)
-        expert_outputs = torch.stack([expert(h) for expert in self.experts], dim=-2)
-        # expert_outputs: [..., num_experts, out_dim]
-        out = (probs.unsqueeze(-1) * expert_outputs).sum(dim=-2)
+        # Batched expert hidden + output via einsum. Equivalent to running
+        # each expert MLP independently then stacking, but with a single
+        # fused kernel.
+        h_e = torch.einsum("...h,ehk->...ek", h, self.W1) + self.b1
+        h_act = F.gelu(h_e)
+        out_e = torch.einsum("...ek,eko->...eo", h_act, self.W2) + self.b2
+        # Soft mixture: probs [..., num_experts] x out_e [..., num_experts, out_dim].
+        out = (probs.unsqueeze(-1) * out_e).sum(dim=-2)
         return out, probs
 
 
