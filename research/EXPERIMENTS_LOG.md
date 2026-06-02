@@ -14325,3 +14325,32 @@ W&B runs: `3icmxaqe` (ep13 TTA), `qgw0ix77` (ep14 TTA), `ijadzof0` (ep15 TTA san
 - Finding: **`multi-cp-symmetric-best`** — 3-cp symmetric output average > both 2-cp asymmetric arms
 
 ---
+
+## 2026-06-02 06:30Z — PR #1557 CLOSED: edward/h364-wss-grad-consistency-loss
+
+**H364: Target-magnitude top-decile WSS hotspot reweighting (γ=3 / γ=5)**
+- Hypothesis: γ-scale per-point loss weight on top-decile (||target_WSS||>4.844 Pa) WSS points to concentrate gradient mass on high-magnitude vortex-shedding hotspots
+- Implementation: hotspot mask = ||target_WSS||_i > 90th percentile threshold; loss weight = γ on mask, 1.0 elsewhere; applied only to WSS channels
+- Recipe: 3-epoch cosine-tail from H336 EP13 (`yw2a5dyl`), Lion + cosine schedule, --wss-hotspot-gamma 3.0 (Arm A)
+
+| W&B run | Phase | val_abupt | val_WSS | val_WSS_z | val_SP | val_VP | Outcome |
+|---|---|---:|---:|---:|---:|---:|---|
+| z1tltc7h (8-rank DDP) | Arm A EP14 | **6.5858%** | 7.2842% | 9.7136% | 4.2890% | 4.5113% | CLOSE rule triggered |
+| H342 SOTA gate | — | 5.8962% | 6.7038% | 9.0807% | 3.9064% | 3.4601% | — |
+| Δ vs gate | — | +69bp | +58bp | +63bp | +38bp | +105bp | All channels regressed |
+
+**Hotspot mask diagnostics (mechanism verified correct):**
+- wss_hotspot/fraction = 0.1000 (top-decile exact)
+- wss_hotspot/threshold = 4.844 Pa
+- wss_hotspot/mean_norm_in = 7.622 Pa, mean_norm_out = 1.247 Pa (6.1× ratio confirmed)
+
+**Decision: CLOSED as Finding P — `target-magnitude-wss-hotspot-reweight-overshoot` (16th closed axis)**
+
+Edward's analysis (banked):
+1. **WSS_z got worse, not better** (+63bp on the very channel reweighting was designed to help). Consistent with H361 discriminator: bottleneck is REPRESENTATION CAPACITY, not gradient allocation.
+2. **Unreweighted channels (SP, VP) regressed too**. Reweighting WSS by 1.20× effective mass shifted (surface vs volume) and (WSS vs cp) gradient ratios — Lion was tuned to H342 balance and is sensitive to this shift.
+3. **Cumulative scalar-reweighting axis CLOSED**: 6 nulls (H338 SP, H339 WSS, H341 wz-only, H346 focal EMA, H361 dir/mag, H364 hotspot). H336 fine-tune basin is brittle to ANY gradient-mass rebalancing.
+
+**Next direction (H368)**: Structural edge-pair loss matching (zero-param). Different lever — acts on point-PAIR gradient differences, not per-point magnitudes. Addresses Edward's #3 hypothesis (high-frequency WSS_z error structure unfittable by current bottleneck width).
+
+---

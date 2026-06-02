@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 05:35Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 06:40Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 15 total)
+## Closed axes (do NOT revisit — 16 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -44,10 +44,11 @@
 | **Direction-magnitude decomposed WSS loss (Finding L)** | `wss-direction-magnitude-decomposed-loss-null` — cosine gradient rewards direction-matching at all magnitudes; rel-norm gradient over-weights small-magnitude points. Per-channel MSE IS the correct gradient object. **Discriminator outcome confirmed: WSS_z floor is NOT loss-geometry; it is representation.** | **H361 CLOSED 04:09Z** |
 | **MoE soft-mixture decoder (Finding N)** | `regime-moe-soft-decoder-redundant-residuals-null` — Two-expert soft-mixture MoE with switch-transformer load-balance aux. Router learned perfectly balanced 50/50 partition (entropy 0.686, load_bal 1.02). But soft mixture averaged experts back to single effective head — redundant residuals. WSS_z floor unmoved (9.20 ≡ H357 9.18). **14th decoder/output-side null axis.** | **H363 CLOSED 05:30Z** |
 | **Tangent-basis output head (Finding O)** | `tangent-basis-output-head-boundary-null` — Native tangent-basis residual output (τ·n=0 by construction) + LayerNorm-gated head_corr. Phase 1 raw 5bp behind H336. Post-TTA+cal val_cal 5.8963 / test_cal 5.7366 — within 0.1bp of H342 gate (noise floor). WSS_z marginally regressed +0.03bp. Output-basis enforcement is physics-correct but did NOT move the WSS_z floor. **15th closed axis. All 3 Morgan P-tier WSS architecture directives have closed null — decisively falsifying the decoder/output hypothesis family.** | **H358 CLOSED 06:00Z** |
+| **Target-magnitude WSS hotspot reweight (Finding P)** | `target-magnitude-wss-hotspot-reweight-overshoot` — Per-point loss weight = γ on top-decile (||target_WSS||>4.844 Pa) WSS points, baseline weight elsewhere. γ=3 Arm A: EP14 val_abupt 6.586% (+69bp vs gate, +57bp vs H336 EP13 source). All channels regressed including unreweighted VP +105bp (Lion sensitivity to 1.20× WSS-mass shift breaks H342-tuned balance). Hotspot mask diagnostics confirmed 10% mask captures 6.1× mean magnitude points — mechanism implemented correctly, **idea failed**. Arm B γ=5 skipped per close rule. **Cumulative scalar-reweighting axis now CLOSED — 6 nulls (H338, H339, H341, H346, H361, H364). H336 fine-tune basin is brittle to gradient-mass rebalancing; bottleneck is REPRESENTATION CAPACITY, not loss geometry.** | **H364 CLOSED 06:30Z** |
 
 ---
 
-## Active Fleet (2026-06-02 06:00Z — 8/8 WIP students, fleet fully active)
+## Active Fleet (2026-06-02 06:40Z — 8/8 WIP students, fleet fully active)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
@@ -57,7 +58,7 @@
 | **#1551** | askeladd | H359: Multi-scale surface kNN branch — Phase 1 done (val_raw ~6.013, 10bp behind SOTA). Single-cp TTA `kwe8tynw` triage running. If not approaching ~5.91 val_cal → close as null. | 🟡 WIP — TTA triage |
 | **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 done, eval `8cqqpd9x` (h360-eval-lappe32) running. | 🟡 WIP — eval phase |
 | **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side: pre-softmax bias α_l·1[j∈kNN(i)] on slice-routing logits, per-layer learnable α init=0. Step-0 invariant. Student's own B1 suggestion post-H363. | 🟡 WIP — smoke + Phase 1 |
-| **#1557** | edward | **H364: Target-magnitude top-decile WSS hotspot reweight** — γ=3 Arm A / γ=5 Arm B conditional. Per-point weight based on ||target_wss|| top-decile. Orthogonal to all prior scalar reweights. | 🟡 WIP — Phase 1 |
+| **#1562** | edward | **H368: WSS spatial-gradient consistency loss (kNN-8 edge-pair matching)** — Zero-param structural loss term: matches predicted WSS edge-gradients (over kNN-8 neighbors) to target edge-gradients. Acts on point-PAIR differences, not per-point magnitudes. Addresses Edward H364 #3 suggestion (high-frequency WSS_z error structure). Different from H347 nezuko (variance penalty), H361 (per-point decomposition), H345 (gradient conflict). Phase 1 from H336 EP13. | 🆕 just assigned 06:35Z |
 | **#1561** | frieren | **H367: Anisotropic surface attention via local tangent frame** (JUST ASSIGNED 06:00Z) — Encoder-side, zero new params (only per-layer learnable scalar γ_l for anisotropy gating, init=-10 for step-0 invariance). Q/K rotated into per-vertex local frame (t1,t2,n) constructed from surface normal. Captures surface intrinsic anisotropy directly in attention. Student's natural follow-up to their own H358 close — same physics intuition, applied at ENCODER not OUTPUT. | 🆕 just assigned |
 
 ---
@@ -83,7 +84,8 @@
 - OUTPUT BASIS: CLOSED (H358 tangent-basis boundary-null, 15th axis)
 - DECODER CAPACITY: CLOSED (H363 MoE null, 14th axis)
 - PHYSICS CONSTRAINT: H347 BL priors (nezuko) — long cascade running
-- LOSS (aligned objective per-point): H364 hotspot reweight (edward) — Phase 1 running
+- LOSS (per-point scalar reweighting axis): CLOSED — 6 nulls cumulative (H338, H339, H341, H346, H361, H364)
+- LOSS (structural edge-pair gradient matching): **H368 WSS spatial-gradient consistency (edward)** — just assigned — zero-param, kNN-8 edge gradient L2 matching
 - TTA (cross-basin): H365 FastSWA cyclic-LR (thorfinn) — Phase 1 training
 
 ### Morgan directive queue (Issue #1056) — ALL P-TIER FALSIFIED
