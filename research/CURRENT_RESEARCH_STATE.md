@@ -1,11 +1,22 @@
 # SENPAI Research State
 
+- **2026-06-02 14:20Z** (H194 EP8 ALL 4 METRICS STILL DESCENDING fresh lows everywhere — strongest fleet candidate; H195 EP2 7.2661 matches H147 EP2=7.26 exactly; H196 frieren smoke launched 14:12Z EP1 ETA ~14:55Z; H193 EP13 8th uptick zone)
 - **2026-06-02 13:50Z** (H192 CLOSED NON-MERGE — hypothesis FALSIFIED, upweighted τ_z largest regress +0.225pp; H196 frieren VP-Charbonnier=0.2 PR #1571 dispatched; H193 EP13 WSS 7th consec POS slope VP plateau; H194 EP8 + H195 EP2 boundaries imminent)
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → ∂u/∂n → WSS) as highest-leverage untried mechanism, TANGENT-BASIS OUTPUT HEAD as 2nd priority. Both require architectural changes larger than current fleet scope.
 - **Human check-in (issue #1056, 18:39Z):** No new messages since 19:27Z 2026-06-01.
+
+## 14:20Z checkpoint — **H194 EP8 all-4-metric fresh-low descent (strongest in fleet)**; H195 EP2 H147-trajectory match; H196 frieren smoke launched 14:12Z; H193 EP13 8th-uptick zone
+
+### Actions taken this cycle (14:20Z)
+- **H194 EP8 boundary cluster ack** posted on PR #1559 (nezuko): WSS=6.7411 ↓-0.0459, VP=3.5865 ↓-0.0175 fresh low, AB=5.9693 ↓-0.0379 fresh low, SP=3.8787 ↓-0.0099 fresh low — **ALL 4 METRICS STILL DESCENDING**, strongest descent in fleet, vs H183 SOTA WSS=6.4427 gap closed to -0.30pp with 17 EPs remaining
+- **H195 EP2 boundary ack** posted on PR #1565 (fern): WSS=7.2661 matches H147 EP2=7.26 exactly; tau_y=1.3 not yet differentiating at EP2; EP3 (~14:42Z) first separation gate
+- H196 frieren smoke run `gtwndogn` confirmed launched 14:12Z (epochs=1 smoke), vol_p_charbonnier_weight=0.2 config verified, EP1 ETA ~14:55Z
+- Identified fern config.agent empty cause for rank-0 lookup miss — fixed via wandb_group regex filter; rank-0 = 7ergjfh4
+- Identified H194 rank-0 = tne4wsap (not c74lnfe1 from previous probe — multi-rank ambiguity)
+- H193 EP13 last read at step 142687 — EP14 step ~153663, current summary step ~147246 (mid-EP14)
 
 ## 13:50Z checkpoint — **H192 CLOSED NON-MERGE**, H196 frieren dispatched; H193 EP13 WSS 7th consec POS slope VP plateau; 4/4 students active again; H194/H195 boundaries imminent
 
@@ -38,14 +49,14 @@
 - Assigned fern H195 (PR #1565): tau_y_loss_weight=1.3 on H183 stack
 - Posted EP5/EP9/EP25 acks on H194/H193/H192
 
-### Fleet snapshot at 13:22Z
+### Fleet snapshot at 14:20Z
 
 | Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | val_AB | val_SP | Status |
 |---|---|---|---|---:|---:|---:|---:|---:|---|
-| nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | EP7 (7.06h) | **6.7870 ↓ (-0.0150)** | **3.6040 ↓ (-0.0630 STRONG)** | **6.0072 ↓ (-0.0258)** | **3.8886 ↓ (-0.0136)** | **ALL 4 DESCENDING — already BELOW EP10 gate ≤6.80 at EP7, strongest in fleet** |
-| fern | #1565 | H195 tau_y=1.3 on H183 stack | 7ergjfh4 main | EP1 (0.91h) | **12.8412** | 14.2048 | 13.0318 | 8.7329 | ON-SHAPE H183 EP1=12.82 match, mechanism non-disruptive at init, kill ladder activates EP3 |
-| frieren | #1571 | **H196 vol_p_charbonnier=0.2 (NEW)** | (pending) | smoke launch (post-13:50Z) | — | — | — | — | Direct VP-isolation hypothesis (double H183 default 0.1); single-var change; smoke-then-30EP-main. Replaces H192 (PR #1541 closed NON-MERGE 13:46Z). |
-| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP13 (10.40h) | **7.7670 ↑ (+0.0505)** 7th POS | 3.7048 ↔ (+0.0034 plateau) | 6.5983 ↑ (+0.0274) | 3.9713 ↑ (+0.0073) | VP descent EXHAUSTED at 3.70 plateau; broader uptick at EP13; WSS NON-MERGE firmly locked in. Continue mid-train. |
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | **EP8 (8.11h)** | **6.7411 ↓ (-0.0459)** | **3.5865 ↓ (-0.0175 fresh)** | **5.9693 ↓ (-0.0379 fresh)** | **3.8787 ↓ (-0.0099 fresh)** | **ALL 4 METRICS DESCENDING — strongest in fleet, -0.30pp from H183 SOTA WSS=6.4427 with 17 EPs remaining** |
+| fern | #1565 | H195 tau_y=1.3 on H183 stack | 7ergjfh4 main | **EP2 (1.97h)** | **7.2661** | 4.9930 | 6.6910 | 4.2132 | H147 EP2=7.26 MATCH exactly — tau_y not differentiating yet, EP3 first separation gate ~14:42Z |
+| frieren | #1571 | **H196 vol_p_charbonnier=0.2** | gtwndogn smoke | **0.21h (epochs=1)** | — | — | — | — | Smoke launched 14:12Z, EP1 ETA ~14:55Z. Direct VP-isolation hypothesis (double H183 default 0.1); single-var change. Replaces H192 (PR #1541 closed NON-MERGE 13:46Z). |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP13 (10.79h) | **7.7670 ↑ (+0.0505)** 7th POS | 3.7048 ↔ (+0.0034 plateau) | 6.5983 ↑ (+0.0274) | 3.9713 ↑ (+0.0073) | VP descent EXHAUSTED at 3.70 plateau; broader uptick at EP13; WSS NON-MERGE firmly locked in. Mid-EP14, next read ~14:30-14:45Z |
 
 ### H191 fern — CLOSED NON-MERGE (2026-06-02 11:00Z)
 - run `ayg4liye`, rt=25.04h, test_WSS=6.6080, test_ABUPT=5.7714, test_VP=3.6217, test_SP=3.6506
