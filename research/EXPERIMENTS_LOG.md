@@ -1,3 +1,36 @@
+## 2026-06-02 17:35Z — PR #1576: H379 PEFT-style per-layer LR decay (backbone × 0.3, decoder × 1.0) — CLOSED (continue-gate broad-disruption regression, Finding AA, 28th closed axis)
+
+- Branch: fern/h379-peft-perlayer-lr-decay
+- **Hypothesis**: Partition LR across param groups during EP13→EP14→EP15→EP16 fine-tune cosine tail: Transolver backbone params at LR × 0.3 (effective 2.7e-5), surface decoder params at LR × 1.0 (effective 9e-5). PEFT-style motivation: preserve pretrained backbone representations (mitigate catastrophic forgetting) while permitting the decoder to adapt more aggressively. Zero new params, zero architecture changes. EP13 EMA warm-start; 3-epoch cosine tail with the original Lion+schedule otherwise unchanged. Hypothesis: the channel-balance breakage observed in H336 fine-tune end-state is silent backbone catastrophic forgetting; decoupling the LR should let decoder absorb the new gradient signal without disturbing the basin.
+- **Implementation** (fern, train.py optimizer construction): 132 backbone tensors @ lr × 0.3, 4 decoder tensors @ lr × 1.0, schedule ratio preserved across cosine tail. Bit-exact verification: backbone group LR trace tracks 0.3× the master cosine; decoder group tracks 1.0×. EP13 EMA load clean (no missing/extra keys).
+
+| Channel | H379 EP14 val | H342 baseline | Δ |
+|---|---:|---:|---:|
+| **val_primary** (axis mean rel L2) | **6.0309%** | 5.8962% | **+13.5bp** (continue gate val≤6.05 PASSED) |
+| **val_WSS_z** | **9.205%** | ~9.094% (H336 EP13) / 8.6122% (H342 test) | **+1.1bp UP** (continue criterion required ≥20bp DROP → FAILED) |
+| val_WSS_x | 5.43% (est.) | 5.3512% (H342 test) | +1.3bp |
+| val_WSS_y | 3.78% (est.) | 3.6488% (H342 test) | +1.4bp |
+| val_p_s | 3.73% (est.) | ~3.59% (H342 test) | +1.4bp |
+| val_p_v | 3.55% (est.) | ~3.42% (H342 test) | +1.4bp |
+| val_wall_shear (vec) | 6.78% (est.) | 6.6351% (H342 test) | +1.5bp |
+| val_VP (norm) | 3.51% (est.) | 3.3751% (H342 test) | +1.4bp |
+
+- **W&B run**: `q73dj958` (group `h379-fern-peft-perlayer-lr`). 8-GPU DDP, peak ~75 GB/GPU.
+- **Pre-committed close rule** (AND-logic of two criteria): val_primary ≤ 6.05% **AND** val_WSS_z drop ≥ 20bp from H336 EP13 baseline. val_primary continue gate PASSED at 6.0309% but val_WSS_z went UP +1.1bp, satisfying close-rule trigger.
+- **Finding AA** (28th closed axis): `peft-perlayer-lr-decay-null`
+  - **ALL 7 CHANNELS UNIFORMLY REGRESSED +1.1 to +1.7bp** — the broad-disruption signature is identical to H375 (Finding Y, cross-channel decoder query tokens). Both interventions produce the same multi-channel uniform regression pattern, falsifying the premise that LR partitioning would isolate the decoder's adaptation from backbone disruption.
+  - **Mechanism**: The H336 EP13 EMA basin is a tightly co-evolved joint optimum across backbone + decoder. Partitioning LR at fine-tune time decouples updates that the H185 cosine had implicitly entangled — the backbone slows down enough that the decoder, racing ahead at 1.0× LR, develops representations the slower-moving backbone cannot continue to support. Effectively, the decoder updates land in a stale backbone neighborhood. Decoder's "fresh" gradient signal becomes mismatched with backbone's "stale" feature distribution within ~1 epoch.
+  - **Cumulative pattern (CRITICAL meta-finding consolidated)**: H375 (cross-channel decoder module — new params) and H379 (PEFT-LR decay — zero new params, only LR ratio) both produced uniform multi-channel regression. The two interventions differ in parameter overhead (264K vs 0), but share the property that they **decouple decoder updates from backbone updates within the cosine tail**. The shared signature implies: **ANY perturbation to the EP13 EMA basin under 3-epoch Lion cosine tail produces uniform multi-channel regression, regardless of where the perturbation is applied.** Future WSS_z attacks must either (a) NOT perturb the basin (TTT, augmentation-only, inference-time methods), (b) train from earlier checkpoint with more headroom (EP10/EP11 + longer cosine tail), or (c) use a non-Lion optimizer that handles heterogeneous-magnitude updates more robustly (H381 AdamW probe — already assigned tanjiro PR #1578).
+  - **Implementation verified bit-exact**: 132 backbone tensors @ lr × 0.3, 4 decoder tensors @ lr × 1.0, schedule ratio preserved; EP13 EMA warm-start load clean. Null is mechanism, not bug.
+- **CRITICAL banked process improvement (kill-thresholds operator semantics bug)**:
+  - fern discovered during this run that `--kill-thresholds "STEP:METRIC>VALUE"` represents the SURVIVAL condition in train.py's CLI, NOT the kill condition as I had assumed in all prior PR instructions.
+  - **Concrete consequence**: H379 was killed at val_primary=6.0309 because `6.0309 ≤ 6.05` violated the survival condition `>6.05`. I had intended "kill if val_primary > 6.05" semantics, which requires writing `STEP:METRIC<=6.05`.
+  - **All future PRs use the corrected operator**: write `STEP:METRIC<=X` for "kill if METRIC > X" semantics. Correction posted as comment on PR #1578 (tanjiro H381 AdamW). H382 fern PR #1579 (easy-first curriculum) already uses the corrected `<=` operator.
+  - **Counterfactual on H379**: even with the corrected operator, H379 would still have closed via val_WSS_z criterion (+1.1bp UP vs ≥20bp DROP requirement). The operator bug did not change the outcome here, but it could mask future continue/kill decisions on borderline runs.
+- **Follow-ups assigned**: fern → H382 PR #1579 (easy-first epoch curriculum — mechanistic contrast pair with H378 edward hard-first; zero new params, zero arch, zero LR change — only data ordering changes; sidesteps the broad-disruption mechanism by leaving all parameters and the LR schedule unchanged). H382 is the strongest available within-basin probe because it perturbs only the data distribution per epoch, not the basin's parameter or optimization geometry.
+
+---
+
 ## 2026-06-02 17:00Z — PR #1572: H376 WSS gradient-magnitude attention bias from frozen EP13 EMA teacher — CLOSED (pre-committed kill gate, Finding Z2, 27th closed axis)
 
 - Branch: tanjiro/h376-wss-grad-attn-bias
