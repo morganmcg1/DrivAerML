@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 08:35Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 09:15Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -60,7 +60,8 @@
 | **#1551** | askeladd | H359: Multi-scale surface kNN branch — Phase 1 done (val_raw ~6.013, 10bp behind SOTA). Single-cp TTA `kwe8tynw` triage running. If not approaching ~5.91 val_cal → close as null. | 🟡 WIP — TTA triage |
 | **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 done, eval `8cqqpd9x` (h360-eval-lappe32) running. | 🟡 WIP — eval phase |
 | **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side: pre-softmax bias α_l·1[j∈kNN(i)] on slice-routing logits, per-layer learnable α init=0. Step-0 invariant. Student's own B1 suggestion post-H363. | 🟡 WIP — smoke + Phase 1 |
-| **#1562** | edward | **H368: WSS spatial-gradient consistency loss** | ❌ **CLOSED 09:05Z** Finding R. EP14 val 6.503% (+49bp); VP +100bp untouched-channel collapse. H370 next: non-loss-tier pivot. |
+| **#1562** | edward | **H368: WSS spatial-gradient consistency loss** | ❌ **CLOSED 09:05Z** Finding R. EP14 val 6.503% (+49bp); VP +100bp untouched-channel collapse. → H370 assigned. |
+| **#1564** | edward | **H370: ISAB middle-layer REPLACE** — Set Transformer inducing-point attention block, M=32 per-head inducing points (`[H=4, M=32, dim_head=128]`), REPLACE middle 3 of 5-layer Transolver stack (idx 1,2,3), keep idx 0 and idx 4. Non-capacity-additive architectural rewrite — replaces O(S²) self-attention with O(SM) inducing-point cross-attention. **Vetted by researcher-agent**: per-head inducing points (not global), trunc_normal init std=0.02, `find_unused_parameters=False`, REPLACE pattern forces clean reroute from step 1. Pre-committed close rule: EP14 val > 6.05% → close. | 🟡 WIP — Phase 1 (just assigned 09:15Z) |
 | **#1561** | frieren | **H367: Anisotropic surface attention via local tangent frame** | ❌ **CLOSED 08:30Z** Finding Q. Reassigning H369 RWPE next. |
 
 ---
@@ -71,7 +72,7 @@
 
 **Live attack tier (post-H368)**: 
 - **Input-feature axis** (3 in flight): H359 multi-scale local kNN (askeladd), H360 LapPE-32 global spectral (fern, val_raw 6.012% neutral-positive), H369 RWPE-16 local topology (frieren)
-- **Non-capacity-additive architectural rewrites** (NEW PRIORITY for edward H370): inducing-point attention bottleneck (Set-Transformer ISAB), sparse+global attention hybrid, heat-kernel signature PE
+- **Non-capacity-additive architectural rewrites** (NEW PRIORITY — edward H370 PR #1564 LIVE): inducing-point attention bottleneck (Set-Transformer ISAB M=32 per-head, REPLACE layers 1,2,3 of 5; researcher-vetted); sparse+global attention hybrid; heat-kernel signature PE next
 - **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn)
 - **Encoder kNN proximity bias** (low-touch attention modulation): H366 (tanjiro, Phase 1 crashed mid-EP14)
 - **Physics-prior cascade**: H347 BL priors (nezuko, long cascade)
