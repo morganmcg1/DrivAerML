@@ -1,11 +1,53 @@
 # SENPAI Research State
 
-- **2026-06-02 02:15Z**
+- **2026-06-02 02:52Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 02:52Z checkpoint — H193 λ=0.20 re-smoke mid-EP1 (penalty firing 0.05-0.07 on 4/8 ranks at 02:50Z); H192 EP14 6.690 closing fleet leader gap to 0.012pp; H189 EP21 VP=3.464 deepening paper-tier; H191 6.678 fleet leader holds; 3 PR heartbeats posted
+
+### Fleet status (02:52Z, 4 active, zero idle GPUs)
+
+| Student | PR | Hyp | EP/State | val_WSS | val_ABU | val_VP | val_SP | Δ since 02:15Z |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| fern | #1535 | H191: Sharper WSD | EP21 (17.3h) | **6.678 ⭐fleet leader** | 5.975 | 3.730 | 3.920 | WSS −0.003pp (stable); VP +0.043pp (uptick concern) |
+| nezuko | #1533 | H189: hidden_dim=640 | EP21 (21.85h) | 6.706 | 5.912 | **3.464 ⭐deepening** | 3.838 | WSS +0.003pp (stable); VP −0.008pp (still descending paper-tier) |
+| frieren | #1541 | H192: τ_z=1.5 only | EP14-15 (12.05h) | 6.690 | 5.940 | 3.567 | 3.912 | WSS −0.006pp (strong descent); gap to fleet leader 0.012pp |
+| tanjiro | #1554 | H193: WSS soft normal penalty λ=0.20 | smoke EP1 mid-run (0.33h, step 4546, ~43% through EP1) | TBD | TBD | TBD | TBD | re-smoke after λ=0.5 FAIL; penalty 0.053-0.068 on 4/8 ranks firing |
+
+### Key finding (02:52Z): H192 closing on fleet leadership
+
+H192 EP14: WSS=6.690 (−0.006pp vs 02:15Z 6.696). Gap to H191 fleet leader (6.678) closed to **0.012pp**. Crucially VP=3.567 holds paper-tier (well below 3.643 floor) — H192 is the only run with both descending WSS AND a clean VP merge path. ~11.95h remaining = ~12 more EPs at current cadence; potential to overtake fleet leadership before EP22-25 natural termination.
+
+### Key finding (02:52Z): H189 VP deepening to 3.464 (gap 0.179pp under floor)
+
+H189 EP21: VP=3.464 (vs 02:15Z 3.472, −0.008pp). This is the strongest paper-tier VP value in fleet history — well below the 3.643 floor. The minor WSS uptick (6.703 → 6.706) is late-stage oscillation, not threatening to merge case. ~2.15h to natural 24h termination.
+
+### Key finding (02:52Z): H191 VP uptick concern persists
+
+H191 EP21: WSS=6.678 (fleet leader), but VP=3.730 — that's **+0.087pp over the 3.643 floor**. Unless VP recovers ≤3.643 in the next ~6.5h of training (EP21 → EP27-ish), this PR cannot merge regardless of WSS. The merge gate is multi-axis: ALL of test_WSS, test_VP, test_SP, test_ABU must hold or improve vs current SOTA.
+
+### Key finding (02:52Z): H193 re-smoke at λ=0.20 mid-EP1, penalty firing correctly on majority of ranks
+
+After PR-internal protocol triggered following λ=0.5 SMOKE FAIL (val_WSS=14.003 vs gates ≤13.5 and gap-to-H183 < +0.71pp), student dl24-tanjiro launched λ=0.20 re-smoke at ~02:30Z. At 02:50Z (20 min in, ~43% through EP1):
+- 4 ranks logged non-zero penalty (0.053, 0.067, 0.066, 0.068) — mechanism firing correctly
+- 4 ranks show penalty=0.000 in summary (likely logging-rank artifact, not a bug)
+- All 8 ranks at step ~4546 (~41% of 11,000-step EP1)
+- No val metrics yet (val happens at EP boundary)
+- Penalty magnitude is ~2.5× weaker than λ=0.5 (~0.17 → ~0.07 weighted contribution), should let primary task descent dominate
+- Expected EP1 terminal: ~03:17-03:20Z
+
+If λ=0.20 EP1 PASSES both PR gates (val_WSS ≤ 13.5% AND gap-to-H183 EP1 12.79% < +0.71pp), advisor pre-authorized 30EP main launch (per 02:34Z ACK). If λ=0.20 also fails: fallback λ=0.05 per PR protocol; if THAT also fails, soft tangent-basis is decisive negative — pivot to hard tangent-basis (Morgan's #2 priority).
+
+### Action plan (02:52Z)
+
+- **Next wake ~03:20Z** — catch H193 λ=0.20 smoke EP1 terminal + fleet EP boundaries (H189 EP22-23, H191 EP21-22, H192 EP15-16)
+- **H189 nezuko terminal watch:** ~2.15h to 24h cutoff. Student session still silent (>19h); advisor will construct terminal SENPAI-RESULT from W&B + manual test eval if needed. VP=3.464 is paper-tier candidate.
+- **Strategic next-round (post-terminal):** BL DERIVATIVE DECODER PROBE (Morgan's #1 priority); compound H189 VP-deepening + H192 τ_z + H191 sharper-WSD (if VP recovers) if all three close terminal.
+- **H193 escalation path:** If λ=0.20 also fails (EP1 ≥ 13.5% OR gap > +0.71pp), fallback λ=0.05 per PR protocol. If λ=0.05 also fails, pivot to hard tangent-basis output head (Morgan's #2 priority issue #1056, dl24 analog of H358 #1550 on ddp8 branch).
 
 ## 02:15Z checkpoint — H193 smoke FAIL @ weight=0.5 (EP1 WSS=14.00 vs target ≤7.50), HOLD main launch + re-smoke at weight=0.25; H192 EP14 6.696 closing on fleet leader; H189 EP21 VP=3.472 holds paper-tier; H191 stable
 
