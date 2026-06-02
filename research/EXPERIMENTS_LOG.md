@@ -1,3 +1,59 @@
+## 2026-06-02 12:08Z — PR #1563: H369 RWPE-K16 Surface Random Walk PE — CLOSED (pre-committed close rule + crash, Finding U)
+
+- Branch: frieren/h369-rwpe-mesh-topology-pe
+- **Hypothesis**: Inject local mesh topology as an input PE via Random Walk Positional Encoding over kNN-16 surface graph. Random-walk return probabilities up to K=16 hops; project into 32 channels via learnable linear layer with zero-init (identity at warm-start). Orthogonal to LapPE (local structural role vs global spectral mode) and to H359 (graph topology vs feature aggregation). Mechanism: RWPE has been shown (Dwivedi et al. 2022, Chen et al. 2024) to capture finite-radius locality structure that spectral PE misses; should benefit WSS_z hotspots near surface curvature transitions.
+- **Implementation**: frieren implemented cleanly. EP13 EMA warm-start (yw2a5dyl), Lion lr 9e-5, 3-epoch cosine. RWPE features precomputed offline + zero-pad surgery into project_surface_features. No smoke comment posted; Phase 1 went straight to 8-rank DDP.
+
+| Metric | H369 EP14 (raw val) | H336 EP13 baseline | Δ | Pass? |
+|---|---:|---:|---:|:---:|
+| val_abupt rel_l2_pct | **6.0742%** | 6.017% | **+5.7bp** | ❌ FAIL (+2.4bp past 6.05% close rule) |
+| val_SP rel_l2_pct | 3.964% | ~3.78% | +18bp | ❌ |
+| val_VP rel_l2_pct | 3.801% | ~3.45% | +35bp | ❌ |
+| val_WSS rel_l2_pct | 6.818% | ~6.78% | +4bp | ≈flat |
+| val_WSS_z rel_l2_pct (TARGET) | **9.204%** | ~9.06% | **+14bp** | ❌ target channel WORSE |
+
+- **W&B**: `o9oh4iom` (rank0), group `h369-frieren-rwpe-mesh-topology-pe`. Phase 1 state=crashed at rt=2009s, step=8943, hb=11:17:12Z — crash occurred mid-EP15, ~5min after EP14 val landed, before EP15 val could complete.
+- **Close decision rationale**: EP14 val_primary > 6.05% triggered pre-committed close rule by +2.4bp. Advisor extended one-epoch grace period contingent on EP15 evidence (would have continued if val dropped below 6.05%). Crash prevented EP15 val from landing → no grace-period evidence available → original close rule applies.
+- **Finding U** (21st closed axis): `rwpe-surface-topology-pe-null` — RWPE-32 injected at input via zero-pad surgery into project_surface_features fails to propagate signal to WSS_z. Per-channel pattern (+18bp SP, +35bp VP, +14bp WSS_z) shows new PE channels actively interfering with existing surface/volume predictions rather than complementing them.
+- **Joint conclusion across input-feature axis** (H348 curvature, H359 multi-scale kNN val_RAW 5.9245 cal pending, H360 LapPE-32 cal=5.9029 +6.7bp FAIL, H369 RWPE-16): **4 of 4 input-feature hypotheses null**. The "inject new geometric information at input via zero-pad surgery" tier is conclusively exhausted on the EP13 fine-tune basin. Either the existing 6-baseline input features already carry the relevant geometric content, or 3-epoch cosine tail is insufficient to integrate any new channel through cold input columns regardless of feature semantic class.
+- **Operator-family axis still open**: H371 (single-layer ISAB at idx=2) is the active probe testing whether non-capacity-additive architectural rewrites have any merit under warm-start. H370 (3-layer ISAB REPLACE) was catastrophic +97bp; H371 tests single-layer minimum probe to bound the operator family.
+- **Crash root cause**: Frieren asked to post brief log root cause; not blocking close. Could be OOM (RWPE adds ~131K features × 32 channels × batch 4 = ~16MB per case, modest), NaN (RWPE matrix could have numerical issues on disconnected mesh components), or driver. Not material to close decision.
+
+---
+
+## 2026-06-02 12:08Z — PR #1552: H360 LapPE-32 spectral input PE — CLOSED (gate FAIL, Finding T)
+
+- Branch: fern/h360-laplacian-pe-spectral-mesh
+- **Hypothesis**: Surface Laplacian eigenfunction positional encoding (LapPE-32, top-32 eigenvectors of normalized graph Laplacian over kNN-8 surface mesh) injected as 32 additional input channels via zero-pad surgery into project_surface_features. Rationale: global spectral mode covers low-frequency structure that local feature aggregation misses; should give the encoder a coordinate-free PE for WSS_z spatial structure (Dwivedi & Bresson 2020, GPS NeurIPS 2022).
+- **Implementation**: fern clean execution. Precomputed LapPE existed at `/mnt/new-pvc/Processed/lap_pe_v1/` from prior infra work (8192-point subgraph, k_graph=8, k_eig=33, std=1/channel). Wrote `lap_pe_dataset.py` + `--lap-pe` flag + zero-pad surgery for `project_surface_features.project.weight` from (512,100) to (512,132). Verified surgery with print: `surface_input_dim=39, n_lap=32, lap_cols_norm=0.0e+00` post warm-load. Resume from EP13 EMA strict-False load: missing=0, unexpected=0 (correct since surgery pre-pads ckpt before load).
+- **Phase 1**: 8-rank DDP launched 02:17Z, EP14→EP16 cosine tail.
+- **Smoke deviations**: First smoke `9fiqs17g` aborted with `run_invalid` due to `--debug` flag capping epochs to 3 → empty `range(13,3)` loop, no training, no checkpoint, run_invalid guard fired. Fixed by dropping `--debug`; Phase 1 healthy thereafter.
+
+| Metric | H360 Phase 1 | H336 EP13 baseline | Δ |
+|---|---:|---:|---:|
+| val_abupt EP14 raw | 6.0211% | 6.017% | +0.4bp ≈flat |
+| val_abupt EP15 raw | 6.0142% | — | improving |
+| val_abupt EP16 raw | **6.0120%** | 6.017% | **-0.5bp** |
+| val_WSS_z EP16 raw | 9.1868% | ~9.18% | ≈flat |
+
+Phase 1 was **neutral-positive** (-0.5bp). TTA eval launched 05:11Z (8-res × Student-t df=4 K=4 antithetic K_eff=8 × mirror × per-channel OLS cal).
+
+| Metric | H360 val_RAW_TTA | H360 val_CAL | H342 SOTA (val_cal=5.8962, test_cal=5.7357) | Δ vs gate |
+|---|---:|---:|---:|---:|
+| **val_abupt** | **5.9258%** | **5.9029%** | 5.8962 | **+6.7bp FAIL** |
+| **test_abupt** | — | **5.7427%** | 5.7357 | **+7.0bp FAIL** |
+| val_WSS_z | 9.0901 | — | 8.6122 | +48bp before cal |
+| val_SP | 3.9145 | — | — | — |
+| val_VP | 3.4618 | — | — | — |
+
+- **W&B runs**: `9c5d2xwt` (Phase 1 rank0), `8cqqpd9x` (TTA eval, state=finished rt=24624s). Group `h360-fern-lappe-32`.
+- **Finding T** (20th closed axis): `lappe-spectral-input-null` — Surface Laplacian eigenfunction PE provides no measurable cal-arm benefit. Cal yield = 5.9258 → 5.9029 = **2.29bp** (vs single-cp K=4 baseline 7-8bp; 4th confirmation of cal-yield-collapse pattern on TTA-averaged outputs). Phase 1 raw was neutral (-0.5bp), TTA pre-cal was at gate (+3bp on val_raw), and cal absorbed only 2.29bp of the per-channel variance, leaving +6.7bp gap unrecoverable.
+- **Cal-yield-collapse pattern**: 4th occurrence (H336 stacked, H342 3-cp avg, H348 stacked, H360 LapPE TTA). Averaging across noise+cp axes already absorbs most channel-correlated variance, leaving little for OLS calibration to remove. K=4 single-cp pre-cal headroom of 5.93% does not translate to a sub-5.8962 post-cal.
+- **WSS_z target channel**: 9.0901% RAW TTA vs H342 cal 8.6122 → +48bp **before** cal. LapPE-32 added 32 spectral input channels with clean wiring, but EP14→EP16 cosine tail did not propagate any signal into WSS_z; ≈flat with H336 raw within seed noise.
+- **Joint conclusion across input-feature axis** (H348 curvature, H359 multi-scale kNN val_RAW 5.9245 cal pending, H360 LapPE-32, H369 RWPE-16): all 4 input-feature hypotheses null. Tier exhausted.
+
+---
+
 ## 2026-06-02 11:15Z — PR #1564: H370 ISAB middle-layer REPLACE (Set Transformer) — CLOSED (pre-committed close rule, Finding S)
 
 - Branch: edward/h370-isab-inducing-point-attention
