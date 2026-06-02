@@ -1,11 +1,47 @@
 # SENPAI Research State
 
-- **2026-06-02 04:47Z**
+- **2026-06-02 05:08Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
-- **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+- **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding. Tay (ddp8 branch) reports their H342 output-space checkpoint averaging SOTA test_WSS=6.6351% on ddp8 stack. No new human messages since 19:27Z 2026-06-01.
+
+## 05:08Z checkpoint — **H191 EP25 VP=3.6668 PLATEAU CONFIRMED** (slope/1k=+0.0009 RISING, WSD decay failing); **H192 EP18 VP=3.5462 FLOOR HOLDING** (all slopes NEGATIVE, descent continues); **H193 EP2 STRONG DESCENT** (13.30→7.87 in EP1-2, -0.494/1k slope); **H194 SMOKE ACTIVE** (8/8 ranks rt=0.36h, EP1 ETA ~06:25Z)
+
+### Actions taken this cycle
+- Heartbeat on PR #1535 (H191): VP plateau + positive slope warning, falsification of WSD recovery hypothesis
+- Heartbeat on PR #1541 (H192): VP cleared paper-tier, descent continues, fleet leader on merge path
+- Heartbeat on PR #1554 (H193): EP2 strong descent ack, EP3 gate ~06:30Z tight but plausible
+- Heartbeat on PR #1559 (H194): smoke launch CONFIRMED 8/8 ranks rt=0.36h step=4094
+
+### Fleet snapshot at 05:08Z
+
+| Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | Status |
+|---|---|---|---|---:|---:|---:|---|
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | n1imnpsk | smoke 0.36h | — | — | active EP1 ETA ~06:25Z |
+| fern | #1535 | H191 sharper WSD 31EP | ayg4liye | EP25 (19.74h) | 6.676 | **3.667 (+0.024pp over floor, slope RISING)** | ⚠️ NON-MERGE imminent at terminal ~09:30Z |
+| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | EP18 (14.46h) | **6.6747 (descending)** | **3.5462 ✅ −0.097pp UNDER floor** | cleanest merge path, 12 EPs left |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP2 (1.64h) | **7.873 (−5.42pp from EP1)** | 4.999 (-8.98pp) | strong descent, EP3 ≤7.50 gate ~06:30Z |
+
+### H191 fern — WSD recovery hypothesis FALSIFIED at late cosine
+val_VP slope per_1k_steps = **+0.0009 (RISING)**. All 4 metric slopes positive in late cosine decay phase. WSD recovery theory predicted re-acceleration of descent when LR drops to 1e-6 — instead the model is drifting upward by ~0.001/1k = +0.124pp expected over remaining 65k steps (6 EPs). NON-MERGE confirmed barring miraculous late-EP recovery. Decisive negative result — H183 stack lacks the slack for WSD to help.
+
+### H192 frieren — descent rate analysis at EP18 of 30
+Recent trajectory: EP14=6.696 → EP15=6.690 → EP17=6.679 → EP18=6.6747. **Slope per_1k_steps=−0.0004**. With ~131k steps to terminal: expected −0.052pp drop → final val_WSS ~6.62-6.63. Typical val→test gap is ~−0.10pp so projected test_WSS ~6.52-6.55, still above H183 SOTA 6.443 by ~+0.08pp. Direct merge unlikely unless final cosine sharpens descent (often seen in last 3-5 EPs). VP safety margin substantial (0.097pp below floor) → even slight VP regression won't break merge.
+
+### H193 tanjiro — penalty mechanism confirmed (z-axis preferential effect)
+EP2 val_WSS_z slope=−0.6467/1k > val_WSS_x slope=−0.4397/1k. The soft tangent penalty is preferentially helping the dominant z-axis as designed. EP3 prediction: 7.87 − (0.494 * 11.0k/1k) = 7.87 − 5.43 = ~2.4 nominal, but val variance is large; realistic landing 7.0-7.5. Gate ≤7.50% should pass.
+
+### H194 nezuko — smoke launch healthy
+DDP8 8/8 ranks confirmed. Rank-0 n1imnpsk rt=0.36h step=4094 / ~10975 (37% into EP1). Smoke gate ≤14.0% val_WSS. EP1 ETA ~06:25Z. Mechanism: H189 compound stack (640d hidden + GradNorm + Charb wss-z) at lr=9e-5 (gentler than H189's lr=1e-4).
+
+### Watch items next 6h
+1. **H192 EP20 (~07:30Z)** — val_WSS ≤6.65% soft gate; VP holding
+2. **H191 EP26-30 (~05:30-09:30Z)** — terminal harvest with NON-MERGE write-up + test eval
+3. **H193 EP3 (~06:30Z)** — first kill gate ≤7.50%
+4. **H194 nezuko smoke EP1 (~06:25Z)** — gate ≤14.0%, then authorize 25EP main launch
+5. **NO IDLE GPUs** — 4/4 students active
 
 ## 04:47Z checkpoint — **H189 CLOSED NON-MERGE** (PR #1533 closed 04:40Z); **H194 ASSIGNED to nezuko** (PR #1559 lr=9e-5 on H189 stack); **H191 EP24 VP=3.667 PLATEAU BLOCKER** (+0.024pp over floor, worsening); **H192 EP17 VP=3.548 FLOOR CLEARED** (strongest merge path); **H193 main EP1 PASS** (val_WSS=13.297, gates clear)
 
