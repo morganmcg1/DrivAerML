@@ -145,6 +145,13 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H375: cross-channel decoder for τ_z conditioning on τ_x/τ_y predictions
+    use_cross_channel_decoder: bool = False
+    cross_channel_query_tokens: int = 4
+    cross_channel_source_channels: str = "wss_x,wss_y"
+    cross_channel_target_channel: str = "wss_z"
+    cross_channel_d_inner: int = 120
+    cross_channel_num_heads: int = 4
     debug: bool = False
 
 
@@ -271,6 +278,42 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "use_cross_channel_decoder": (
+            "H375: enable cross-channel decoder. K learnable query tokens "
+            "cross-attend to per-point predictions of "
+            "--cross-channel-source-channels (default wss_x,wss_y), produce a "
+            "global context vector that conditions a δτ_z residual head "
+            "added to the original prediction of "
+            "--cross-channel-target-channel (default wss_z). Identity at "
+            "init via zero-init xattn out_proj and zero-init δ-head output. "
+            "Surface τ_x/τ_y/cp decoders are unchanged."
+        ),
+        "cross_channel_query_tokens": (
+            "H375: K, number of learnable cross-channel query tokens "
+            "(default 4). Tokens are mean-pooled to a single d_model context "
+            "vector that conditions the δτ_z residual head."
+        ),
+        "cross_channel_source_channels": (
+            "H375: comma-separated list of source channel names that the "
+            "cross-channel query tokens attend over. Default 'wss_x,wss_y'. "
+            "Valid names: cp, wss_x|tau_x, wss_y|tau_y, wss_z|tau_z."
+        ),
+        "cross_channel_target_channel": (
+            "H375: name of the channel that receives the δ residual from the "
+            "cross-channel decoder. Default 'wss_z'. Must differ from all "
+            "--cross-channel-source-channels entries."
+        ),
+        "cross_channel_d_inner": (
+            "H375: inner dimension of the cross-channel decoder. Cross-"
+            "attention runs at d_inner (default 120) rather than the full "
+            "d_model so the cross-channel pathway stays under the +1%% "
+            "parameter overhead cap. Total cross-channel params ~150K with "
+            "d_model=512, d_inner=120 (0.92%% of 17.4M base)."
+        ),
+        "cross_channel_num_heads": (
+            "H375: number of attention heads in the cross-channel decoder "
+            "(default 4). d_inner must be divisible by this value."
         ),
     }
     for field in fields(Config):
@@ -414,6 +457,18 @@ def mirror_augment_batch(batch, p: float = 0.5):
     )
 
 
+def parse_cross_channel_source_channels(spec: str) -> tuple[str, ...]:
+    """Parse comma-separated channel names for --cross-channel-source-channels."""
+
+    spec = (spec or "").strip()
+    if not spec:
+        return ("wss_x", "wss_y")
+    names = tuple(token.strip() for token in spec.split(",") if token.strip())
+    if not names:
+        return ("wss_x", "wss_y")
+    return names
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -429,6 +484,14 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_cross_channel_decoder=config.use_cross_channel_decoder,
+        cross_channel_query_tokens=config.cross_channel_query_tokens,
+        cross_channel_source_channels=parse_cross_channel_source_channels(
+            config.cross_channel_source_channels
+        ),
+        cross_channel_target_channel=config.cross_channel_target_channel,
+        cross_channel_d_inner=config.cross_channel_d_inner,
+        cross_channel_num_heads=config.cross_channel_num_heads,
     )
 
 
@@ -942,7 +1005,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_cross_channel_decoder:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

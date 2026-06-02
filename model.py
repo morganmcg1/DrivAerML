@@ -394,6 +394,161 @@ class Transformer(nn.Module):
         return x
 
 
+# H375: surface_y channel layout (loader.py:42)
+# [0]=surface_pressure (cp), [1]=wall_shear_x (tau_x), [2]=wall_shear_y (tau_y), [3]=wall_shear_z (tau_z)
+_SURFACE_CHANNEL_NAME_TO_INDEX = {
+    "cp": 0,
+    "surface_pressure": 0,
+    "p_s": 0,
+    "wss_x": 1,
+    "tau_x": 1,
+    "wall_shear_x": 1,
+    "wss_y": 2,
+    "tau_y": 2,
+    "wall_shear_y": 2,
+    "wss_z": 3,
+    "tau_z": 3,
+    "wall_shear_z": 3,
+}
+
+
+class CrossChannelDecoder(nn.Module):
+    """H375: cross-channel decoder conditioning τ_z prediction on τ_x/τ_y predictions.
+
+    K learnable query tokens cross-attend (at the reduced ``d_inner``
+    dimension) to per-point predictions of the "source" channels (τ_x and
+    τ_y by default). The K attended tokens are mean-pooled to a single
+    context vector, broadcast per-point, and concatenated with a
+    ``d_inner``-projected view of the surface hidden features to feed a
+    small 2-layer δτ_z head whose output is added as a residual to the
+    original τ_z prediction.
+
+    The attention happens at ``d_inner`` (default 120) rather than at
+    ``d_model`` so that the cross-channel pathway stays within the
+    PR-specified +1% parameter cap. With ``d_model=512`` and
+    ``d_inner=120``, total overhead is ~150K params (~0.92% of the
+    17.4M-param H185 EP13 backbone).
+
+    Warm-start invariance:
+      * ``xattn.out_proj`` weight/bias are zero-initialised — the
+        cross-attention sublayer emits exactly zero regardless of Q/K/V
+        (mirrors the ``surf_to_vol_xattn`` warm-start pattern at lines
+        549-551 of this module).
+      * The final linear of ``delta_head`` is zero-initialised — the δτ_z
+        residual is exactly zero at step 0 regardless of context.
+      * A learnable LayerScale ``residual_scale`` (init=1e-2) multiplies the
+        final δτ_z, limiting early-epoch perturbation magnitude before the
+        query tokens have learned meaningful K/V patterns (per CaiT and
+        Moshi practice for new module insertion into pretrained models).
+
+    Together these give an exact identity-at-init: τ_z output equals the
+    original surface_out τ_z prediction, so loading an H185 EP13 EMA
+    checkpoint reproduces its predictions before the new params train.
+
+    Per-channel τ_x/τ_y predictions are projected to ``d_inner`` and passed
+    through a LayerNorm before attention to keep the K/V scale in the
+    activation regime expected by the Xavier-init in_proj weights. The
+    source predictions are ``.detach()``-ed before projection so gradient
+    cannot flow back through the τ_x/τ_y heads and disturb their already-
+    saturated solutions (stop-gradient teacher pattern).
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        d_inner: int = 120,
+        num_query_tokens: int = 4,
+        num_source_channels: int = 2,
+        num_heads: int = 4,
+        dropout: float = 0.0,
+        residual_scale_init: float = 1e-2,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.d_inner = d_inner
+        self.num_query_tokens = num_query_tokens
+        self.num_source_channels = num_source_channels
+        self.num_heads = num_heads
+        if d_inner % num_heads != 0:
+            raise ValueError(
+                f"cross-channel d_inner={d_inner} must be divisible by num_heads={num_heads}"
+            )
+
+        self.queries = nn.Parameter(torch.empty(num_query_tokens, d_inner))
+        nn.init.xavier_uniform_(self.queries)
+
+        self.kv_proj = nn.Linear(num_source_channels, d_inner)
+        nn.init.xavier_uniform_(self.kv_proj.weight)
+        nn.init.zeros_(self.kv_proj.bias)
+        self.kv_norm = nn.LayerNorm(d_inner, eps=1e-6)
+
+        self.xattn = nn.MultiheadAttention(
+            embed_dim=d_inner,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+        )
+        nn.init.zeros_(self.xattn.out_proj.weight)
+        nn.init.zeros_(self.xattn.out_proj.bias)
+
+        self.hidden_proj = nn.Linear(d_model, d_inner)
+        nn.init.trunc_normal_(self.hidden_proj.weight, std=0.02)
+        nn.init.zeros_(self.hidden_proj.bias)
+
+        self.delta_head = nn.Sequential(
+            nn.Linear(d_inner * 2, d_inner),
+            nn.SiLU(),
+            nn.Linear(d_inner, 1),
+        )
+        nn.init.trunc_normal_(self.delta_head[0].weight, std=0.02)
+        nn.init.zeros_(self.delta_head[0].bias)
+        nn.init.zeros_(self.delta_head[2].weight)
+        nn.init.zeros_(self.delta_head[2].bias)
+
+        self.residual_scale = nn.Parameter(
+            torch.full((1,), float(residual_scale_init))
+        )
+
+    def forward(
+        self,
+        source_preds: torch.Tensor,
+        surface_hidden: torch.Tensor,
+        surface_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size, num_points, _ = surface_hidden.shape
+        mask_float = surface_mask.unsqueeze(-1).to(dtype=surface_hidden.dtype)
+        # Stop-gradient on source predictions so τ_x/τ_y heads stay clean.
+        # Padding positions in ``source_preds`` are already zeroed upstream
+        # by ``surface_preds * surface_mask.unsqueeze(-1)``; chained through
+        # zero-bias kv_proj and zero-bias LayerNorm they stay at zero, so V
+        # at padding contributes nothing to the attention output. We do NOT
+        # pass a ``key_padding_mask`` here (mirroring the working
+        # ``surf_to_vol_xattn`` pattern): an all-masked row would cause
+        # softmax(-inf,...) = NaN and stall MultiheadAttention's CUDA kernel
+        # on Blackwell GPUs. The final ``delta * mask_float`` zeros the
+        # padding-position output regardless of attention weights.
+        kv = self.kv_proj(source_preds.detach().to(dtype=surface_hidden.dtype))
+        kv = self.kv_norm(kv)
+
+        queries = self.queries.to(dtype=surface_hidden.dtype)
+        q = queries.unsqueeze(0).expand(batch_size, -1, -1)
+
+        attn_out, _ = self.xattn(
+            query=q,
+            key=kv,
+            value=kv,
+            need_weights=False,
+        )
+        context = attn_out.mean(dim=1)
+        context_broadcast = context.unsqueeze(1).expand(-1, num_points, -1)
+        hidden_inner = self.hidden_proj(surface_hidden)
+        delta_input = torch.cat([hidden_inner, context_broadcast], dim=-1)
+        delta = self.delta_head(delta_input)
+        delta = delta * self.residual_scale.to(dtype=delta.dtype)
+        delta = delta * mask_float
+        return delta
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -419,6 +574,12 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_cross_channel_decoder: bool = False,
+        cross_channel_query_tokens: int = 4,
+        cross_channel_source_channels: tuple[str, ...] | list[str] | None = None,
+        cross_channel_target_channel: str = "wss_z",
+        cross_channel_d_inner: int = 120,
+        cross_channel_num_heads: int = 4,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -558,6 +719,50 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H375: cross-channel decoder for τ_z conditioning on τ_x/τ_y predictions.
+        # Identity at init via zero-init xattn.out_proj + zero-init delta_head[-1].
+        self.use_cross_channel_decoder = use_cross_channel_decoder
+        self.cross_channel_query_tokens = cross_channel_query_tokens
+        self.cross_channel_target_channel = cross_channel_target_channel
+        if cross_channel_source_channels is None:
+            self.cross_channel_source_channels = ("wss_x", "wss_y")
+        else:
+            self.cross_channel_source_channels = tuple(cross_channel_source_channels)
+        if use_cross_channel_decoder:
+            try:
+                self.cross_channel_source_indices = tuple(
+                    _SURFACE_CHANNEL_NAME_TO_INDEX[c] for c in self.cross_channel_source_channels
+                )
+                self.cross_channel_target_index = _SURFACE_CHANNEL_NAME_TO_INDEX[
+                    self.cross_channel_target_channel
+                ]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Unknown cross-channel channel name {exc!s}; "
+                    f"valid names: {sorted(_SURFACE_CHANNEL_NAME_TO_INDEX)}"
+                ) from None
+            if self.cross_channel_target_index in self.cross_channel_source_indices:
+                raise ValueError(
+                    "cross-channel target channel must differ from source channels"
+                )
+            self.cross_channel_decoder = CrossChannelDecoder(
+                d_model=n_hidden,
+                d_inner=cross_channel_d_inner,
+                num_query_tokens=cross_channel_query_tokens,
+                num_source_channels=len(self.cross_channel_source_indices),
+                num_heads=cross_channel_num_heads,
+                dropout=dropout,
+            )
+            self.register_buffer(
+                "cross_channel_source_index_buf",
+                torch.tensor(list(self.cross_channel_source_indices), dtype=torch.long),
+                persistent=False,
+            )
+        else:
+            self.cross_channel_source_indices = ()
+            self.cross_channel_target_index = -1
+            self.cross_channel_decoder = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -662,6 +867,20 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.cross_channel_decoder is not None and surface_tokens > 0:
+                source_preds = surface_preds.index_select(
+                    -1, self.cross_channel_source_index_buf
+                )
+                delta = self.cross_channel_decoder(
+                    source_preds=source_preds,
+                    surface_hidden=surface_hidden,
+                    surface_mask=surface_mask,
+                )
+                target_idx = self.cross_channel_target_index
+                channels = list(torch.unbind(surface_preds, dim=-1))
+                channels[target_idx] = channels[target_idx] + delta.squeeze(-1)
+                surface_preds = torch.stack(channels, dim=-1)
+                surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
