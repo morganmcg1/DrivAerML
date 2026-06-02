@@ -1,3 +1,22 @@
+## 2026-06-02 04:35Z — PR #1544: H352 SWA-within-cosine-tail — CLOSED (null)
+
+- Branch: thorfinn/swa-cosine-tail
+- **Hypothesis**: SWA over fine-grained snapshots (54@stride 100, EP15→EP16) within the H336 cosine-tail finds a flatter basin with better generalisation, specifically on WSS_z.
+
+| Metric | H336 SOTA | H352 Arm B SWA | Δ | Gate | Pass? |
+|---|---:|---:|---:|---:|---:|
+| val_abupt_cal | 5.8978 | 5.8985 | +0.07bp | <5.8962 | ❌ MISS 0.23bp |
+| test_abupt_cal | 5.7379 | 5.7383 | +0.04bp | <5.7357 | ❌ MISS 0.26bp |
+| test_WSS_z | 8.6175 | 8.6158 | **-0.17bp** | — | — |
+
+All deltas within ±0.20bp — statistically indistinguishable from EMA endpoint. **Arm A skipped** (correctly, per pre-committed skip-rule: Arm A had higher raw gate than Arm B).
+- **W&B runs**: `5cy70kau` (training), `fgao25bk` (Arm B TTA+cal)
+- **Finding M** (13th closed axis): `swa-equivalent-to-ema-cosine-tail` — within-trajectory uniform SWA converges to same basin as EMA endpoint. Per-channel cal coefs identical (Δα ≤ 0.04). SWA's flatness mechanism too gentle for WSS_z gain.
+- **Micro-finding**: SWA cal yield (~2.4bp) vs H336 (~7-8bp) — smaller yield when pre-cal raw already near cal-stable point. Diagnostic signal for future SWA-like models.
+- **Student insight** (banked): cyclic LR (fastswa) or cross-seed traversal needed to produce meaningfully different basin points.
+
+---
+
 ## 2026-06-02 04:09Z — PR #1553: H361 Direction-Magnitude Decomposed WSS Loss — CLOSED (null)
 
 - Branch: edward/wss-direction-magnitude-decoder-split

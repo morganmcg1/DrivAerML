@@ -40,6 +40,7 @@
 | SP-loss-reweight stacked | `sp-reweight-armC-x-h336-split-decision` | H338 |
 | Target transform axis | `target-transform-axis-closed-wssz` (arcsinh + signed_power) | H349+H353 |
 | GeoTransolver content embedding | `geotransolver-content-embedding-null` | H357 |
+| **SWA within cosine-tail (Finding M)** | `swa-equivalent-to-ema-cosine-tail` — within-trajectory uniform SWA ≡ EMA endpoint, same cal coefs, same basin. Late-trajectory weight averaging cannot find meaningfully different point. **FastSWA cyclic-LR now needed (H365).** | **H352 CLOSED 04:35Z** |
 | **Direction-magnitude decomposed WSS loss (Finding L)** | `wss-direction-magnitude-decomposed-loss-null` — cosine gradient rewards direction-matching at all magnitudes; rel-norm gradient over-weights small-magnitude points. Per-channel MSE IS the correct gradient object. **Discriminator outcome confirmed: WSS_z floor is NOT loss-geometry; it is representation.** | **H361 CLOSED 04:09Z** |
 
 ---
@@ -50,7 +51,7 @@
 |---|---|---|---|
 | **#1548** | alphonse | **H356: 3-cp × K=5 output-avg — SOTA CANDIDATE** — val_raw 5.9206 (best pre-cal after frieren; projects val_cal ~5.84-5.85, LIKELY PASSES gate). Cal arm `0n1xkwic` running silently, ETA terminal ~04:25Z. test arm cascading. | 🔥 SOTA candidate, cal arm landing |
 | **#1550** | frieren | **H358: tangent-basis residual head — BEST PRE-CAL val_raw 5.9191** — Phase 1 done EP16. Phase 2 TTA `6fcumd8m` running silently ~2.78h. Projects val_cal ~5.84, LIKELY PASSES. | 🔥 SOTA candidate, TTA+cal landing |
-| **#1544** | thorfinn | H352: SWA-within-cosine-tail — Arm B TTA cal `fgao25bk` running. val_raw 5.9223 (pre-cal). Projects val_cal ~5.85, MAY PASS gate. ETA ~04:25Z. | 🔥 SOTA candidate, cal arm landing |
+| **#1558** | thorfinn | **H365: FastSWA cyclic-LR cross-basin 3-cp output-avg** (JUST ASSIGNED 04:35Z) — 3 cyclic cosine restarts from EP13 (T_max=1 per epoch), output-average 3 cycle-end predictions with H336 TTA recipe. Cross-basin diversity vs H342's within-basin ep13/14/15. Student's own suggested follow-up from H352 close. | 🆕 just assigned |
 | **#1538** | nezuko | H347: BL physics priors — Arm A val_cal 5.9253 FAILED gate. Arm B/C cascade auto-chaining. ETA terminal ~18-19Z June 2. | 🟡 WIP — long cascade running |
 | **#1551** | askeladd | H359: Multi-scale surface kNN branch — Phase 1 done (val_raw ~6.013, 10bp behind SOTA). Single-cp TTA `kwe8tynw` triage running. If not approaching ~5.91 val_cal → close as null. | 🟡 WIP — TTA triage |
 | **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 step ~4540 (55% done). Train_loss 0.006-0.010 healthy. ETA Phase 1 complete ~05:30Z. | 🟡 WIP — Phase 1 training |
