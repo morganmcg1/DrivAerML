@@ -1,13 +1,57 @@
 # SENPAI Research State
 
-- **2026-06-02 03:54Z**
+- **2026-06-02 04:47Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
 
-## 03:54Z checkpoint — **H189 TERMINAL** rt=22.88h: test_ABUPT=5.665 (+0.050pp REGRESS vs H183), **test_VP=3.401 (−0.041pp deepest VP in fleet)**, **NON-MERGE pending student SENPAI-RESULT**; H193 main rt=17min/EP1 step=3964/penalty=0.060 firing; H191 VP=3.657 (+0.014pp over floor) still recovering; H192 EP15 holds
+## 04:47Z checkpoint — **H189 CLOSED NON-MERGE** (PR #1533 closed 04:40Z); **H194 ASSIGNED to nezuko** (PR #1559 lr=9e-5 on H189 stack); **H191 EP24 VP=3.667 PLATEAU BLOCKER** (+0.024pp over floor, worsening); **H192 EP17 VP=3.548 FLOOR CLEARED** (strongest merge path); **H193 main EP1 PASS** (val_WSS=13.297, gates clear)
+
+### Actions taken this cycle
+- PR #1533 (H189): closed NON-MERGE at 04:40Z. Student SENPAI-RESULT received 04:00Z confirming test_ABUPT=5.6654, test_VP=3.4009.
+- PR #1559 (H194): created + assigned to dl24-nezuko. Slug: `h194-h189-stack-lr-9e-5`. Single-variable lr=9e-5 on H189 compound stack. Smoke (1 EP) → main (25 EP).
+- Heartbeat posted on PR #1535 (H191): VP plateau concern flag.
+- Heartbeat posted on PR #1541 (H192): VP floor cleared + kill ladder reminder.
+- Heartbeat posted on PR #1554 (H193): EP1 terminal ack (val_WSS=13.297, gates clear).
+
+### Fleet snapshot at 04:47Z
+
+| Student | PR | Hyp | EP/State | val_WSS | val_VP | Status |
+|---|---|---|---:|---:|---:|---|
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | **ASSIGNED (smoke pending)** | — | — | student picks up on next poll |
+| fern | #1535 | H191 sharper WSD 31EP | EP24 (19.23h) | **6.676** | 3.667 (+0.024pp over floor) | ⚠️ VP PLATEAU BLOCKER — not recovering |
+| frieren | #1541 | H192 τ_z=1.5 only 30EP | EP17 (13.96h) | 6.679 | **3.548 ✅ floor cleared (−0.095pp)** | cleanest merge path, 13 EPs left |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | EP1→2 (1.06h) | 13.297 | 13.982 | EP1 gates clear, EP3 ≤7.50% next check |
+
+### H191 fern — VP plateau: merge risk assessment
+
+H191 val_VP trajectory at late-cosine:
+- EP21 (17.3h): 3.730 (+0.087pp over floor)
+- EP22 (18.1h): 3.650 (+0.007pp — sharp recovery)
+- EP23-24 (18.4-19.2h): 3.657 → 3.667 (+0.014 → +0.024pp) — **STALLED AND WORSENING**
+
+Floor is 3.643. val_VP=3.667 means +0.024pp above floor. At EP24 of 31, with ~7 EP / 5.6h remaining, if VP continues this plateau/upward trend, **H191 will fail the VP floor at terminal** and cannot merge. WSS=6.676 is fleet leader but irrelevant if VP fails.
+
+### H192 frieren — cleanest merge path
+
+VP=3.548 is already 0.095pp BELOW the 3.643 floor at EP17. 13 EPs remaining (≈10h). WSS=6.679 vs SOTA 6.443 = 0.236pp gap. Trajectory at recent EPs:
+- EP14: 6.696, EP15-16: 6.690-6.692, EP17: 6.679 — recovering
+
+Not yet on track to beat H183 SOTA (6.4427) from this rate, but final epochs often have the sharpest descent. This is the highest-confidence merge candidate in the fleet.
+
+### H194 nezuko — next assignment context
+
+H194 rationale: H189 (640d + compound at lr=1e-4) regressed primary ABUPT by +0.050pp but achieved deepest fleet VP (3.4009). H194 tests whether lr=9e-5 recovers WSS while preserving VP advantage. Evidence: May 4 SOTA `9mm3sz7x` used lr=9e-5 and achieved best 4.7h single-model test. Larger model (640d) typically benefits from gentler LR. Single-variable controlled test.
+
+### Watch items next 6h
+1. **H192 EP20 (~07:30Z)** — val_WSS ≤6.65% soft gate; VP must stay <3.643
+2. **H191 EP25-28 VP** — if VP doesn't cross floor, PR #1535 will be NON-MERGE (terminal ~09:30Z)
+3. **H193 EP3 (~06:30Z)** — loose gate ≤7.50%
+4. **H194 nezuko smoke (~06:00-07:00Z)** — first EP DDP8 smoke of H194
+
+## 03:54Z checkpoint — **H189 TERMINAL** rt=22.88h: test_ABUPT=5.665 (+0.050pp REGRESS vs H183), **test_VP=3.401 (−0.041pp deepest VP in fleet)**, **NON-MERGE (student SENPAI-RESULT received)**; H193 main rt=17min/EP1 step=3964/penalty=0.060 firing; H191 VP=3.657 (+0.014pp over floor) still recovering; H192 EP15 holds
 
 ### MAJOR EVENT: H189 nezuko TERMINAL — VP wins, primary regresses → NON-MERGE
 

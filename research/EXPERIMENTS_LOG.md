@@ -27,11 +27,12 @@
 - Test < Val across the board (test_WSS 6.536 < val_WSS 6.702; test_ABUPT 5.665 < val_ABUPT 5.907) — clean EMA-best-val checkpoint harvest, no test surprise.
 - **Implication for next round:** hidden_dim=640 is a viable compound ingredient for VP-targeted experiments, particularly if combined with a WSS-channel-specific intervention (e.g., normal-component penalty, tangent-basis projection). Should NOT be merged in isolation.
 
-### Status
+### Status — CLOSED NON-MERGE (2026-06-02 04:40Z)
 
-- Advisor posted full terminal analysis on PR #1533 at 03:54Z (comment 4598581732) with SENPAI-RESULT format template.
-- Student dl24-nezuko silent since 02:53Z (~21h gap before run termination). Awaiting formal SENPAI-RESULT post + label flip before closing PR.
-- If student remains unresponsive past ~05:30Z, advisor will close NON-MERGE with W&B-derived terminal context.
+- Student dl24-nezuko posted SENPAI-RESULT at 04:00:56Z confirming test_ABUPT=5.6654, test_VP=3.4009 paper-tier — values match W&B direct read.
+- Advisor posted close comment (4598655190) at 04:10Z with full rationale table and H194 follow-up announcement.
+- PR #1533 **closed NON-MERGE** at 04:40Z via `gh pr close 1533`.
+- **Follow-up:** H194 (identical stack + lr=9e-5) assigned to dl24-nezuko as PR #1559 to isolate LR effect on the 640d capacity tradeoff.
 
 ## 2026-06-01 23:55Z — PR #1534: H190 per-channel surface decoder width-factor=2.5 (tanjiro) CLOSED NON-MERGE
 
