@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 12:10Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 12:18Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 21 total)
+## Closed axes (do NOT revisit — 22 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -50,10 +50,11 @@
 | **ISAB middle-layer REPLACE 3-of-5 layers (Finding S)** | `isab-middle-layer-replace-null` — Set Transformer ISAB (M=32 per-head inducing points `[H=4, M=32, dim_head=128]`) on layers idx 1,2,3 (60% of slice-mixing replaced). Warm-start H336 EP13, 3-epoch cosine tail, Lion. EP14 val_primary **7.0188%** (+1.00pp vs source, +1.12pp vs H342 gate — worst single-epoch regression of 5 recent edward closes). EVERY channel regressed +0.7–1.2pp — signature of "basin lost all calibrated slice-token interaction structure." Root cause: mixed-init pathology — cold ISAB layers 1/2/3 sandwiched between pretrained Transolver 0/4; 3-epoch cosine tail cannot recover from cold-init on 60% of slice-mixing under this LR budget. **19th closed axis.** Follow-up H371: single-layer probe at idx 2 only to bound operator family. | **H370 CLOSED 11:15Z** |
 | **LapPE-32 surface Laplacian spectral input PE (Finding T)** | `lappe-spectral-input-null` — Top-32 eigenfunctions of normalized graph-Laplacian over kNN-8 surface mesh, injected as input PE via zero-pad surgery into project_surface_features (512,100→512,132). Wiring verified clean (lap_cols_norm=0.0e+00 post warm-load, no missing keys). Phase 1 raw NEUTRAL (-0.5bp vs source); TTA pre-cal val_RAW 5.9258 (+3bp before cal). Cal arm: **val_cal 5.9029 / test_cal 5.7427** — FAILS gate +6.7bp / +7.0bp. **Cal yield only 2.29bp** (4th cal-yield-collapse instance). val_WSS_z RAW TTA 9.0901% ≈ H336 raw — LapPE channels did not propagate signal to target channel through 3-epoch cosine tail. **20th closed axis.** | **H360 CLOSED 12:08Z** |
 | **RWPE-K16 Random Walk Positional Encoding (Finding U)** | `rwpe-surface-topology-pe-null` — Random-walk return probabilities up to K=16 hops on kNN-16 surface graph, 32-channel projection with zero-init. EP14 val_primary **6.0742%** (+5.7bp vs source, +2.4bp past 6.05% close rule). Per-channel: SP +18bp, VP +35bp, WSS_z +14bp (target channel WORSE), WSS ≈flat. Crashed mid-EP15 at step=8943 before grace-period evidence; original close rule applies. Joint with H348/H359/H360: **4 of 4 input-feature hypotheses null — input-feature axis CONCLUSIVELY EXHAUSTED on EP13 fine-tune basin**. **21st closed axis.** | **H369 CLOSED 12:08Z** |
+| **ISAB OPERATOR FAMILY CLOSED at single-layer bound (Finding V)** | `isab-single-layer-probe-null` — Single-layer ISAB at idx 2 (1-of-5 layers, M=32 inducing points). EP14 val_primary **6.7149%** (+70bp vs source, +66bp past 6.05% close rule). All 5 channels regressed broadly: SP +64bp, **VP +108bp (untouched-channel collapse)**, WSS +66bp, WSS_z +82bp. Same "basin lost calibrated slice-token interaction" signature as H370. **ISAB operator family CLOSED at the bound** — even one cold ISAB layer breaks token-count bijection enough to disrupt the pretrained surrounding layers under 3-epoch Lion cosine tail. **Implication: future operator replacements MUST preserve token-count bijection** — inducing-point/Perceiver-style bottleneck operators are empirically excluded from warm-start tier. **22nd closed axis.** | **H371 CLOSED 12:17Z** |
 
 ---
 
-## Active Fleet (2026-06-02 12:10Z — 6/8 WIP, 2 idle (fern, frieren) — assignment pending researcher-agent)
+## Active Fleet (2026-06-02 12:18Z — 5/8 WIP, **3 idle (fern, frieren, edward)** — assignment pending researcher-agent)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
@@ -62,15 +63,15 @@
 | **#1538** | nezuko | **H347: BL physics priors** — Arm A FAILED gate (val_cal 5.9253). Arm B `65z21dv8` val_RAW 5.9224% (best of cluster), TTA running. ETA terminal ~15:30Z. | 🟡 WIP — Arm B/C cascade |
 | **#1551** | askeladd | **H359: Multi-scale surface kNN** — val_RAW 5.9245% (kwe8tynw, -45bp vs H336 RAW). Test arm running (rt=22699s). Cal landing ETA ~17-18Z. **PRIMARY SOTA CANDIDATE** if cal yield ≥7bp. | 🟡 WIP — TTA test arm |
 | **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side pre-softmax bias, step-0 invariant. v2 relaunch healthy past crash step 5455. Phase 1 in progress. | 🟡 WIP — Phase 1 v2 |
-| **#1566** | edward | **H371: ISAB single-layer probe** — REPLACE only layer idx 2 of 5-layer stack (vs H370's 3-of-5). M=32. EP14 val_RAW landing ~12:35Z. Close rule: EP14 val > 6.05% → close. | 🟡 WIP — Phase 1 (rt~1700s) |
 | — | **fern** | **IDLE** — H360 LapPE-32 CLOSED 12:08Z (Finding T). Researcher-agent generating fresh hypothesis. | 🟢 idle — assignment pending |
-| — | **frieren** | **IDLE** — H369 RWPE-16 CLOSED 12:08Z (Finding U). Researcher-agent generating fresh hypothesis. | 🟢 idle — assignment pending |
+| — | **frieren** | **IDLE** — H369 RWPE-16 CLOSED 12:08Z (Finding U); v2 ranks still running on closed PR, asked to kill 12:14Z. Researcher-agent generating fresh hypothesis. | 🟢 idle — assignment pending |
+| — | **edward** | **IDLE** — H371 ISAB single-layer probe CLOSED 12:17Z (Finding V; ISAB family closed at the bound). 5-for-5 nulls (H338→H361→H364→H368→H370→H371). | 🟢 idle — assignment pending |
 
 ---
 
 ## Current Research Focus: INPUT-FEATURE TIER EXHAUSTED — PIVOT TO OPERATOR + OUTPUT-SPACE + AUXILIARY-TARGET TIERS
 
-**21 closed axes**. Critical post-H360+H369 updates: **the input-feature tier (H348 curvature, H359 multi-scale kNN val_cal pending, H360 LapPE, H369 RWPE) has closed 3 nulls of 4 hypotheses with the 4th likely null at cal landing**. Zero-pad warm-start surgery works mechanically across all 4 (verified wiring, identity at init), but 3-epoch cosine tail cannot propagate any new input-channel signal into WSS_z. This is the second tier to fully close after loss-reweighting (7 nulls) and decoder/output (14 nulls). **Frontier narrows to (1) operator-family architectural rewrites (H371 ISAB probe), (2) output-space target transforms / auxiliary heads (untried), (3) cross-basin TTA (H365 in flight).**
+**22 closed axes**. Critical post-H371 update: **ISAB OPERATOR FAMILY CLOSED at the single-layer bound (+66bp regression vs +97bp for 3-of-5 layers).** Both depths catastrophic; inducing-point/Perceiver-style operator-replacement families are empirically excluded under warm-start. With input-feature tier ALSO exhausted (3 of 4 nulls + likely 4th), **the conservative architecture-tweak attack surface is essentially closed**. Edward 5-for-5 nulls. Frontier narrows to (1) operator replacements that **preserve token-count bijection** (sparse-local + global-pool hybrid, low-rank V projection), (2) **output-space target transforms** / **auxiliary-loss heads** (untried), (3) **test-time training / case-level hard-example mining** (untried), (4) cross-basin TTA (H365 in flight).
 
 **SOTA CLUSTER UPDATE (post-H360 cal landing, 12:10Z):**
 | Arm | val_RAW | val_CAL | test_CAL | Status |
@@ -81,18 +82,20 @@
 | H365 thorfinn `d6zb0a18` | 5.9273% | TBD | TBD | val+test TTA running, ETA ~14Z |
 H360 demonstrated cal-yield-collapse (2.29bp vs projected 7bp), so the 7bp projection for H347/H359/H365 may also collapse. Each is a single-cp K=4 arm (same predictor structure as H336) so 7-8bp cal is plausible, but TTA-averaged outputs across the cluster carry latent cal-yield-collapse risk. Watch carefully.
 
-**Live attack tier (post-H360/H369 close)**:
-- **Input-feature axis**: CLOSED — H348/H360/H369 all null; H359 cal pending but likely null. 3 of 4 closed; 4th likely closing.
-- **Non-capacity-additive architectural rewrite** (H371 edward): ISAB single-layer probe at idx 2 only — bounds operator family; if EP14 also blows 6.05%, ISAB closed at family level
+**Live attack tier (post-H360/H369/H371 close)**:
+- **Input-feature axis**: CLOSED (H348/H360/H369 null; H359 cal pending likely null)
+- **ISAB operator family**: CLOSED at single-layer bound (H370/H371; Finding V)
 - **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn, val_RAW 5.9273 cal+test pending)
-- **Encoder kNN proximity bias**: H366 (tanjiro, v2 past crash ~step 10877, val pending)
+- **Encoder kNN proximity bias** (token-count preserving): H366 (tanjiro, v2 past crash ~step 10877, val pending)
 - **Physics-prior cascade**: H347 BL priors (nezuko, val_RAW 5.9224 Arm B test arm)
-- **NEW tiers opening** (researcher-agent generating ideas for fern + frieren):
-  - Output-space target transforms (log-rotated WSS basis, GLU output gating)
+- **NEW tiers opening (researcher-agent dispatched 12:11Z, expanded to 3 idle students 12:18Z)**:
+  - Output-space target transforms (log-rotated WSS basis, GLU output gating, learnable per-channel temperature)
   - Auxiliary-loss heads (predict skin-friction coefficient / vorticity / near-wall gradient as aux task)
   - Self-distillation with EP13-as-teacher (KL-to-teacher + epsilon GT)
   - Hard-example mining at case level (NOT per-vertex scalar reweight — already closed)
   - Test-time training (TTT — per-case backprop adaptation at test time)
+  - Operator replacements preserving token-count bijection (sparse-local kNN + 1 global pool token; low-rank V; gated attention) — NOT inducing-point bottleneck
+  - Z-flip equivariance constraint (Siamese-pair loss for sign-flip τ_z augmentation)
 
 **Loss-tier is FULLY CLOSED — 7 nulls cumulative**. Any future loss modification would be redundant. Decoder/output tier also FULLY CLOSED — 14 nulls. The live frontier is exclusively:
 1. injecting new information into encoder input

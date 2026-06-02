@@ -1,3 +1,35 @@
+## 2026-06-02 12:17Z — PR #1566: H371 ISAB single-layer probe at idx 2 — CLOSED (pre-committed close rule, Finding V) — ISAB OPERATOR FAMILY CLOSED at single-layer bound
+
+- Branch: edward/h371-isab-single-layer-idx2-probe
+- **Hypothesis**: Test whether ISAB operator family is fundamentally incompatible with H336 EP13 fine-tune basin, or whether H370 (3-of-5 layers REPLACE) failed only on depth. Bound the family by REPLACE-ing only the middle layer (idx 2 of 5). Same M=32 inducing points, same warm-start recipe.
+- **Implementation**: edward executed cleanly. Phase 1 8-rank DDP launched ~11:38Z. Step 2801 at EP14 marker (`per_epoch_checkpoint/path: outputs/drivaerml/run-mdzazf0k/checkpoint_ep14.pt`).
+
+| Channel | H371 EP14 | H336 EP13 source | Δ vs source |
+|---|---:|---:|---:|
+| **val_abupt** | **6.7149%** | 6.017% | **+70bp** |
+| val_SP | 4.4177% | ~3.78% | +64bp |
+| val_VP | 4.5283% | ~3.45% | **+108bp (untouched-channel collapse)** |
+| val_WSS | 7.4403% | ~6.78% | +66bp |
+| val_WSS_x | 6.5057% | — | sizable |
+| val_WSS_y | 8.2410% | — | sizable |
+| val_WSS_z | **9.8822%** | ~9.06% | **+82bp** |
+
+- **W&B**: `mdzazf0k` (rank0) + 7 sibling ranks. Group `h371-isab-1layer-idx2`.
+- **Close-rule trigger**: EP14 val 6.7149% > 6.05% threshold by **+66bp** → triggers immediately.
+- **Joint with H370**:
+
+| Hypothesis | ISAB depth | EP14 val | Δ vs source |
+|---|---|---:|---:|
+| H370 | 3-of-5 layers (idx 1,2,3) | 7.0188% | +1.00pp |
+| H371 | 1-of-5 layers (idx 2 only) | 6.7149% | +0.70pp |
+
+- **Finding V** (22nd closed axis): `isab-single-layer-probe-null` — ISAB OPERATOR FAMILY CLOSED. Even single-layer ISAB replacement at idx 2 (middle of 5-layer stack) produces +66bp catastrophic regression. All 5 channels regress broadly (+64-108bp), with VP +108bp (channel ISAB doesn't directly modify) showing the worst absolute regression — same "basin lost all calibrated slice-token interaction structure" signature as H370. The 3-epoch Lion cosine tail (lr 9e-5 → 1e-6) cannot recover from cold-init even on a single inducing-point compression layer.
+- **Mechanism**: With M=32 < S=128, the ISAB layer cannot pass through the slice-token interaction structure that pretrained Transolver layers 0/1/3/4 expect on input. Operator replacement via inducing-point compression breaks the token-count bijection, which the surrounding pretrained layers cannot tolerate under this LR budget.
+- **Implication for architectural-rewrite tier**: Inducing-point compression families (ISAB, MAB-based set transformers, perceiver-style cross-attention with latent bottleneck) are now empirically excluded from warm-start tier. Future operator replacements must **preserve token-count bijection** — for example: sparse-local + global-pool hybrid (kNN-attention + one global token but each token still has 1-to-1 correspondence with surface point), or attention with low-rank value projection (no token-count change). Operator replacements that CHANGE the token count or compress through a bottleneck are excluded.
+- **Joint with input-feature exhaustion (H348/H359/H360/H369)**: We now have TWO fully closed axes (input-feature tier + ISAB operator family). Edward is 5-for-5 nulls (H338, H361, H364, H368, H370, H371). Next assignment must pivot to: (a) output-space target transforms, (b) auxiliary-loss heads, (c) test-time training, (d) operator replacements preserving token-count bijection.
+
+---
+
 ## 2026-06-02 12:08Z — PR #1563: H369 RWPE-K16 Surface Random Walk PE — CLOSED (pre-committed close rule + crash, Finding U)
 
 - Branch: frieren/h369-rwpe-mesh-topology-pe
