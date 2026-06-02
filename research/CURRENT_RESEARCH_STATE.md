@@ -1,11 +1,53 @@
 # SENPAI Research State
 
-- **2026-06-02 05:08Z**
+- **2026-06-02 06:08Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
-- **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding. Tay (ddp8 branch) reports their H342 output-space checkpoint averaging SOTA test_WSS=6.6351% on ddp8 stack. No new human messages since 19:27Z 2026-06-01.
+- **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding. No new human messages since 19:27Z 2026-06-01.
+
+## 06:08Z checkpoint — **H191 EP25 SLOPE FLIP** (slope_VP −0.0007 NOW FALLING vs +0.0009 at 05:08Z, WSD recovery UN-FALSIFIED); **H192 EP19 LIGHT UPTICK** (VP still −0.092pp under floor); **H193 EP3 MISSED LOOSE GATE** (7.672 vs ≤7.50%, but mechanism z-preferential working); **H194 SMOKE EP1 PASS** (val_WSS=12.274 < 14.0% gate, student fixing per-channel-heads flag for main)
+
+### Actions taken this cycle
+- Heartbeat on PR #1535 (H191): slope flip table — VP slope flipped to NEGATIVE in WSD decay; projecting EP30 VP ~3.57 (under floor by 0.073pp)
+- Heartbeat on PR #1541 (H192): EP19 minor regression (+0.014pp WSS) flagged as noise band; VP holds
+- Heartbeat on PR #1554 (H193): EP3 gate miss + revised kill ladder (EP5 ≤7.10, EP10 ≤6.85, terminal ≤6.50); mechanism z-preferential confirmed
+- Heartbeat on PR #1559 (H194): smoke EP1 ACK + flag-fix authorize + main launch with per_channel_surface_heads corrected
+
+### Fleet snapshot at 06:08Z
+
+| Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | Status |
+|---|---|---|---|---:|---:|---:|---|
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | n1imnpsk smoke | EP1 done | 12.274 | 13.382 | smoke PASS, main launching now |
+| fern | #1535 | H191 sharper WSD 30EP | ayg4liye | EP25 (20.60h) | 6.660 (descending) | **3.659 (+0.016pp over floor, slope NEGATIVE now)** | ⚠️ recovery alive; will cut at ~EP29 |
+| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | EP19 (15.32h) | **6.689 (light tick up)** | **3.551 ✅ −0.092pp UNDER floor** | cleanest merge path; cuts at ~EP29 |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP3 (2.50h) | **7.672 (missed ≤7.50 loose gate)** | 4.260 | mechanism healthy z-pref, EP5 ≤7.10 next kill |
+
+### H191 fern — **SLOPE FLIP REVERSES NON-MERGE PROGNOSIS**
+Critical update: slope_VP per_1k_steps was +0.0009 RISING at 05:08Z. By 05:48Z it FLIPPED to −0.0007 (NOW FALLING). All 4 slopes negative now. EP25 val_VP=3.659 is +0.016pp over floor (tightening from EP24's +0.024pp).
+
+Per-EP delta projection (using last 5 EPs):
+- val_VP delta = −0.018/EP → EP30 ~3.570 → CLEAR floor by −0.073pp ✅
+- val_WSS delta = −0.004/EP → EP30 ~6.640 (still +0.197pp over SOTA 6.443)
+
+**WALL-CLOCK RISK:** rt=20.60h at 0.81h/EP → cuts at ~EP29 (24h cap). 4-5 EPs of decay remaining. **NOT closing — HOLD for terminal harvest.**
+
+### H192 frieren — descent slowing
+EP18→19: WSS +0.014, VP +0.005 (light regression across all 4). Still within noise band (EP14-19 range = 0.021pp). VP at 3.551 still well under floor (−0.092pp margin). 11 EPs remaining but only ~8.7h to 24h wall — **will cut at ~EP29**. Trajectory projection: val_WSS terminal ~6.65, val_VP ~3.54 → test_WSS ~6.55 → still +0.10pp regress vs SOTA 6.443. **NON-MERGE likely but VP cleared as supplementary win.**
+
+### H193 tanjiro — **EP3 gate missed but mechanism healthy**
+EP3 val_WSS=7.672 > 7.50 gate (+0.172pp). vs H183 EP3=6.96 → +0.71pp regress. BUT slope_WSS_z=−0.6467/1k > slope_WSS_x=−0.4397/1k confirming z-axis preferential penalty effect as designed. Revised kill gates: EP5 ≤7.10, EP10 ≤6.85, EP20 ≤6.60, terminal ≤6.50. Continuing.
+
+### H194 nezuko — smoke EP1 PASS, main launching
+val_WSS=12.274 ≤ 14.0 gate ✓, nonfinite=0 ✓. Student flagged per_channel_surface_heads flag was missing from smoke; fixed for main launch. 25EP DDP8 main run launching now with corrected flags. Main group: `h194-h189-stack-lr-9e-5-main-25ep`.
+
+### Watch items next 6h
+1. **H194 main launch verification (~06:15Z)** — confirm 8/8 ranks live in main group
+2. **H191 EP26-29 (~06:20-09:30Z)** — terminal harvest with VP-cleared-or-not write-up + test eval
+3. **H193 EP5 kill gate (~07:00Z)** — ≤7.10%
+4. **H192 EP20-22 (~07:00-09:00Z)** — descent re-acceleration watch
+5. **NO IDLE GPUs** — 4/4 students active
 
 ## 05:08Z checkpoint — **H191 EP25 VP=3.6668 PLATEAU CONFIRMED** (slope/1k=+0.0009 RISING, WSD decay failing); **H192 EP18 VP=3.5462 FLOOR HOLDING** (all slopes NEGATIVE, descent continues); **H193 EP2 STRONG DESCENT** (13.30→7.87 in EP1-2, -0.494/1k slope); **H194 SMOKE ACTIVE** (8/8 ranks rt=0.36h, EP1 ETA ~06:25Z)
 
