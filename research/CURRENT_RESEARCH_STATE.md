@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-06-02 12:20Z** (boundary cluster all landed — H195 smoke green-lit, H194 EP6 strong descent, H192 mid-EP27 VP plateau)
+- **2026-06-02 12:38Z** (H195 main DDP8 launched 12:27Z 8 ranks; H193 EP11 VP fresh low 3.7137 -0.0196)
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
@@ -25,9 +25,9 @@
 | Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | val_AB | val_SP | Status |
 |---|---|---|---|---:|---:|---:|---:|---:|---|
 | nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | EP6 (6.07h) | **6.8020 ↓ (-0.0353)** | **3.6670 ↓ (-0.0775)** | 6.0330 | 3.9022 | on-shape H183, 4 EPs ahead of EP10 gate, VP descent strongest in fleet |
-| fern | #1565 | H195 tau_y=1.3 on H183 stack | 1bx92iq5 smoke | smoke EP1 PASS (0.80h) | **12.8244 ✓** | 14.1565 | 13.0190 | 8.7526 | green-light posted, main 25-EP launching imminently |
+| fern | #1565 | H195 tau_y=1.3 on H183 stack | 7ergjfh4 main | main launched 12:27Z (0.20h) | — | — | — | — | DDP8 8 ranks running, EP1 ETA ~13:15Z |
 | frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | mid-EP27 (21.56h) | **6.7001 flat** | **3.5306 plateau ✅** | 5.9420 | 3.9222 | VP camped at fresh-low region, WSS POS slope flattened; terminal ~13:30-14:00Z |
-| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP10 (8.75h) | **7.7030 ↑** | **3.7333 ✅ FRESH LOW** | 6.5615 | 3.9717 | mid 30-EP, decoupled WSS/VP, VP-research note locked NON-MERGE on WSS |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP11 (9.01h) | **7.7100 ↑ (+0.0070)** | **3.7137 ✅ FRESH LOW (-0.0196 deepening)** | 6.5585 ↓ | 3.9695 ↓ | VP slope ACCELERATING (-0.0196 vs -0.0118), AB/SP turn NEG slope, only WSS holds POS |
 
 ### H191 fern — CLOSED NON-MERGE (2026-06-02 11:00Z)
 - run `ayg4liye`, rt=25.04h, test_WSS=6.6080, test_ABUPT=5.7714, test_VP=3.6217, test_SP=3.6506
@@ -82,9 +82,9 @@
 2. τ_y + τ_z compound (after H195 and H192 terminals confirm axis mechanisms)
 3. Tangent-basis output head reformulation (2nd human priority)
 
-### Watch items next 3h (from 12:20Z)
-1. **H195 main launch confirm** ETA ~13:00Z — verify fern posted main rank-0 ID + launched 25-EP DDP8; smoke EP1 already on-shape with H183
-2. **H192 EP28-30 terminal** ETA ~13:30-14:00Z (24h cap may hit at EP28) — VP plateau at fresh low (3.5306), WSS flat 6.7001, NON-MERGE close expected; frieren idle next
-3. **H194 EP7-8 boundaries** ETA ~13:00-13:50Z — continue strong descent expected (~-0.03pp/EP); EP10 gate ≤6.80 should clear easily
-4. **H193 EP11-12** ETA ~12:50-13:40Z — continuation of VP descent watch (mid 30-EP run)
-5. **NO IDLE GPUs** — 4/4 active. First idle: frieren@H192 terminal ~13:30-14:00Z → assignment ready at that boundary (BL derivative decoder is queued per Morgan's directive)
+### Watch items next 2h (from 12:38Z)
+1. **H192 EP28-30 terminal** ETA ~13:13Z EP28, 13:50Z EP29, ~14:30Z EP30 (24h cap at +24h from launch = ~14:50Z) — VP camped at fresh low 3.5306, WSS flat 6.7001; NON-MERGE close + frieren next assignment
+2. **H195 main EP1** ETA ~13:15Z (0.80h from main launch 12:27Z, matching smoke pace) — kill ladder activates at EP3 ≤7.10%
+3. **H194 EP7** ETA ~13:14Z (step=70324 vs EP7 boundary 76832, 6508 steps @11k/h = 35min) — continued descent expected
+4. **H193 EP12** ETA ~13:25Z — VP descent acceleration watch
+5. **NO IDLE GPUs** — 4/4 active. First idle: frieren@H192 terminal ~14:00-14:30Z → BL derivative decoder candidate per Morgan's directive (architecturally complex — may need fern handoff after H195 lands instead)
