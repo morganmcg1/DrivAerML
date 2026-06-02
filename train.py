@@ -130,6 +130,14 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    # H381: AdamW-specific hyperparameters. Decoupled from --lr / --weight-decay
+    # (which the Lion path uses) so an AdamW swap from a Lion-trained checkpoint
+    # can pick the canonical AdamW LR / WD / betas without disturbing Lion runs.
+    # These fields are read only when --optimizer adamw.
+    adamw_lr: float = 3e-4
+    adamw_weight_decay: float = 0.01
+    adamw_beta1: float = 0.9
+    adamw_beta2: float = 0.999
     vol_points_schedule: str = ""
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
@@ -291,8 +299,9 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
             model.parameters(),
-            lr=config.lr,
-            weight_decay=config.weight_decay,
+            lr=config.adamw_lr,
+            weight_decay=config.adamw_weight_decay,
+            betas=(config.adamw_beta1, config.adamw_beta2),
         )
     if optimizer_name == "lion":
         from lion_pytorch import Lion
