@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 09:15Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 11:18Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 18 total)
+## Closed axes (do NOT revisit — 19 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -47,35 +47,35 @@
 | **Target-magnitude WSS hotspot reweight (Finding P)** | `target-magnitude-wss-hotspot-reweight-overshoot` — Per-point loss weight = γ on top-decile (||target_WSS||>4.844 Pa) WSS points, baseline weight elsewhere. γ=3 Arm A: EP14 val_abupt 6.586% (+69bp vs gate, +57bp vs H336 EP13 source). All channels regressed including unreweighted VP +105bp (Lion sensitivity to 1.20× WSS-mass shift breaks H342-tuned balance). Hotspot mask diagnostics confirmed 10% mask captures 6.1× mean magnitude points — mechanism implemented correctly, **idea failed**. Arm B γ=5 skipped per close rule. **Cumulative scalar-reweighting axis now CLOSED — 6 nulls (H338, H339, H341, H346, H361, H364). H336 fine-tune basin is brittle to gradient-mass rebalancing; bottleneck is REPRESENTATION CAPACITY, not loss geometry.** | **H364 CLOSED 06:30Z** |
 | **Anisotropic tangent-frame attention encoder (Finding Q)** | `anisotropic-tangent-frame-attention-encoder-null` — Per-vertex Q/K rotation into local frame (t1,t2,n) via slice-effective surface normals; pre-softmax score mix `(1-σ(γ_l)) S_std + σ(γ_l) S_aniso`, per-layer learnable γ_l init=-10. EP14 val_primary 6.0757% (>6.05% close threshold by 2.6bp); EP15 6.0765%, EP16 6.0783% — flat-to-worse trajectory. **Diagnostic: all 5 γ_aniso scalars stayed pinned at ~-10 (σ≈4.5e-5) — gates NEVER opened**. Optimizer found no gradient signal toward engaging anisotropy. Per-channel WSS_z MAE +0.7% worse than H336 EP13 (the channel the hypothesis targeted). **17th closed axis. 4 consecutive encoder/representation hypotheses using surface normals (H351 routing, H357 content, H358 output basis, H367 attention frame) ALL null — model is saturated on existing geometric content; next attacks must inject information the encoder doesn't currently have, not rearrange existing.** | **H367 CLOSED 08:30Z** |
 | **WSS spatial-gradient consistency loss (Finding R)** | `wss-spatial-gradient-consistency-loss-overshoot` — Per-edge L2 of (WSS_pred[j] - WSS_pred[i]) − (WSS_target[j] - WSS_target[i]) over kNN-8 surface graph, λ=0.3. EP14 val_primary **6.503%** (+49bp regression vs baseline 6.017%, blows close threshold by 45bp). ALL 5 channels regressed: WSS_z +38bp (the target channel got WORSE), WSS_y sizable, SP +32bp, VP **+100bp** (channel not touched by new loss term, regressed most). train/wss_grad_loss DID converge 0.026 → 0.015 — mechanism worked but destroyed point accuracy. **Cumulative loss-tier null pattern is now 7 axes (H338, H339, H341, H346, H361, H364, H368). H336/H342 loss formulation is at a tight Pareto-optimum on the EP13 fine-tune basin — any per-point reweighting OR per-edge structural addition breaks multi-channel balance via Lion-basin gradient-mass shift, regardless of weight or operator.** Decisive: edward is 4-for-4 nulls on loss-tier in a row (H338→H361→H364→H368) — pivoting to non-loss-tier next. | **H368 CLOSED 09:05Z** |
+| **ISAB middle-layer REPLACE 3-of-5 layers (Finding S)** | `isab-middle-layer-replace-null` — Set Transformer ISAB (M=32 per-head inducing points `[H=4, M=32, dim_head=128]`) on layers idx 1,2,3 (60% of slice-mixing replaced). Warm-start H336 EP13, 3-epoch cosine tail, Lion. EP14 val_primary **7.0188%** (+1.00pp vs source, +1.12pp vs H342 gate — worst single-epoch regression of 5 recent edward closes). EVERY channel regressed +0.7–1.2pp — signature of "basin lost all calibrated slice-token interaction structure." Root cause: mixed-init pathology — cold ISAB layers 1/2/3 sandwiched between pretrained Transolver 0/4; 3-epoch cosine tail cannot recover from cold-init on 60% of slice-mixing under this LR budget. **19th closed axis.** Follow-up H371: single-layer probe at idx 2 only to bound operator family. | **H370 CLOSED 11:15Z** |
 
 ---
 
-## Active Fleet (2026-06-02 06:40Z — 8/8 WIP students, fleet fully active)
+## Active Fleet (2026-06-02 11:18Z — 8/8 WIP students, fleet fully active)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| **#1548** | alphonse | **H356: 3-cp × K=5 output-avg — FAILED GATES** — Cal arm `0n1xkwic` finished: val_cal **5.9206** (>gate 5.8962, MISS 24bp) / test_cal **5.7668** (>gate 5.7357, MISS 31bp). Awaiting terminal SENPAI-RESULT post then close. | ⏳ awaiting student terminal |
-| **#1558** | thorfinn | **H365: FastSWA cyclic-LR cross-basin 3-cp output-avg** — 3 cyclic cosine restarts from EP13 (T_max=1 per epoch), output-average 3 cycle-end predictions with H336 TTA recipe. Cross-basin diversity vs H342's within-basin ep13/14/15. | 🟡 WIP — Phase 1 |
-| **#1538** | nezuko | H347: BL physics priors — Arm A val_cal 5.9253 FAILED gate. Arm B/C cascade auto-chaining. ETA terminal ~18-19Z June 2. | 🟡 WIP — long cascade running |
-| **#1551** | askeladd | H359: Multi-scale surface kNN branch — Phase 1 done (val_raw ~6.013, 10bp behind SOTA). Single-cp TTA `kwe8tynw` triage running. If not approaching ~5.91 val_cal → close as null. | 🟡 WIP — TTA triage |
-| **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 done, eval `8cqqpd9x` (h360-eval-lappe32) running. | 🟡 WIP — eval phase |
-| **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side: pre-softmax bias α_l·1[j∈kNN(i)] on slice-routing logits, per-layer learnable α init=0. Step-0 invariant. Student's own B1 suggestion post-H363. | 🟡 WIP — smoke + Phase 1 |
-| **#1562** | edward | **H368: WSS spatial-gradient consistency loss** | ❌ **CLOSED 09:05Z** Finding R. EP14 val 6.503% (+49bp); VP +100bp untouched-channel collapse. → H370 assigned. |
-| **#1564** | edward | **H370: ISAB middle-layer REPLACE** — Set Transformer inducing-point attention block, M=32 per-head inducing points (`[H=4, M=32, dim_head=128]`), REPLACE middle 3 of 5-layer Transolver stack (idx 1,2,3), keep idx 0 and idx 4. Non-capacity-additive architectural rewrite — replaces O(S²) self-attention with O(SM) inducing-point cross-attention. **Vetted by researcher-agent**: per-head inducing points (not global), trunc_normal init std=0.02, `find_unused_parameters=False`, REPLACE pattern forces clean reroute from step 1. Pre-committed close rule: EP14 val > 6.05% → close. | 🟡 WIP — Phase 1 (just assigned 09:15Z) |
-| **#1561** | frieren | **H367: Anisotropic surface attention via local tangent frame** | ❌ **CLOSED 08:30Z** Finding Q. Reassigning H369 RWPE next. |
+| **#1548** | alphonse | **H356: 3-cp × K=5 output-avg** — val_cal 5.9206 / test_cal 5.7668, FAILED gates. Awaiting SENPAI-RESULT then close. | ⏳ awaiting terminal |
+| **#1558** | thorfinn | **H365: FastSWA cyclic-LR cross-basin 3-cp output-avg** — 3 cyclic cosine restarts from EP13 (T_max=1 per epoch), output-average 3 cycle-end predictions. Cross-basin diversity vs H342's within-basin ep13/14/15. | 🟡 WIP — Phase 1 |
+| **#1538** | nezuko | **H347: BL physics priors** — Arm A FAILED gate (val_cal 5.9253). Arm B `65z21dv8` val_RAW 5.9224%, TTA running. ETA terminal ~15:30Z. | 🟡 WIP — Arm B/C cascade |
+| **#1551** | askeladd | **H359: Multi-scale surface kNN** — val_RAW 5.9245% (kwe8tynw, -45bp vs H336 RAW). Test arm running (rt=22699s). Cal landing ETA ~17-18Z. **PRIMARY SOTA CANDIDATE** if cal yield ≥7bp. | 🟡 WIP — TTA test arm |
+| **#1552** | fern | **H360: LapPE-32 Laplacian eigenfunction PE** — Phase 1 done, full TTA eval running. | 🟡 WIP — eval phase |
+| **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side pre-softmax bias, step-0 invariant. v2 relaunch healthy past crash step 5455. Phase 1 in progress. | 🟡 WIP — Phase 1 v2 |
+| **#1563** | frieren | **H369: Surface RWPE-K16 positional encoding** — Random-walk PE over kNN-16 surface graph. Phase 1 rank0-7 ALL at step=8906, rt=32min — **NEARLY DONE**, val_primary expected imminently. Close rule: EP14 val > 6.05% → close. | 🟡 WIP — Phase 1 almost done |
+| **#1566** | edward | **H371: ISAB single-layer probe** — REPLACE only layer idx 2 of 5-layer stack (vs H370's 3-of-5). Tests whether ISAB operator is fundamentally incompatible or whether H370 failed on mixed-init depth. M=32, same warm-start recipe. Close rule: EP14 val > 6.05% → close. | 🟡 WIP — just assigned 11:18Z |
 
 ---
 
-## Current Research Focus: ENCODER INPUT-FEATURE TIER (NORMAL/GEOMETRY EXISTING-CONTENT SATURATED)
+## Current Research Focus: ENCODER INPUT-FEATURE + ARCHITECTURAL OPERATOR TIER
 
-**17 closed axes** all point to the same conclusion: WSS_z floor is representational/upstream. **Critical update post-H367**: 4 consecutive encoder/representation hypotheses using **surface normals** (H351 routing, H357 content, H358 output basis, H367 attention frame) ALL closed null — the model is **saturated on existing geometric content**. Next attacks must inject information the encoder DOES NOT CURRENTLY HAVE, not rearrange existing representations.
+**19 closed axes** all converge to: WSS_z floor is representational/upstream AND the H336 EP13 basin is brittle to perturbation under 3-epoch cosine tail. **Critical update post-H370**: ISAB middle-layer REPLACE (Finding S) is the worst single-epoch regression in the entire edward streak (+1.0pp), confirming that warm-start + 3-epoch cosine is insufficient for 60%-of-stack operator replacement. **H371 single-layer probe (idx 2 only)** is the current architectural bound.
 
-**Live attack tier (post-H368)**: 
-- **Input-feature axis** (3 in flight): H359 multi-scale local kNN (askeladd), H360 LapPE-32 global spectral (fern, val_raw 6.012% neutral-positive), H369 RWPE-16 local topology (frieren)
-- **Non-capacity-additive architectural rewrites** (NEW PRIORITY — edward H370 PR #1564 LIVE): inducing-point attention bottleneck (Set-Transformer ISAB M=32 per-head, REPLACE layers 1,2,3 of 5; researcher-vetted); sparse+global attention hybrid; heat-kernel signature PE next
-- **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn)
-- **Encoder kNN proximity bias** (low-touch attention modulation): H366 (tanjiro, Phase 1 crashed mid-EP14)
-- **Physics-prior cascade**: H347 BL priors (nezuko, long cascade)
+**Live attack tier (post-H370)**:
+- **Input-feature axis** (3 in flight): H359 multi-scale local kNN (askeladd, val_RAW 5.9245% — PRIMARY SOTA CANDIDATE), H360 LapPE-32 global spectral (fern, eval running), H369 RWPE-16 local topology (frieren, Phase 1 just finishing ~step 8906)
+- **Non-capacity-additive architectural rewrite** (H371 edward): ISAB single-layer probe at idx 2 only — bounds operator family cheaply (~40min Phase 1); if EP14 also blows 6.05%, ISAB is closed at family level
+- **Cross-basin TTA**: H365 FastSWA cyclic-LR (thorfinn, Phase 1)
+- **Encoder kNN proximity bias**: H366 (tanjiro, v2 past crash)
+- **Physics-prior cascade**: H347 BL priors (nezuko, Arm B/C)
 
 **Loss-tier is FULLY CLOSED — 7 nulls cumulative**. Any future loss modification would be redundant. Decoder/output tier also FULLY CLOSED — 14 nulls. The live frontier is exclusively:
 1. injecting new information into encoder input

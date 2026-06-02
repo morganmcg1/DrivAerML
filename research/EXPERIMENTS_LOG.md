@@ -1,3 +1,25 @@
+## 2026-06-02 11:15Z — PR #1564: H370 ISAB middle-layer REPLACE (Set Transformer) — CLOSED (pre-committed close rule, Finding S)
+
+- Branch: edward/h370-isab-inducing-point-attention
+- **Hypothesis**: Non-capacity-additive architectural rewrite — REPLACE layers idx 1, 2, 3 of 5-layer Transolver stack with ISAB (Set Transformer Inducing-Point Attention Block). M=32 per-head inducing points `[H=4, M=32, dim_head=128]`, compressing S=128 slice tokens via MAB1 → M=32 bottleneck → MAB2 expansion. Rationale: replaces O(S²) self-attention with O(SM) inducing-point cross-attention; the bottleneck acts as explicit information bottleneck without adding capacity (REPLACE not ADD).
+- **Implementation**: edward implemented per-head `ISABTransolverAttention` class with MAB1 + MAB2. `trunc_normal_(std=0.02)` init. Param overhead +103,680 (+0.595% of 17.41M baseline — above spec's +0.3% due to per-layer FFNs, but within order-of-magnitude). All 3 ISAB layers received nonzero gradient on first backward step. Smoke test passed. Phase 1 warm-start from `yw2a5dyl` EP13, Lion, lr 9e-5 → 1e-6 cosine, 3 epochs.
+- **Deviations**: edward used `--batch-size 4` and `--model-slices 128` (both matching actual H336 baseline config rather than PR spec's S=96 and batch=1). Correct choice — preserves H342 basin. S=128 with M=32 gives 4:1 compression rather than spec's 3:1.
+
+| Metric | H370 EP14 (raw val) | H342 gate | Δ |
+|---|---:|---:|---:|
+| val_abupt rel_l2_pct | **7.0188%** | 5.8962% | **+1.12pp** ❌ |
+| val_SP rel_l2_pct | 4.6037% | — | +0.83pp vs H336 EP13 |
+| val_VP rel_l2_pct | 4.7053% | — | +1.24pp vs H336 EP13 |
+| val_WSS rel_l2_pct | 7.8147% | — | +1.04pp vs H336 EP13 |
+| val_WSS_z rel_l2_pct | 10.2829% | — | +1.17pp vs H336 EP13 |
+
+- **W&B**: `v8i8tna4` (rank0), group `h370-isab-phase1`. Training stopped ~48min in; EP15/EP16 skipped per close rule.
+- **Finding S** (19th closed axis): `isab-middle-layer-replace-null` — ISAB on layers 1/2/3 (60% of slice-mixing replaced) produced +1.00pp regression on EP14 vs source checkpoint. Worst single-epoch regression of the 5 most recent edward closes (H338: +0.4pp, H361: +0.4pp, H364: +0.6pp, H368: +0.5pp, H370: +1.0pp). The broad regression across ALL channels (+0.7–1.2pp each) is the signature of "the model lost its calibrated slice-token interaction structure across all output heads" — mixed-init pathology: cold ISAB layers 1/2/3 sandwiched between pretrained Transolver 0 and 4 produces near-noise that pretrained layers cannot interpret, and 3-epoch cosine tail is insufficient to re-learn 60% of slice-mixing through a fundamentally different operator.
+- **Warm-start mismatch root cause confirmed**: Edward's analysis: "The warm-start root is the wrong attack vector for ISAB." With `trunc_normal_(std=0.02)` inducing-point init, 2720 train steps × 3 epochs = ~8K gradient updates against cold inducing points. The pretrained-Transolver + cold-ISAB hybrid creates an unstable mixed-init pattern at EP13.
+- **Next assignment**: H371 (single-layer ISAB probe at idx 2 only) — tests whether operator family has ANY merit under warm-start recipe, or whether all ISAB depths are incompatible with the H336 basin. Cheapest informative test: ~40 min Phase 1, same close rule.
+
+---
+
 ## 2026-06-02 09:05Z — PR #1562: H368 WSS spatial-gradient consistency loss (kNN-8 edge-pair) — CLOSED (overshoot)
 
 - Branch: edward/h368-wss-grad-consistency-loss
