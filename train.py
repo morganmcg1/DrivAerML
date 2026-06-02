@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -146,6 +147,11 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    # H374: self-consistency vs frozen EMA teacher on noisy channel(s)
+    teacher_ckpt: str = ""
+    self_consistency_weight: float = 0.0
+    self_consistency_channels: str = "wss_z"
+    self_consistency_loss: str = "mse"
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -271,6 +277,29 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "teacher_ckpt": (
+            "H374: path to a frozen teacher checkpoint (e.g. EP13 EMA) used "
+            "for self-consistency regularization. The teacher is loaded with "
+            "the SAME --model-* / --rff-* / --use-qk-norm / --use-surf-to-vol-xattn "
+            "/ --pos-encoding-mode flags as the student, set to eval() and "
+            "requires_grad=False, and never updated. Empty disables the "
+            "self-consistency loss."
+        ),
+        "self_consistency_weight": (
+            "H374: scalar lambda multiplying the self-consistency MSE/L1 loss "
+            "between student and teacher predictions on selected channel(s). "
+            "0.0 disables (default). Recommended start 0.1 for tau_z."
+        ),
+        "self_consistency_channels": (
+            "H374: comma-separated list of surface channels to apply the "
+            "self-consistency loss to. Valid tokens: sp, wss_x, wss_y, wss_z. "
+            "Default 'wss_z' (tau_z only — the noisiest channel)."
+        ),
+        "self_consistency_loss": (
+            "H374: which pointwise distance to use for the self-consistency "
+            "loss. 'mse' (L2, advisor default) or 'l1' (more robust to "
+            "noisy teacher predictions). Default 'mse'."
         ),
     }
     for field in fields(Config):
@@ -432,6 +461,39 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+SURFACE_CHANNEL_INDEX = {"sp": 0, "wss_x": 1, "wss_y": 2, "wss_z": 3}
+
+
+def parse_self_consistency_channels(spec: str) -> list[int]:
+    tokens = [t.strip().lower() for t in (spec or "").split(",") if t.strip()]
+    if not tokens:
+        return []
+    indices: list[int] = []
+    for token in tokens:
+        if token not in SURFACE_CHANNEL_INDEX:
+            raise ValueError(
+                f"--self-consistency-channels token {token!r} unknown; "
+                f"valid: {sorted(SURFACE_CHANNEL_INDEX)}"
+            )
+        indices.append(SURFACE_CHANNEL_INDEX[token])
+    return sorted(set(indices))
+
+
+def _self_consistency_distance(
+    student_pred: torch.Tensor,
+    teacher_pred: torch.Tensor,
+    mask: torch.Tensor,
+    loss_type: str,
+) -> torch.Tensor:
+    loss_type = loss_type.lower()
+    diff = student_pred - teacher_pred
+    if loss_type == "mse":
+        return masked_mean(diff.square(), mask)
+    if loss_type == "l1":
+        return masked_mean(diff.abs(), mask)
+    raise ValueError(f"--self-consistency-loss {loss_type!r} not in {{mse, l1}}")
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -442,10 +504,19 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    teacher_model: nn.Module | None = None,
+    self_consistency_weight: float = 0.0,
+    self_consistency_channel_indices: list[int] | None = None,
+    self_consistency_loss_type: str = "mse",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    use_consistency = (
+        teacher_model is not None
+        and self_consistency_weight > 0.0
+        and self_consistency_channel_indices
+    )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -467,13 +538,42 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+
+        consistency_loss: torch.Tensor | None = None
+        if use_consistency:
+            with torch.no_grad():
+                teacher_out = teacher_model(
+                    surface_x=batch.surface_x,
+                    surface_mask=batch.surface_mask,
+                    volume_x=batch.volume_x,
+                    volume_mask=batch.volume_mask,
+                )
+                teacher_surface = teacher_out["surface_preds"].detach()
+            consistency_terms = []
+            for idx in self_consistency_channel_indices:
+                consistency_terms.append(
+                    _self_consistency_distance(
+                        out["surface_preds"][..., idx : idx + 1],
+                        teacher_surface[..., idx : idx + 1],
+                        batch.surface_mask,
+                        self_consistency_loss_type,
+                    )
+                )
+            consistency_loss = torch.stack(consistency_terms).mean()
+            loss = loss + self_consistency_weight * consistency_loss
+
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if consistency_loss is not None:
+        consistency_value = float(consistency_loss.detach().cpu().item())
+        metrics["consistency_loss"] = consistency_value
+        metrics["consistency_loss_weighted"] = self_consistency_weight * consistency_value
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -927,6 +1027,60 @@ def main(argv: Iterable[str] | None = None) -> None:
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
+
+        # H374: self-consistency teacher (frozen EP13 EMA). Built BEFORE the
+        # student is wrapped in torch.compile/DDP so we can reuse build_model().
+        teacher_model: nn.Module | None = None
+        self_consistency_channel_indices: list[int] = []
+        if config.teacher_ckpt:
+            if config.self_consistency_weight <= 0.0:
+                raise ValueError(
+                    "--teacher-ckpt set but --self-consistency-weight is 0; "
+                    "either drop the teacher path or pass a positive weight."
+                )
+            if config.use_gradnorm:
+                raise ValueError(
+                    "--teacher-ckpt is not currently wired into the GradNorm "
+                    "training path; run without --use-gradnorm or extend "
+                    "per_task_train_losses()."
+                )
+            self_consistency_channel_indices = parse_self_consistency_channels(
+                config.self_consistency_channels
+            )
+            if not self_consistency_channel_indices:
+                raise ValueError(
+                    "--self-consistency-channels must list at least one channel "
+                    "from {sp, wss_x, wss_y, wss_z}."
+                )
+            teacher_path = Path(config.teacher_ckpt)
+            if not teacher_path.is_file():
+                raise FileNotFoundError(f"--teacher-ckpt not found: {teacher_path}")
+            teacher_model = build_model(config).to(device)
+            teacher_ck = torch.load(str(teacher_path), map_location="cpu", weights_only=False)
+            teacher_state_dict = teacher_ck["model"] if "model" in teacher_ck else teacher_ck
+            teacher_state_dict = {
+                k.removeprefix("module."): v for k, v in teacher_state_dict.items()
+            }
+            t_missing, t_unexpected = teacher_model.load_state_dict(
+                teacher_state_dict, strict=False
+            )
+            teacher_model.eval()
+            for param in teacher_model.parameters():
+                param.requires_grad_(False)
+            channel_token_lookup = {v: k for k, v in SURFACE_CHANNEL_INDEX.items()}
+            channel_names = [
+                channel_token_lookup[idx] for idx in self_consistency_channel_indices
+            ]
+            if state.is_main:
+                print(
+                    f"H374 self-consistency teacher loaded from {teacher_path} "
+                    f"(epoch={teacher_ck.get('epoch')}, "
+                    f"source={teacher_ck.get('checkpoint_source')}, "
+                    f"missing={len(t_missing)}, unexpected={len(t_unexpected)}); "
+                    f"lambda={config.self_consistency_weight}, "
+                    f"channels={channel_names}, loss={config.self_consistency_loss}"
+                )
+
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -1081,6 +1235,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["mirror_augmentation"] = config.mirror_augmentation
             wandb.summary["epochs_already_done"] = config.epochs_already_done
             wandb.summary["save_every_epoch"] = config.save_every_epoch
+            if teacher_model is not None:
+                wandb.summary["self_consistency/enabled"] = True
+                wandb.summary["self_consistency/weight"] = config.self_consistency_weight
+                wandb.summary["self_consistency/channels"] = config.self_consistency_channels
+                wandb.summary["self_consistency/loss"] = config.self_consistency_loss
+                wandb.summary["self_consistency/teacher_ckpt"] = config.teacher_ckpt
+            else:
+                wandb.summary["self_consistency/enabled"] = False
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1230,6 +1392,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        teacher_model=teacher_model,
+                        self_consistency_weight=config.self_consistency_weight,
+                        self_consistency_channel_indices=self_consistency_channel_indices,
+                        self_consistency_loss_type=config.self_consistency_loss,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1270,6 +1436,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "consistency_loss" in batch_loss_metrics:
+                        train_log["train/consistency_loss"] = batch_loss_metrics[
+                            "consistency_loss"
+                        ]
+                        train_log["train/consistency_loss_weighted"] = batch_loss_metrics[
+                            "consistency_loss_weighted"
+                        ]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
