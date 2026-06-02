@@ -1,5 +1,38 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-06-02 03:54Z — PR #1533: H189 hidden_dim=640 (nezuko) TERMINAL — pending student SENPAI-RESULT, NON-MERGE recommended
+
+- dl24-nezuko/h189-hidden-dim-640-per-channel-heads
+- W&B run: `c2qyhgmh` state=finished, rt=22.88h, step=249,442/25EP (group: `h189-hidden-dim-640-per-channel-heads`)
+- **Hypothesis**: Doubling backbone width capacity (hidden_dim 512 → 640) on top of H183's per-channel decoder stack should improve representation depth for the wall-shear cross-flow components without destabilizing optimization.
+
+### Terminal test metrics — W&B `c2qyhgmh` summary direct read
+
+| Metric | H189 | H183 SOTA | Δ vs SOTA | Floor | Result |
+|---|---:|---:|---:|---:|:---:|
+| **test_primary/abupt_axis_mean_rel_l2_pct** | **5.6654** | 5.6152 | **+0.050pp REGRESS** | ≤5.844 | clear (margin 0.179pp) |
+| test_primary/wall_shear_rel_l2_pct | 6.5357 | 6.4427 | +0.093pp REGRESS | — | worse |
+| **test_primary/volume_pressure_rel_l2_pct** | **3.4009** | 3.4415 | **−0.041pp WIN** | ≤3.643 | ✅ deepest VP in fleet |
+| test_primary/surface_pressure_rel_l2_pct | 3.5288 | 3.5187 | +0.010pp ~tied | ≤3.577 | clear (margin 0.048pp) |
+| test_primary/wall_shear_x_rel_l2_pct | 5.7897 | — | — | — | — |
+| test_primary/wall_shear_y_rel_l2_pct | 7.0781 | — | — | — | — |
+| test_primary/wall_shear_z_rel_l2_pct | 8.5295 | — | — | — | — |
+| best_val_primary/abupt_axis_mean_rel_l2_pct | 5.907 | — | — | — | — |
+
+### Analysis
+
+- Primary metric ABUPT regresses by +0.050pp / +0.89% relative → **NON-MERGE per merge contract**.
+- **Real scientific win on VP only:** hidden_dim=640 produces the deepest test_VP in fleet history (3.4009, beating H183's 3.4415 by −0.041pp, fully paper-tier).
+- **Tradeoff signature:** extra width helps volume pressure absorption, costs WSS (+0.093pp) and primary ABUPT (+0.050pp). This is a **VP-specialization architecture trait**, not a generalized win.
+- Test < Val across the board (test_WSS 6.536 < val_WSS 6.702; test_ABUPT 5.665 < val_ABUPT 5.907) — clean EMA-best-val checkpoint harvest, no test surprise.
+- **Implication for next round:** hidden_dim=640 is a viable compound ingredient for VP-targeted experiments, particularly if combined with a WSS-channel-specific intervention (e.g., normal-component penalty, tangent-basis projection). Should NOT be merged in isolation.
+
+### Status
+
+- Advisor posted full terminal analysis on PR #1533 at 03:54Z (comment 4598581732) with SENPAI-RESULT format template.
+- Student dl24-nezuko silent since 02:53Z (~21h gap before run termination). Awaiting formal SENPAI-RESULT post + label flip before closing PR.
+- If student remains unresponsive past ~05:30Z, advisor will close NON-MERGE with W&B-derived terminal context.
+
 ## 2026-06-01 23:55Z — PR #1534: H190 per-channel surface decoder width-factor=2.5 (tanjiro) CLOSED NON-MERGE
 
 - dl24-tanjiro/h190-surface-out-width-2p5

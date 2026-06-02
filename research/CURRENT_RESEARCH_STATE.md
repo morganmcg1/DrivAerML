@@ -1,11 +1,45 @@
 # SENPAI Research State
 
-- **2026-06-02 03:39Z**
+- **2026-06-02 03:54Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 03:54Z checkpoint — **H189 TERMINAL** rt=22.88h: test_ABUPT=5.665 (+0.050pp REGRESS vs H183), **test_VP=3.401 (−0.041pp deepest VP in fleet)**, **NON-MERGE pending student SENPAI-RESULT**; H193 main rt=17min/EP1 step=3964/penalty=0.060 firing; H191 VP=3.657 (+0.014pp over floor) still recovering; H192 EP15 holds
+
+### MAJOR EVENT: H189 nezuko TERMINAL — VP wins, primary regresses → NON-MERGE
+
+H189 main 25EP DDP8 finished at rt=22.88h (W&B `c2qyhgmh` state=finished). Full test harvest landed cleanly. Advisor posted full terminal analysis on PR #1533 (comment 4598581732) at 03:54Z with SENPAI-RESULT format template for the silent student.
+
+| Metric | H189 | H183 SOTA | Δ | Floor | Result |
+|---|---:|---:|---:|---:|:---:|
+| **test_ABUPT (PRIMARY)** | **5.6654** | 5.6152 | +0.050pp REGRESS | ≤5.844 | clear |
+| test_WSS | 6.5357 | 6.4427 | +0.093pp REGRESS | — | worse |
+| **test_VP** | **3.4009** | 3.4415 | **−0.041pp WIN** | ≤3.643 | ✅ deepest in fleet |
+| test_SP | 3.5288 | 3.5187 | +0.010pp ~tied | ≤3.577 | clear |
+| test_τ_x | 5.7897 | — | — | — | — |
+| test_τ_y | 7.0781 | — | — | — | — |
+| test_τ_z | 8.5295 | — | — | — | — |
+
+**Decision: NON-MERGE.** Primary ABUPT regresses +0.050pp / +0.89% rel. Scientific value: hidden_dim=640 = deepest test_VP in fleet history (paper-tier 3.401, beating H183 by −0.041pp), confirming width-capacity advantage for volume pressure but tradeoff against WSS/ABUPT. **Mechanism queued for future compound assignment** (hidden_dim=640 + WSS-channel-targeted intervention).
+
+### Fleet snapshot at 03:54Z
+
+| Student | PR | Hyp | EP/State | val_WSS | val_VP | Status |
+|---|---|---|---:|---:|---:|---|
+| nezuko | #1533 | H189 hidden_dim=640 | **TERMINAL rt=22.88h** | 6.702 | 3.455 | test harvested, NON-MERGE pending student SENPAI-RESULT |
+| fern | #1535 | H191 sharper WSD | EP22 (18.4h) | **6.655 ⭐fleet leader** | **3.657 (+0.014pp over floor)** | still recovering, 5.6h to 24h cap |
+| frieren | #1541 | H192 τ_z compound | EP15-16 (13.1h) | 6.692 | 3.563 paper-tier | strong descent holds, 10.9h to cap |
+| tanjiro | #1554 | H193 wss_normal_penalty | **main EP1 step=3964 rt=17min** | smoke 13.063 | — | penalty=0.060 firing healthy, EP1 ~04:25Z |
+
+### Watch items next ~6h
+1. **H189 student SENPAI-RESULT** — silent ~21h; advisor posted terminal analysis 03:54Z; if no response by ~05:30Z, close NON-MERGE with W&B-derived context
+2. **H193 main EP1 (~04:25Z)** — first val read; expect ~13.0% val_WSS at λ=0.2 (matches smoke 13.063)
+3. **H191 fern VP cross-floor** — was 3.657 at 03:54Z, slope still descending; should clear 3.643 in next 30-60min
+4. **H192 frieren EP16-17** — strongest non-H189 trajectory continuing; cleanest merge path if test_WSS ≤6.443 at terminal
+5. **H193 main EP3 (~06:25Z)** — first kill gate ≤7.50% loose
 
 ## 03:39Z checkpoint — **H193 main 30EP DDP8 LAUNCHED** (group `h193-wss-normal-penalty-w020-main`, 8/8 ranks, rank-0 `vuvpegip`); **H191 VP RECOVERING in late cosine** 3.730 → 3.650 (just +0.007pp over floor); H192 EP15 6.692 paper-tier holds; H189 EP22 paper-tier VP=3.455 deepens
 
