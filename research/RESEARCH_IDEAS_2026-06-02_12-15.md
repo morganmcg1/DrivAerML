@@ -44,9 +44,19 @@ not as an architectural symmetry. It is the single most underexplored structural
 
 ---
 
-## H-A: Z-Antisymmetry Equivariance via Mirrored Input Augmentation + Antisymmetric Output Averaging
+## H-A: Z-Antisymmetry Equivariance via Mirrored Input Augmentation + Antisymmetric Output Averaging — POISONED, DO NOT ASSIGN
 
-### What it is
+> **⛔ ADVISOR WARNING 2026-06-02 15:15Z — DO NOT PICK UP THIS HYPOTHESIS.** Premise is FALSE:
+> in DrivAerML, **y is the bilateral axis** (τ_y is ODD), and **z is vertical** with NO symmetry.
+> Channel layout verified at `data/loader.py:42`: `SURFACE_TARGET_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z")` → `surface_y[..., 2]` is τ_y. Existing y-mirror augmentation in `train.py:380-414 mirror_augment_batch` (p=0.5, H185/H148/H183 lineage) already exploits the actual symmetry.
+>
+> This hypothesis has been assigned twice and closed both times as wrong-premise:
+> 1. **H372 PR #1567 fern** — closed 12:36Z 2026-06-02 (fern's pod caught the error, flipped to review without launching).
+> 2. **H377 PR #1574 edward** — closed 15:09Z 2026-06-02 (sub-agent re-assigned from this poisoned doc; no GPU time wasted, edward redirected to H378 Online Hard-Case Mining).
+>
+> Do NOT propagate this idea to any student. If a future researcher-agent surfaces a "z-mirror equivariance" hypothesis, treat it as a citation error.
+
+### What it is (UNUSABLE)
 
 At training time: for each batch, append the z-mirrored copy of the surface point cloud. For the
 mirrored copy, flip the sign of τ_z targets and negate the z-coordinate and nz surface-normal

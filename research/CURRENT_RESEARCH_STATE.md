@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 23 total)
+## Closed axes (do NOT revisit — 24 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -56,7 +56,7 @@
 
 ---
 
-## Active Fleet (2026-06-02 13:15Z — 8/8 WIP, **all students assigned**)
+## Active Fleet (2026-06-02 15:20Z — 8/8 WIP, **all students assigned**)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
@@ -67,11 +67,12 @@
 | **#1572** | tanjiro | **H376: WSS gradient-magnitude attention bias (EP13 EMA teacher, zero-param)** — Per-key additive attention bias proportional to ||∇τ_pred||₂ from frozen EP13 EMA teacher's WSS prediction over kNN-8 surface graph. Pre-compute once per sample; inject as static scalar into all slice-attention layers. Physics-informed successor to H366 (geometric kNN bias nulled as Finding W). Discriminator: if H376 also nulls, attention-steering tier CLOSED. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 13:00Z |
 | **#1570** | fern | **H375: Cross-Channel Decoder Query Tokens** — K=4 learnable query tokens, cross-attention from τ_x/τ_y context → τ_z decoder. +0.1% params (264K @ d_model=512). Channels verified: loader.py:42 [...,1]=τ_x, [...,2]=τ_y, [...,3]=τ_z. Replaces wrong-premise H372 (z-mirror, closed no-run). Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:45Z |
 | **#1568** | frieren | **H373: Transolver++ Local Adaptive Slice Pooling** — Replace global slice softmax with k=16 kNN-constrained local pooling (temp=0.1). Zero params, preserves token-count bijection (post-H371 V constraint). Targets boundary-layer τ_z. Kill gate EP14 val>6.05%. ~14h+TTA. | 🟢 ASSIGNED 12:33Z |
-| **#1574** | edward | **H377: Z-antisymmetry mirrored augmentation (H-A)** — τ_z has strict algebraic antisymmetry τ_z(x,y,−z)=−τ_z(x,y,z) under lateral mirror. Train with z-mirrored batch copies (negate z-coord, nz, τ_z targets; batch_size=2 so mirror doubles back to 4 eff). Average τ_z at inference: 0.5×(pred_orig + (−pred_mirror)). Highest-priority unattacked symmetry axis. Zero params, zero architecture change. Kill gate EP14 val>6.00%. ~10.5h+TTA. | 🟢 ASSIGNED 13:15Z |
+| **#1574** | ~~edward~~ | ~~**H377: Z-antisymmetry mirrored augmentation (H-A)**~~ — **CLOSED 15:10Z wrong-premise** (z-axis is NOT bilateral; same root cause as H372 PR #1567). Sub-agent reused H-A from `RESEARCH_IDEAS_2026-06-02_12-15.md` without checking the axis convention. **NOT a counted closed axis** (no run consumed). Edward reassigned to H378. | ⛔ CLOSED wrong-premise |
+| **#1575** | edward | **H378: Online Hard-Case Mining (case-CDF reweighted sampling, α=1.0)** — Case-level (not vertex-level) reweighting of the 400-sample training distribution. Per-epoch, compute per-case `τ_z MAE`; build case-sampling probabilities `p_i ∝ MAE_i^α`. Next epoch samples cases proportional to p (with replacement). α=1.0 mild upweighting → α=2.0 aggressive arm. Mechanistically distinct from edward's 7 prior nulls (all per-vertex / loss-tier / operator). Zero params, ~10.5h. Kill gate EP14 val>6.05%. | 🟢 ASSIGNED 15:20Z |
 
 ---
 
-## Current Research Focus: 24 CLOSED AXES — SYMMETRY AUGMENTATION NOW PRIMARY ATTACK (H377)
+## Current Research Focus: 24 CLOSED AXES — PLATEAU PROTOCOL ACTIVE; CASE-LEVEL DISTRIBUTION SHIFT NOW EDWARD'S ATTACK (H378)
 
 **24 closed axes**. H374 closed (Finding X): self-consistency vs EP13 EMA teacher null — teacher has ~9% WSS_z error itself, violating the Mean Teacher premise. H366 (Finding W): geometric kNN proximity attention bias null. H376 now tests physics-informed attention bias; H377 (edward) tests z-antisymmetry mirrored augmentation — HIGHEST-priority remaining unattacked axis. H375/H373 in live round testing cross-channel decoder conditioning and local slice pooling. Narrowed frontier: (1) physical symmetry augmentation / equivariance constraints, (2) physics-informed attention bias, (3) decoder cross-channel conditioning, (4) operator replacements preserving token-count bijection. Training-time regularizer, input-feature, loss, decoder-capacity, and ISAB-operator tiers all exhausted.
 
