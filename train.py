@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -106,6 +107,14 @@ class Config:
     drop_path_max: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    # H361: direction-magnitude decomposed WSS loss
+    # added on top of the per-channel surface MSE (does not replace it).
+    # alpha weights (1 - cosine_similarity) on the WSS vector (tau_x, tau_y, tau_z);
+    # beta weights relative-magnitude MSE on the vector norm.
+    # Both terms operate on normalized-space WSS (same space as the base MSE).
+    # Both 0.0 = disabled (loss is exactly the existing MSE).
+    wss_dir_loss_alpha: float = 0.0
+    wss_dir_loss_beta: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -432,6 +441,36 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def wss_direction_magnitude_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    alpha: float = 1.0,
+    beta: float = 1.0,
+    eps: float = 1e-6,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Decomposed WSS loss: alpha * (1 - cos_sim) + beta * relative_norm_mse.
+
+    pred / target: [B, N, 3] — WSS channels (tau_x, tau_y, tau_z) only,
+    in the same space as the base MSE (normalized).
+    mask: [B, N]. Returns (combined_loss, dir_loss, rel_mag_loss).
+    """
+    # eps inside the sqrt is the numerically stable L2-norm idiom: it keeps the
+    # backward gradient ``x / (||x||^2 + eps^2).sqrt()`` bounded for near-zero
+    # vectors (clamp on the output protects the forward only).
+    eps_sq = eps * eps
+    pred_norm = (pred.pow(2).sum(dim=-1) + eps_sq).sqrt()  # [B, N]
+    tgt_norm = (target.pow(2).sum(dim=-1) + eps_sq).sqrt()  # [B, N]
+    dot = (pred * target).sum(dim=-1)                       # [B, N]
+    cos_sim = dot / (pred_norm * tgt_norm)                  # [B, N]
+    dir_loss = masked_mean(1.0 - cos_sim, mask)
+    mag_sq_err = (pred_norm - tgt_norm).square()
+    rel_mag_loss = masked_mean(mag_sq_err / (tgt_norm.square() + eps_sq), mask)
+    combined = alpha * dir_loss + beta * rel_mag_loss
+    return combined, dir_loss, rel_mag_loss
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -442,6 +481,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    wss_dir_loss_alpha: float = 0.0,
+    wss_dir_loss_beta: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -462,18 +503,37 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        wss_dir_extra_loss: torch.Tensor | None = None
+        wss_dir_component: torch.Tensor | None = None
+        wss_mag_component: torch.Tensor | None = None
+        if wss_dir_loss_alpha > 0.0 or wss_dir_loss_beta > 0.0:
+            wss_pred = out["surface_preds"][..., 1:4]
+            wss_true = surface_target[..., 1:4]
+            wss_dir_extra_loss, wss_dir_component, wss_mag_component = wss_direction_magnitude_loss(
+                wss_pred,
+                wss_true,
+                batch.surface_mask,
+                alpha=wss_dir_loss_alpha,
+                beta=wss_dir_loss_beta,
+            )
+            surface_loss = surface_loss + wss_dir_extra_loss
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics_out = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if wss_dir_extra_loss is not None:
+        metrics_out["wss_dir_extra_loss"] = float(wss_dir_extra_loss.detach().cpu().item())
+        metrics_out["wss_dir_component"] = float(wss_dir_component.detach().cpu().item())
+        metrics_out["wss_mag_component"] = float(wss_mag_component.detach().cpu().item())
+    return loss, metrics_out
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1064,6 +1124,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/wss_dir_loss_alpha"] = config.wss_dir_loss_alpha
+            wandb.summary["loss/wss_dir_loss_beta"] = config.wss_dir_loss_beta
             backbone = getattr(base_model, "backbone", None)
             if backbone is not None and hasattr(backbone, "blocks"):
                 drop_path_schedule = [
@@ -1230,6 +1292,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        wss_dir_loss_alpha=config.wss_dir_loss_alpha,
+                        wss_dir_loss_beta=config.wss_dir_loss_beta,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1268,8 +1332,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/wss_dir_loss_alpha": config.wss_dir_loss_alpha,
+                            "train/wss_dir_loss_beta": config.wss_dir_loss_beta,
                         }
                     )
+                    if "wss_dir_extra_loss" in batch_loss_metrics:
+                        train_log["train/wss_dir_extra_loss"] = batch_loss_metrics["wss_dir_extra_loss"]
+                        train_log["train/wss_dir_component"] = batch_loss_metrics["wss_dir_component"]
+                        train_log["train/wss_mag_component"] = batch_loss_metrics["wss_mag_component"]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
