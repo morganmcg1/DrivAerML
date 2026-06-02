@@ -1,11 +1,66 @@
 # SENPAI Research State
 
-- **2026-06-02 08:55Z**
+- **2026-06-02 09:25Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding. No new human messages since 19:27Z 2026-06-01.
+
+## 09:25Z checkpoint — **H194 EP3 PASSED first gate 6.985 (≤7.10 ✓, Δ+0.025pp vs H183 EP3)**; **H192 EP23 VP FRESH LOW 3.5320 (-0.111pp under floor)** with WSS uptick (slope flipped POS 3rd time); **H193 EP7 WSS PLATEAU BREAKING UPWARD** (slope +0.0024, VP descent halved -0.0032); **H191 24h CUT IMMINENT** (rt=23.84h step=327871, EP29 still latest read)
+
+### Actions taken this cycle
+- ACK on PR #1559 (H194): EP3 gate ≤7.10 PASS at 6.985 (Δ+0.025pp vs H183 EP3=6.96 — on-shape within noise), revised kill ladder EP5-25
+- Heartbeat on PR #1541 (H192): EP23 VP fresh low 3.5320, decoupled descent confirmed (VP improving while WSS oscillates higher), cleanest VP in fleet
+- Heartbeat on PR #1554 (H193): EP7 mechanism transition read — WSS plateau breaking UPWARD (slope +0.0024), VP descent halved (-0.0065→-0.0032), all 3 of WSS/AB/SP flipping positive
+- 4/4 students WIP, 0 idle, 0 review-ready
+- Awaiting H191 24h cut for terminal harvest
+
+### Fleet snapshot at 09:25Z
+
+| Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | val_AB | val_SP | Status |
+|---|---|---|---|---:|---:|---:|---:|---:|---|
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | EP3 (3.12h) | **6.9854 ✓ gate PASS** | 4.0856 | 6.2620 | 3.9967 | next gate EP5 ≤6.90 ~11:18Z |
+| fern | #1535 | H191 sharper WSD 30EP | ayg4liye | EP29 (23.84h) | 6.6443 | 3.6433 | 5.9278 | 3.8908 | ⚠️ 24h CUT ~09:25Z, terminal harvest imminent |
+| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | EP23 (18.58h) | 6.6967 (uptick) | **3.5320 ✅ FRESH LOW -0.111pp** | 5.9389 | 3.9194 | ⚠️ decoupled descent — VP cleanest in fleet, WSS rising |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP7 (5.77h) | 7.6627 (rising) | **3.7953 (slowing)** | 6.5323 | 3.9768 | ⚠️ plateau breaking UPWARD, VP descent halved |
+
+### H194 nezuko — EP3 PASSED first hard gate (kill ladder updated)
+- EP3 val_WSS=6.985 vs H183 EP3=6.96 → Δ+0.025pp (within run-to-run noise, ≤7.10 gate PASS)
+- EP1 lead has fully reverted to H183-shape (matching expected divergence collapse pattern)
+- LR at EP4 start = 8.86e-5 (cosine decay from 9e-5 peak, 98.4%)
+- **Kill ladder going forward:** EP5≤6.90 (~11:18Z), EP10≤6.80 (~16:20Z), EP15≤6.65, EP20≤6.55, EP25 terminal ≤6.50 paper-tier
+- **Mechanism note:** lr=9e-5 (+20% over H183's 7.5e-5) gain will only be visible in decay phase EP15+; EP3 same-shape is expected
+- Trajectory healthy, no intervention needed
+
+### H192 frieren — decoupled descent confirmed (VP fresh low, WSS oscillating)
+- EP23 VP=3.5320 = FRESH LOW (-0.111pp under floor 3.643), cleanest in fleet
+- EP23 WSS=6.6967 = 3rd consecutive uptick (+0.0075 vs EP22)
+- VP slope FLIPPED BACK NEG (-0.0004) at the fresh low — VP is decoupling from cosine drift
+- Other slopes: WSS +0.0007 (3rd POS), AB +0.0003 (3rd POS), SP -0.0001 (marginal)
+- **Test projection:** val_VP=3.5320 → test_VP ~3.33-3.45 = paper-tier VP improvement over H183 baseline 3.4415
+- Multi-metric NON-MERGE still likely (SP +0.34pp over floor), but VP-only research result strengthens with each EP
+
+### H193 tanjiro — WSS plateau BREAKING UPWARD (mechanism transition)
+- EP6→EP7 WSS 7.6358→7.6627 (+0.0269 uptick), slope FLIPPED POS (-0.0005→+0.0024)
+- VP descent halved (-0.0065→-0.0032) but still negative — EP7 VP=3.7953 fresh low
+- AB/SP slopes also flipped POSITIVE (+0.0009, +0.0007)
+- **Read:** wss_normal_penalty (λ=0.20) is now OVER-constraining — penalty gradient is pulling WSS up rather than bounding from below
+- **Kill decision matrix at EP8 (~10:15Z):** if WSS continues up + VP slope flattens → mechanism exhausted; if WSS holds flat + VP steepens → plateau resumed
+- Continuation to EP10 (~10:55Z), gate ≤6.85 certain miss
+
+### H191 fern — 24h CUT IMMINENT (terminal harvest awaited)
+- rt=23.84h at 09:22Z probe (step 327871 vs 320572 at 08:55Z, +7300 steps)
+- EP29 still latest read (6.6443/3.6433/5.9278/3.8908 — all fresh lows confirmed)
+- Budget cap will trigger SENPAI-RESULT terminal block within minutes
+- **Test projection unchanged:** WSS ~6.32-6.45 (likely TIE or marginal win), VP/AB/SP borderline (-0.05 to +0.05pp from floors)
+
+### Watch items next 4h
+1. **H191 24h cut** — terminal harvest + test eval, decision merge vs NON-MERGE based on test floors
+2. **H194 EP5 (~11:18Z)** — second hard gate ≤6.90, confirms tracking
+3. **H193 EP10 (~10:55Z)** — loose gate ≤6.85 (essentially certain miss given uptick), terminal VP harvest
+4. **H192 EP24-26 (~10:30-12:15Z)** — decoupled descent confirmation, VP terminal harvest
+5. **NO IDLE GPUs** — 4/4 students active
 
 ## 08:55Z checkpoint — **H191 EP29 FRESH LOWS ON ALL 4 METRICS** (WSD recovery deepening, rt=23.32h cuts at ~09:20Z); **H192 EP22 SLOPE 2ND REVERSAL** (now positive again, late-cosine drift confirmed pattern); **H193 EP6 WSS PLATEAU CONFIRMED** (5 EP flat at 7.64, VP descending steeply -0.0065/1k); **H194 main EP3 hold** (step=28905 mid-EP3 85%, ETA ~09:15Z first hard gate ≤7.10)
 
