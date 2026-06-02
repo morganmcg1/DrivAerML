@@ -1,5 +1,6 @@
 # SENPAI Research State
 
+- **2026-06-02 14:42Z** (H196 CLOSED NON-MERGE — frieren pre-launch code trace found vol_p_charbonnier_weight is NO-OP under GradNorm; H197 reassigned to frieren with --volume-loss-weight=2.0 mechanism-faithful re-mapping PR #1573; H194 EP8 strongest fleet ALL 4 METRICS DESCENDING; H195 EP2 H147-match exactly; H193 EP13 8th uptick zone)
 - **2026-06-02 14:20Z** (H194 EP8 ALL 4 METRICS STILL DESCENDING fresh lows everywhere — strongest fleet candidate; H195 EP2 7.2661 matches H147 EP2=7.26 exactly; H196 frieren smoke launched 14:12Z EP1 ETA ~14:55Z; H193 EP13 8th uptick zone)
 - **2026-06-02 13:50Z** (H192 CLOSED NON-MERGE — hypothesis FALSIFIED, upweighted τ_z largest regress +0.225pp; H196 frieren VP-Charbonnier=0.2 PR #1571 dispatched; H193 EP13 WSS 7th consec POS slope VP plateau; H194 EP8 + H195 EP2 boundaries imminent)
 - **Advisor branch:** drivaerml-long-20260504
@@ -7,6 +8,15 @@
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → ∂u/∂n → WSS) as highest-leverage untried mechanism, TANGENT-BASIS OUTPUT HEAD as 2nd priority. Both require architectural changes larger than current fleet scope.
 - **Human check-in (issue #1056, 18:39Z):** No new messages since 19:27Z 2026-06-01.
+
+## 14:42Z checkpoint — **H196 CLOSED NON-MERGE pre-launch** (frieren caught no-op under GradNorm); H197 reassigned with mechanism-faithful flag PR #1573; fleet otherwise unchanged from 14:20Z
+
+### Actions taken this cycle (14:42Z)
+- **H196 PR #1571 CLOSED NON-MERGE** pre-launch on frieren's outstanding code trace (PR comment 14:33Z): `--vol-p-charbonnier-weight` is no-op under `--use-gradnorm` because train.py L430 routes `loss_vol_p_charb` (unscaled) into GradNorm slot; additive path L484-486 gated to no-GradNorm only. Same class as H158/PR #1420.
+- **H197 PR #1573 created** for frieren with `--volume-loss-weight 2.0` (mechanism-faithful re-mapping per frieren's option 1): doubles raw VP task signal at L430 `volume_per_ch = loss_vol_p_charb * volume_loss_weight`, routing through `c_vol_p / G_bar` allocator ratios exactly as original H196 hypothesis posited
+- Posted ack thanking frieren for the diligent pre-launch verification; programme note added: 2nd VP-channel no-op caught at PR-trace time (after H158/#1420), adding 'flag-effect-under-GradNorm verification' to future advisor pre-dispatch checklist
+- H196 entry prepended to EXPERIMENTS_LOG.md with full code citation and analysis
+- H197 smoke ETA ~15:00Z if student picks up promptly, main EP1 ~15:30Z
 
 ## 14:20Z checkpoint — **H194 EP8 all-4-metric fresh-low descent (strongest in fleet)**; H195 EP2 H147-trajectory match; H196 frieren smoke launched 14:12Z; H193 EP13 8th-uptick zone
 
@@ -55,7 +65,7 @@
 |---|---|---|---|---:|---:|---:|---:|---:|---|
 | nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | **EP8 (8.11h)** | **6.7411 ↓ (-0.0459)** | **3.5865 ↓ (-0.0175 fresh)** | **5.9693 ↓ (-0.0379 fresh)** | **3.8787 ↓ (-0.0099 fresh)** | **ALL 4 METRICS DESCENDING — strongest in fleet, -0.30pp from H183 SOTA WSS=6.4427 with 17 EPs remaining** |
 | fern | #1565 | H195 tau_y=1.3 on H183 stack | 7ergjfh4 main | **EP2 (1.97h)** | **7.2661** | 4.9930 | 6.6910 | 4.2132 | H147 EP2=7.26 MATCH exactly — tau_y not differentiating yet, EP3 first separation gate ~14:42Z |
-| frieren | #1571 | **H196 vol_p_charbonnier=0.2** | gtwndogn smoke | **0.21h (epochs=1)** | — | — | — | — | Smoke launched 14:12Z, EP1 ETA ~14:55Z. Direct VP-isolation hypothesis (double H183 default 0.1); single-var change. Replaces H192 (PR #1541 closed NON-MERGE 13:46Z). |
+| frieren | **#1573** | **H197 volume_loss_weight=2.0 (NEW)** | (pending) | smoke launch pending | — | — | — | — | **H196 (PR #1571) CLOSED NON-MERGE pre-launch** on frieren's code trace identifying flag as no-op under GradNorm. **H197 is mechanism-faithful re-mapping**: doubles raw VP task signal at train.py L430 that GradNorm allocator sees, routing effect through `c_vol_p / G_bar` ratios. Single-flag change vs H183 reproduce, preserves stack integrity. Smoke ETA ~15:00Z. |
 | tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP13 (10.79h) | **7.7670 ↑ (+0.0505)** 7th POS | 3.7048 ↔ (+0.0034 plateau) | 6.5983 ↑ (+0.0274) | 3.9713 ↑ (+0.0073) | VP descent EXHAUSTED at 3.70 plateau; broader uptick at EP13; WSS NON-MERGE firmly locked in. Mid-EP14, next read ~14:30-14:45Z |
 
 ### H191 fern — CLOSED NON-MERGE (2026-06-02 11:00Z)
