@@ -145,6 +145,11 @@ class Config:
     resume_alias: str = ""
     epochs_already_done: int = 0
     save_every_epoch: bool = False
+    # H370: ISAB (Set Transformer inducing-point attention) middle-layer
+    # REPLACE. Empty string disables; comma-separated indices select which
+    # backbone block(s) get the ISAB operator (default off for all layers).
+    use_isab_layers: str = ""
+    isab_inducing_points: int = 32
     debug: bool = False
 
 
@@ -271,6 +276,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "use_isab_layers": (
+            "H370: comma-separated backbone block indices that should "
+            "REPLACE the O(S^2) slice-token self-attention with a per-head "
+            "ISAB (Set Transformer inducing-point attention, Lee et al. "
+            "ICML 2019) mixer. Empty string disables ISAB everywhere. "
+            "Example: '1,2,3' replaces the middle 3 of a 5-layer stack."
+        ),
+        "isab_inducing_points": (
+            "H370: number of inducing points (M) per head used by ISAB "
+            "blocks when --use-isab-layers is non-empty. Default 32 with "
+            "S=128 slice tokens is a 4x bottleneck. Inducing point tensor "
+            "shape is [num_heads, M, dim_head]."
         ),
     }
     for field in fields(Config):
@@ -414,6 +432,19 @@ def mirror_augment_batch(batch, p: float = 0.5):
     )
 
 
+def parse_isab_layer_indices(spec: str) -> list[int]:
+    spec = (spec or "").strip()
+    if not spec:
+        return []
+    indices = []
+    for piece in spec.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        indices.append(int(piece))
+    return indices
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -429,6 +460,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        isab_layer_indices=parse_isab_layer_indices(config.use_isab_layers),
+        isab_inducing_points=config.isab_inducing_points,
     )
 
 

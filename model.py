@@ -320,6 +320,138 @@ class TransolverAttention(nn.Module):
         return _apply_token_mask(out_x, attn_mask)
 
 
+class ISABTransolverAttention(nn.Module):
+    """H370: Transolver attention with per-head ISAB slice-token mixing.
+
+    Replaces the O(S^2) slice-token self-attention with a Set-Transformer
+    ISAB (Lee et al. ICML 2019) bottlenecked through ``inducing_points``
+    learned per-head latent queries. The slice-token construction
+    (``create_slices``) and the scatter back to mesh points are unchanged
+    from ``TransolverAttention``; only the mixing operator on the slice
+    tokens is swapped.
+
+    Inducing points have shape ``[num_heads, M, dim_head]`` so each head
+    owns its own bottleneck manifold. The two MABs use post-LN with a
+    minimal per-head FFN (``dim_head -> dim_head -> dim_head``) to keep
+    the parameter overhead small relative to the original ``qkv`` matrix
+    that this operator replaces.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_slices: int,
+        inducing_points: int = 32,
+        dropout: float = 0.0,
+        use_qk_norm: bool = False,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.num_slices = num_slices
+        self.num_inducing = inducing_points
+        self.dropout = dropout
+        self.use_qk_norm = use_qk_norm
+
+        # Slice creation (mirrors TransolverAttention).
+        self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
+        self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
+        self.in_project_fx = LinearProjection(hidden_dim, hidden_dim)
+        self.in_project_slice = LinearProjection(self.dim_head, num_slices)
+        # Output projection (mirrors TransolverAttention).
+        self.proj = LinearProjection(hidden_dim, hidden_dim)
+        self.proj_dropout = nn.Dropout(dropout)
+
+        # Per-head inducing points: [H, M, dim_head].
+        self.inducing_points = nn.Parameter(
+            torch.empty(num_heads, self.num_inducing, self.dim_head)
+        )
+        nn.init.trunc_normal_(self.inducing_points, std=0.02)
+
+        # MAB1: I (queries) <- slice_tokens (keys/values).
+        self.mab1_norm_attn = nn.LayerNorm(self.dim_head, eps=1e-6)
+        self.mab1_norm_ffn = nn.LayerNorm(self.dim_head, eps=1e-6)
+        self.mab1_ffn = UpActDownMlp(hidden_dim=self.dim_head, mlp_hidden_dim=self.dim_head)
+
+        # MAB2: slice_tokens (queries) <- H (keys/values).
+        self.mab2_norm_attn = nn.LayerNorm(self.dim_head, eps=1e-6)
+        self.mab2_norm_ffn = nn.LayerNorm(self.dim_head, eps=1e-6)
+        self.mab2_ffn = UpActDownMlp(hidden_dim=self.dim_head, mlp_hidden_dim=self.dim_head)
+
+        if use_qk_norm:
+            self.mab1_q_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+            self.mab1_k_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+            self.mab2_q_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+            self.mab2_k_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+        else:
+            self.mab1_q_norm = None
+            self.mab1_k_norm = None
+            self.mab2_q_norm = None
+            self.mab2_k_norm = None
+
+    def create_slices(
+        self, x: torch.Tensor, attn_mask: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch_size, num_tokens, _ = x.shape
+        fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
+        x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
+        slice_logits = self.in_project_slice(x_mid) / self.temperature
+        slice_weights = F.softmax(slice_logits, dim=-1)
+        if attn_mask is not None:
+            slice_weights = slice_weights * attn_mask[:, None, :, None].to(
+                device=slice_weights.device,
+                dtype=slice_weights.dtype,
+            )
+        slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
+        slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
+        return slice_tokens, slice_weights
+
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+        batch_size = slice_tokens.shape[0]
+
+        # MAB1: inducing points attend to the S slice tokens.
+        # I_expanded: [B, H, M, dim_head]; slice_tokens: [B, H, S, dim_head].
+        I_expanded = self.inducing_points.unsqueeze(0).expand(batch_size, -1, -1, -1)
+        q1 = I_expanded
+        k1 = slice_tokens
+        v1 = slice_tokens
+        if self.mab1_q_norm is not None:
+            q1 = self.mab1_q_norm(q1)
+            k1 = self.mab1_k_norm(k1)
+        h_attn = F.scaled_dot_product_attention(
+            q1, k1, v1,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        h = self.mab1_norm_attn(h_attn + I_expanded)
+        h = self.mab1_norm_ffn(h + self.mab1_ffn(h))
+
+        # MAB2: S slice tokens attend back to the M compressed reps.
+        q2 = slice_tokens
+        k2 = h
+        v2 = h
+        if self.mab2_q_norm is not None:
+            q2 = self.mab2_q_norm(q2)
+            k2 = self.mab2_k_norm(k2)
+        out_attn = F.scaled_dot_product_attention(
+            q2, k2, v2,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        out_slice = self.mab2_norm_attn(out_attn + slice_tokens)
+        out_slice = self.mab2_norm_ffn(out_slice + self.mab2_ffn(out_slice))
+
+        # Scatter back to N tokens (mirrors TransolverAttention).
+        out_x = torch.einsum("bhsc,bhns->bhnc", out_slice, slice_weights)
+        out_x = out_x.permute(0, 2, 1, 3).contiguous().view(x.shape[0], x.shape[1], self.hidden_dim)
+        out_x = _apply_token_mask(out_x, attn_mask)
+        out_x = self.proj_dropout(self.proj(out_x))
+        return _apply_token_mask(out_x, attn_mask)
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -330,17 +462,29 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_prob: float = 0.0,
+        use_isab: bool = False,
+        isab_inducing_points: int = 32,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
         self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.attention = TransolverAttention(
-            hidden_dim=hidden_dim,
-            num_heads=num_heads,
-            num_slices=num_slices,
-            dropout=dropout,
-            use_qk_norm=use_qk_norm,
-        )
+        if use_isab:
+            self.attention = ISABTransolverAttention(
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                num_slices=num_slices,
+                inducing_points=isab_inducing_points,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
+        else:
+            self.attention = TransolverAttention(
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                num_slices=num_slices,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
         self.drop_path_attn = DropPath(drop_path_prob)
@@ -366,6 +510,8 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_max: float = 0.0,
+        isab_layer_indices: list[int] | None = None,
+        isab_inducing_points: int = 32,
     ):
         super().__init__()
         if depth > 1:
@@ -373,6 +519,14 @@ class Transformer(nn.Module):
         else:
             drop_path_probs = [0.0]
         self.drop_path_probs = drop_path_probs
+        isab_set = set(isab_layer_indices or [])
+        for idx in isab_set:
+            if not 0 <= idx < depth:
+                raise ValueError(
+                    f"isab_layer_indices entry {idx} is outside [0, {depth})"
+                )
+        self.isab_layer_indices = sorted(isab_set)
+        self.isab_inducing_points = isab_inducing_points
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -383,6 +537,8 @@ class Transformer(nn.Module):
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
                     drop_path_prob=drop_path_probs[i],
+                    use_isab=(i in isab_set),
+                    isab_inducing_points=isab_inducing_points,
                 )
                 for i in range(depth)
             ]
@@ -419,6 +575,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        isab_layer_indices: list[int] | None = None,
+        isab_inducing_points: int = 32,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -511,6 +669,8 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             use_qk_norm=use_qk_norm,
             drop_path_max=drop_path_max,
+            isab_layer_indices=isab_layer_indices,
+            isab_inducing_points=isab_inducing_points,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
