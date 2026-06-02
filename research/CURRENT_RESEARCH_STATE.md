@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-06-02 11:00Z**
+- **2026-06-02 11:42Z** (H193 schedule corrected — 30-EP not 10-EP terminal)
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
@@ -45,12 +45,13 @@
 - Multi-metric NON-MERGE confirmed: WSS rising +0.26pp over SOTA, SP val ~3.93 (floor=3.577)
 - EP30 terminal ETA ~14:00Z; will close as VP-research note
 
-### H193 tanjiro — WSS exhausted, VP harvest at EP10 terminal
-- EP9 est VP~3.72, WSS~7.676 — decoupled pattern sustained
-- Pattern: wss_normal_penalty over-constraining WSS (pulling UP), VP gradient descends independently
-- VP at current rate: EP10 projects val_VP~3.71 → test_VP~3.51-3.59 (under floor 3.643)
-- Multi-metric NON-MERGE: WSS +1.24pp over SOTA, no merge path
-- EP10 terminal ETA ~11:55Z; closing as VP-research note
+### H193 tanjiro — 30-EP run (NOT 10-EP terminal as previously noted)
+- W&B config confirms `num_epochs=30` — EP10 is mid-train, NOT terminal
+- EP10 landed (11:38Z, step=109759): val_WSS=7.7030 (+0.0267 uptick), val_VP=3.7333 (FRESH LOW -0.0118), val_AB=6.5615 (+0.0251 uptick), val_SP=3.9717 (+0.0057 uptick)
+- Decoupled pattern continues: VP descends, WSS/AB/SP all uptick at EP10 boundary
+- Step rate ~10976/EP → 30-EP total ~329k steps, will hit ~24h cap at EP27 (~04:00Z+1d) or finish 30 EP at ~05:48Z+1d
+- Multi-metric NON-MERGE final outcome already locked in: WSS +1.24pp over SOTA, no merge path
+- Mid-train: keep observing for VP test projection. Terminal close not until ~04:00Z+1d
 
 ### H194 nezuko — EP5 PASS (6.8373), EP10 gate ~16:20Z
 - EP5 val_WSS=6.8373 (≤6.90 gate PASS), val_VP=3.7445 (strong VP descent)
@@ -66,20 +67,21 @@
 3. H194: lr ceiling scan (optimization) (running)
 4. H195: τ_y axis weighting (starts now)
 
-**Next round (when runs terminate ~13:00-14:00Z):**
-- H192 terminal → if VP-only, log as VP research note; if SP clears, consider merge
-- H193 terminal EP10 → VP harvest, WSS NON-MERGE
-- H194 terminal EP25 → key lr=9e-5 verdict on H189 compound stack
-- New assignments after terminal cycles
+**Next round (terminal landing pattern):**
+- H192 terminal ~14:55Z (24h cap, EP27-30) → if VP-only, log as VP research note; if SP clears, consider merge → frieren idle next
+- H193 terminal ~04:00Z+1d (24h cap at EP27 or natural 30EP at ~05:48Z+1d) → VP harvest, WSS NON-MERGE → tanjiro idle late tomorrow
+- H194 terminal ~22h (~03:30Z+1d) → key lr=9e-5 verdict on H189 compound stack
+- H195 fern smoke ~13:00Z then main 25EP, terminal ~21h after main launch
+- New assignments only after H192 terminal (~14:55Z) — others not idle for many hours
 
 **Queued but not yet assigned (per human directive):**
 1. BL DERIVATIVE DECODER — Morgan's top priority, architecturally complex, hold for right student (fern or frieren, after H195 lands)
 2. τ_y + τ_z compound (after H195 and H192 terminals confirm axis mechanisms)
 3. Tangent-basis output head reformulation (2nd human priority)
 
-### Watch items next 3h (from 11:30Z)
-1. **H193 EP10 terminal** ETA ~11:55Z — VP harvest, close NON-MERGE, free tanjiro
-2. **H195 fern smoke** ETA ~12:30Z — report EP1 val_WSS (pod active, startup phase)
-3. **H192 EP26-30** ETA ~14:00Z terminal — VP fresh-low series, NON-MERGE close
-4. **H194 EP10** ETA ~16:20Z — key gate ≤6.80%
-5. **NO IDLE GPUs** — 4/4 students active (tanjiro becomes idle ~11:55Z → new assignment needed)
+### Watch items next 3h (from 11:42Z) — CORRECTED H193 schedule
+1. **H192 EP27-30 terminal** ETA ~14:55Z (24h cap) — VP fresh-low series, NON-MERGE close (or merge if SP clears), frieren idle next
+2. **H193 EP10 mid-train landed 11:38Z** (NOT terminal — 30 EP run) — VP fresh low 3.7333, WSS uptick 7.7030; observe for VP test projection
+3. **H195 fern smoke EP1** ETA ~13:00Z — DDP8 8 ranks running, step=2744/0.20h
+4. **H194 EP10 gate** ETA ~16:20Z — key gate ≤6.80%, currently on-shape at EP5=6.8373
+5. **NO IDLE GPUs** — 4/4 active. First idle: frieren@H192 terminal ~14:55Z → assignment needed at that boundary
