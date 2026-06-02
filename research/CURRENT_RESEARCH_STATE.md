@@ -1,11 +1,54 @@
 # SENPAI Research State
 
-- **2026-06-02 06:08Z**
+- **2026-06-02 06:25Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding. No new human messages since 19:27Z 2026-06-01.
+
+## 06:25Z checkpoint — **H194 MAIN 8/8 RANKS LIVE** (group `h194-h189-stack-lr-9e-5-main-25ep`, student corrected: per-channel-heads is default post-#1531 cleanup, smoke was fine); **H191 EP26 VP SLOPE FLATTENING** (−0.0007 → −0.0000, recovery weakening); **H192 EP20 ALL 4 SLOPES POSITIVE** (cohort uptick, late-cosine drift); **H193 EP3 hold (EP4 ETA ~07:00Z)**
+
+### Actions taken this cycle
+- Heartbeat on PR #1559 (H194): main launch ACK with 8 rank IDs + correction acknowledged (per-channel-heads flag is no longer needed post-PR #1531)
+- Heartbeat on PR #1535 (H191): EP26 VP slope flattened −0.0007 → −0.0000, recovery story WEAKENING, projected terminal val_VP ~3.658 may not clear floor in test
+- Heartbeat on PR #1541 (H192): EP20 all 4 slopes flipped POSITIVE (late-cosine overfit signature), projected terminal val_WSS ~6.83
+- No comment on PR #1554 (H193): EP4 ETA ~07:00Z, no new boundary yet
+
+### Fleet snapshot at 06:25Z
+
+| Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | Status |
+|---|---|---|---|---:|---:|---:|---|
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | main (8 ranks: 160j1y4t, 38xv4ktf, c74lnfe1, n9qrf7rn, qg14mw7d, rqdvs7xm, tne4wsap, yopb7rnd) | step~1603 (~14min) | — | — | DDP8 healthy, EP1 ETA ~07:18Z |
+| fern | #1535 | H191 sharper WSD 30EP | ayg4liye | EP26 (20.92h) | 6.654 (+0.006/EP) | **3.659 (slope −0.0000 flat)** | ⚠️ VP plateauing, terminal ~EP29 |
+| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | EP20 (15.64h) | **6.689 (+0.014/EP UPTICK)** | **3.551 ✅ −0.092pp UNDER floor** | ⚠️ all slopes flipped POS, cuts ~EP30 |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP3+ (2.82h) | 7.672 | 4.260 | descending fast, EP5 ≤7.10 next gate ~08:00Z |
+
+### H194 nezuko — main 25EP DDP8 launched at 06:18Z
+- 8/8 ranks live in `h194-h189-stack-lr-9e-5-main-25ep`. Step ~1603 at 06:25Z (~14 min in, ~3.0 it/s).
+- Student correction: `--per-channel-surface-heads` CLI flag was removed in PR #1531 (commit 5cbb8db, H183-cleanup). Per-channel heads are now the unconditional default. Original H183-cleanup intentionally simplified the CLI surface. Smoke n1imnpsk DID run with per-channel-heads — it just no longer shows up in config because the dataclass entry was removed. No actual flag deviation; PR body's reproduce command carried stale flag as historical artifact.
+- Kill ladder: EP1≤13.0, EP3≤7.40, EP5≤7.00, EP10≤6.75, EP25≤6.50.
+
+### H191 fern — slope flip TRANSIENT (recovery weakening)
+At 05:08Z: slope_VP = +0.0009 (rising). At 05:48Z: −0.0007 (briefly negative). At 06:25Z: **−0.0000 (flat)**. The "flip to negative" appears to have been a transient EWMA blip, not a sustained recovery. EP26 val_VP=3.6585 unchanged from EP25=3.659. Trend: PLATEAU near +0.016pp over 3.643 floor.
+
+**Updated terminal projection (EP29-30 at 24h wall):**
+- val_VP ~3.658 → test_VP estimate ~3.55-3.60 → likely NON-MERGE on VP (sits near floor)
+- val_WSS ~6.62 → test_WSS ~6.50 → +0.06pp regress vs SOTA 6.4427
+
+### H192 frieren — late-cosine overfit signature
+EP20 reading shows cohort-wide tick: WSS +0.014, VP +0.005, AB +0.013, SP +0.014. **All 4 slopes flipped to positive** (sl_WSS=+0.0013, sl_VP=+0.0004, sl_AB=+0.0013, sl_SP=+0.0010). This is the H172-late pattern — model overfitting train, val drifting upward.
+
+VP cushion (3.551 vs floor 3.643 = −0.092pp) likely survives even with +0.005/EP for 10 more EPs (final ~3.60 → test ~3.50, still −0.14pp under floor).
+
+WSS likely terminal ~6.83 → test ~6.70 → +0.26pp regress vs SOTA. NON-MERGE on primary, but VP supplementary win likely.
+
+### Watch items next 6h
+1. **H194 main EP1 (~07:18Z)** — first val read; gate ≤13.0%
+2. **H191 EP28-29 (~07:50-08:40Z)** — terminal harvest with VP-cleared-or-not write-up
+3. **H193 EP5 kill gate (~08:00Z)** — ≤7.10%
+4. **H192 EP22-25 (~07:40-09:30Z)** — uptick rate watch; if slopes accelerate +0.020/1k, consider early termination
+5. **NO IDLE GPUs** — 4/4 students active
 
 ## 06:08Z checkpoint — **H191 EP25 SLOPE FLIP** (slope_VP −0.0007 NOW FALLING vs +0.0009 at 05:08Z, WSD recovery UN-FALSIFIED); **H192 EP19 LIGHT UPTICK** (VP still −0.092pp under floor); **H193 EP3 MISSED LOOSE GATE** (7.672 vs ≤7.50%, but mechanism z-preferential working); **H194 SMOKE EP1 PASS** (val_WSS=12.274 < 14.0% gate, student fixing per-channel-heads flag for main)
 
