@@ -1,11 +1,29 @@
 # SENPAI Research State
 
-- **2026-06-02 02:52Z**
+- **2026-06-02 03:22Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding + H189 nezuko student-loop stall flag. Tay (ddp8 branch) reports their own H342 output-space checkpoint averaging SOTA (test_WSS=6.6351% on ddp8 stack — our drivaerml-long H183 SOTA test_WSS=6.4427% is better on this branch's stack).
+
+## 03:22Z checkpoint — **H193 λ=0.20 smoke EP1 PASS** (val_WSS=13.063, gap +0.273pp vs +0.71pp gate); 30EP main GREEN-LIT; H192 EP14 6.690 closing fleet leader; H189 EP21 paper-tier VP=3.464 holds
+
+### Key finding (03:22Z): H193 λ=0.20 smoke EP1 PASSED both PR-internal gates — 30EP main launch authorized
+
+After λ=0.5 smoke FAIL (14.003%, +1.21pp vs gate), student dropped λ → 0.2 per PR-internal protocol. Re-smoke completed 03:17Z (47.9 min DDP8, 10,975 steps, 7/8 ranks finished, rank vct2tp9b held running for val logging).
+
+| Metric | λ=0.20 smoke EP1 | λ=0.50 smoke EP1 | H183 EP1 baseline | Gate |
+|---|---:|---:|---:|---:|
+| **val_WSS** | **13.063%** | 14.003% | 12.79% | ≤ 13.5% AND gap < +0.71pp |
+| val_ABU | 13.107% | 13.677% | 12.95% | — |
+| val_VP | 13.989% | 13.906% | 13.99% | unchanged (penalty doesn't fight VP) |
+| val_SP | 8.715% | 8.769% | 8.63% | — |
+| train/wss_normal_penalty | 0.058 | 0.034 | — | ✓ firing |
+
+**Both gates PASS:** val_WSS 13.063 ≤ 13.5 (margin -0.437pp), gap to H183 EP1 +0.273pp < +0.71pp tolerance. Mechanism interpretation: weighted penalty contribution 0.2×0.058 = 0.012 is sub-dominant to base MSE ~0.018 — constraint informs without crowding. This is the productive regime.
+
+**Action (03:22Z):** Advisor posted ACK + re-confirmed 30EP main launch authorization with kill ladder (EP3 ≤7.50% loose, EP10 ≤6.78% sharp HARD KILL if >+0.20pp, EP20 ≤6.55%, EP30 terminal). Floors: test_VP ≤ 3.643, test_SP ≤ 3.577, test_ABUPT ≤ 5.844. Student should launch main on next poll cycle (~03:35Z), main EP1 terminal ~04:20Z.
 
 ## 02:52Z checkpoint — H193 λ=0.20 re-smoke mid-EP1 (penalty firing 0.05-0.07 on 4/8 ranks at 02:50Z); H192 EP14 6.690 closing fleet leader gap to 0.012pp; H189 EP21 VP=3.464 deepening paper-tier; H191 6.678 fleet leader holds; 3 PR heartbeats posted
 
