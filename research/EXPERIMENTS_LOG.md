@@ -1,3 +1,31 @@
+## 2026-06-02 17:36Z — PR #1575: H378 Online Hard-Case Mining via case-CDF reweighted sampling (α=1.0) — CLOSED (pre-committed kill gate + mechanistic null, Finding Z3, 29th closed axis)
+
+- Branch: edward/h378-online-hard-case-mining
+- **Hypothesis**: Per-CASE (NOT per-vertex) τ_z MAE-CDF-weighted sampling of the 400-sample training distribution, α=1.0 mild upweighting. Per-epoch, compute per-case `τ_z MAE` on EP13 EMA predictions; build case-sampling probabilities `p_i ∝ MAE_i^α`. Next epoch samples cases proportional to p (with replacement). Mechanistically distinct from edward's 7 prior nulls (all per-vertex / loss-tier / operator); attempts to redistribute gradient mass at the CASE level rather than the loss-weight level. Arm A α=1.0 mild; Arm B α=2.0 aggressive conditional on Arm A pass.
+- **Implementation** (edward, train.py CaseCDFSampler): per-epoch resampling tied to EP13 EMA teacher case-MAE computation; ESS-aware re-weighting; α=1.0 with safety clamp.
+
+| Metric | EP14 value | H342 EP14 baseline | Δ |
+|---|---:|---:|---:|
+| **val_primary** (axis mean rel L2) | **6.0701%** | 6.0168% | **+5.3bp ❌** (>6.05% kill gate) |
+| **val_WSS_z** | 9.2585% | 9.192% | +6.6bp (within 9.30% upper gate but no DROP) |
+| val_WSS | 6.8667% | — | regressed |
+| val_SP | 4.0132% | — | regressed |
+| val_VP | 3.5569% | — | regressed |
+
+- **W&B runs**: rank 0 `f7ttk3f8`; ranks 1-7 = `2zo0jkho/tar8uh7p/mkfet66l/e4t4wpek/qbnd4n7g/ylqb4ho9/gzxr0kqd` (group `h378-edward-hard-case-mining`). 8-GPU DDP. Run terminated cleanly via SIGTERM at 17:35Z, EP15 had reached ≈step 31/2720 (~1.1%). All 8 GPUs freed.
+- **Pre-committed EP14 kill gate fired**: val_primary 6.0701% > 6.05% threshold → CLOSE.
+- **Finding Z3** (29th closed axis): `online-hard-case-mining-null`
+  - **ROOT CAUSE (excellent student mechanistic diagnosis): per-case WSS_z MAE distribution on 400 training cases is too flat for CDF reweighting to concentrate gradient signal.** Concrete numbers measured on EP13 EMA teacher: **w_max/w_min ≈ 1.36×, ESS_frac = 0.9975, entropy_ratio = 0.9998**. The case-MAE distribution has near-uniform spread, so α=1.0 reweighting leaves the effective sampling distribution essentially uniform. Effective gradient redistribution was negligible.
+  - **Arm B (α=2.0) skipped because spread analysis predicts no rescue**: even α=2 only lifts spread to ≈1.46× while adding sampling-noise overfit risk on a 400-sample training set. Higher α would not be worth Arm B's GPU time. Student's pre-committed decision rule fired correctly.
+  - **Joint implication for case-level distribution-shift tier**: this null joins H361 (loss-direction-magnitude) and H364 (target-magnitude WSS hotspot) scalar-reweight nulls. The H336 EP13 EMA basin has too-uniform per-CASE difficulty for any reweighting-based intervention to concentrate gradient signal on hard cases. **Case-level distribution-shift tier CLOSED for H336 basin.**
+  - **Joint prediction for H382 (fern, easy-first curriculum)**: same mechanism (case-MAE too flat) predicts H382 will also null because the easy/hard partition itself depends on the same near-uniform difficulty signal that defeated H378. If H382 also nulls, case-ORDERING tier closes alongside case-WEIGHTING tier — completing the case-distribution closure.
+  - **Implication for future τ_z attacks**: case-level interventions are insufficient on a 400-sample dataset with near-uniform per-case error. Future attacks must operate at a different granularity (per-VERTEX with magnitude information already closed, per-POINT with inference-time adaptation NOT YET TRIED), or at a different level of abstraction entirely (inference-time, calibration-side, multi-seed).
+- **Meta-finding consolidated (meta-β)**: ANY case-distribution intervention is bottlenecked by the near-uniform per-case difficulty signal on the H336 fine-tune basin. H378 (case-CDF α=1.0) confirms; H382 (easy-first curriculum) predicted to confirm; weighted-mix curricula and Mixup-style case-interpolation would be expected to also null without first introducing case-diversity beyond what DrivAerML provides.
+- **Banked process improvement (excellent student mechanistic discipline)**: edward computed the case-MAE distribution statistics BEFORE deciding whether to launch Arm B — pre-committed decision-rule on diagnostic data is the right pattern. Future case-level / sample-weighting hypotheses should pre-compute the relevant distribution spread (w_max/w_min, ESS_frac, entropy_ratio) and verify it has sufficient dynamic range before committing GPU time.
+- **Follow-ups assigned**: edward → H383 (inference-time adaptation candidate, design imminent — primary attack vector post-H378 close per meta-finding consolidation).
+
+---
+
 ## 2026-06-02 17:35Z — PR #1576: H379 PEFT-style per-layer LR decay (backbone × 0.3, decoder × 1.0) — CLOSED (continue-gate broad-disruption regression, Finding AA, 28th closed axis)
 
 - Branch: fern/h379-peft-perlayer-lr-decay
