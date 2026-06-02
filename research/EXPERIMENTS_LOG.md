@@ -1,3 +1,37 @@
+## 2026-06-02 08:30Z — PR #1561: H367 Anisotropic surface attention via local tangent frame — CLOSED (null)
+
+- Branch: frieren/h367-anisotropic-tangent-frame-attention
+- **Hypothesis**: Transolver slice-attention with per-vertex tangent-frame rotation of Q/K. Pre-softmax score mix `(1-σ(γ_l)) S_std + σ(γ_l) S_aniso`, per-layer learnable γ_l init=-10 for step-0 invariance. WSS_z is fundamentally a tangent-plane phenomenon; making attention reason in surface-intrinsic coordinates should outperform world-frame attention.
+- **Implementation**: frieren clean execution — adapted vertex-level theory to slice-level Transolver (slice-effective normals via attention weights, Gram-Schmidt frame R_s, 3-aligned subblock rotation à la FrameDiff/AlphaFold3 pattern, pre-softmax mixing). Consulted researcher-agent for verification of pre-softmax vs post-softmax mixing. Wrote thorough `tools/h367_step0_check.py`; step-0 invariance PASS at γ=-20 (max|Δ|=1.12e-8) and γ=-10 (max|Δ|=1.40e-8). Smoke 2-GPU 200 steps clean, forward overhead +16.8% (<20% PR budget).
+
+| Metric | H367 | H336 EP13 baseline | Close rule | Pass? |
+|---|---:|---:|---:|:---:|
+| val_primary EP14 (step 8907) | **6.0757%** | 6.017% | <6.05% | ❌ FAIL by 2.6bp |
+| val_primary EP15 (step 17815) | 6.0765% | — | — | flat-to-worse |
+| val_primary EP16 (step 26723) | 6.0783% | — | — | flat-to-worse |
+| full_val_primary (step 26724) | 6.0757% | — | — | matches best |
+| WSS_z MAE (full_val) | 0.05004 | ~0.04969 | — | +0.7% worse (target channel) |
+| WSS_y MAE | 0.05019 | ~0.04971 | — | +1.0% worse |
+| WSS_x MAE | 0.07622 | ~0.07583 | — | +0.5% worse |
+| SP MAE | 0.01057 | ~0.01054 | — | +0.3% worse |
+| γ_aniso (all 5 layers) | ~-10.000 | (init -10) | gates open? | ❌ NEVER ENGAGED |
+
+- **W&B runs**: `ktp47k3l` (Phase 1 rank0) + 7 sibling ranks, 7376s = 123 min on 8×H100 DDP. Smoke crashes (tt3nfy3g/ui0b29fr at ~3.3-3.5min) were 2-GPU smoke tests deliberately killed; Phase 1 8-GPU ran cleanly.
+- **Finding Q** (17th closed axis): `anisotropic-tangent-frame-attention-encoder-null` — Per-layer γ_aniso gates stayed pinned at ~-10 (σ(γ)≈4.5e-5) across all 5 transformer blocks throughout 26723 steps. Gates moved by <0.003 from initialization → **the optimizer received negligible gradient signal toward opening anisotropy gates**. EP14 already triggered close rule (6.0757% > 6.05% by 2.6bp); subsequent epochs worsened (EP16 6.0783%). WSS_z, the channel the hypothesis specifically targeted, was the channel that regressed most.
+- **Mechanism interpretation**: H367 is the 4th encoder/representation hypothesis using surface normals to close null:
+  - H351 normal-only ROUTING null
+  - H357 normal/area as CONTENT null
+  - H358 tangent-basis at OUTPUT null
+  - H367 tangent-frame at ENCODER ATTENTION null
+  - **Pattern**: ADDING NEW REPRESENTATIONS OF EXISTING GEOMETRIC CONTENT (surface normals) doesn't help. The model already has sufficient surface-normal information through the existing input features and project_surface_features projection. Even when given a fully differentiable knob (γ_l) to dial in anisotropic structure, slice-attention found no useful direction to engage it.
+- **Implication for live attack tier**: Next attacks must inject information the encoder DOES NOT CURRENTLY HAVE. Three orthogonal input-feature axes now in flight to triangulate:
+  - INPUT global spectral: **H360 LapPE-32 (fern)** — Phase 1 val_raw 6.012% (essentially neutral vs baseline 6.017%); TTA eval in progress
+  - INPUT multi-scale local features: **H359 kNN aggregation (askeladd)** — TTA triage
+  - INPUT local mesh topology: **H369 RWPE-16 (frieren) — JUST ASSIGNED** — random-walk return probabilities; orthogonal to LapPE (local structural role vs global spectral mode) and to H359 (graph topology vs feature aggregation)
+- If all 3 input-feature axes null, bottleneck is conclusively capacity not information → pivot to non-additive structural rewrites (inducing-point bottleneck, sparse+global attention, recurrent state).
+
+---
+
 ## 2026-06-02 06:00Z — PR #1550: H358 Native tangent-basis residual output head (Morgan P2) — CLOSED (boundary-null)
 
 - Branch: frieren/h358-tangent-basis-output-head

@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 06:40Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 08:35Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 16 total)
+## Closed axes (do NOT revisit — 17 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -45,6 +45,7 @@
 | **MoE soft-mixture decoder (Finding N)** | `regime-moe-soft-decoder-redundant-residuals-null` — Two-expert soft-mixture MoE with switch-transformer load-balance aux. Router learned perfectly balanced 50/50 partition (entropy 0.686, load_bal 1.02). But soft mixture averaged experts back to single effective head — redundant residuals. WSS_z floor unmoved (9.20 ≡ H357 9.18). **14th decoder/output-side null axis.** | **H363 CLOSED 05:30Z** |
 | **Tangent-basis output head (Finding O)** | `tangent-basis-output-head-boundary-null` — Native tangent-basis residual output (τ·n=0 by construction) + LayerNorm-gated head_corr. Phase 1 raw 5bp behind H336. Post-TTA+cal val_cal 5.8963 / test_cal 5.7366 — within 0.1bp of H342 gate (noise floor). WSS_z marginally regressed +0.03bp. Output-basis enforcement is physics-correct but did NOT move the WSS_z floor. **15th closed axis. All 3 Morgan P-tier WSS architecture directives have closed null — decisively falsifying the decoder/output hypothesis family.** | **H358 CLOSED 06:00Z** |
 | **Target-magnitude WSS hotspot reweight (Finding P)** | `target-magnitude-wss-hotspot-reweight-overshoot` — Per-point loss weight = γ on top-decile (||target_WSS||>4.844 Pa) WSS points, baseline weight elsewhere. γ=3 Arm A: EP14 val_abupt 6.586% (+69bp vs gate, +57bp vs H336 EP13 source). All channels regressed including unreweighted VP +105bp (Lion sensitivity to 1.20× WSS-mass shift breaks H342-tuned balance). Hotspot mask diagnostics confirmed 10% mask captures 6.1× mean magnitude points — mechanism implemented correctly, **idea failed**. Arm B γ=5 skipped per close rule. **Cumulative scalar-reweighting axis now CLOSED — 6 nulls (H338, H339, H341, H346, H361, H364). H336 fine-tune basin is brittle to gradient-mass rebalancing; bottleneck is REPRESENTATION CAPACITY, not loss geometry.** | **H364 CLOSED 06:30Z** |
+| **Anisotropic tangent-frame attention encoder (Finding Q)** | `anisotropic-tangent-frame-attention-encoder-null` — Per-vertex Q/K rotation into local frame (t1,t2,n) via slice-effective surface normals; pre-softmax score mix `(1-σ(γ_l)) S_std + σ(γ_l) S_aniso`, per-layer learnable γ_l init=-10. EP14 val_primary 6.0757% (>6.05% close threshold by 2.6bp); EP15 6.0765%, EP16 6.0783% — flat-to-worse trajectory. **Diagnostic: all 5 γ_aniso scalars stayed pinned at ~-10 (σ≈4.5e-5) — gates NEVER opened**. Optimizer found no gradient signal toward engaging anisotropy. Per-channel WSS_z MAE +0.7% worse than H336 EP13 (the channel the hypothesis targeted). **17th closed axis. 4 consecutive encoder/representation hypotheses using surface normals (H351 routing, H357 content, H358 output basis, H367 attention frame) ALL null — model is saturated on existing geometric content; next attacks must inject information the encoder doesn't currently have, not rearrange existing.** | **H367 CLOSED 08:30Z** |
 
 ---
 
@@ -59,13 +60,15 @@
 | **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 done, eval `8cqqpd9x` (h360-eval-lappe32) running. | 🟡 WIP — eval phase |
 | **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** — Zero-param encoder-side: pre-softmax bias α_l·1[j∈kNN(i)] on slice-routing logits, per-layer learnable α init=0. Step-0 invariant. Student's own B1 suggestion post-H363. | 🟡 WIP — smoke + Phase 1 |
 | **#1562** | edward | **H368: WSS spatial-gradient consistency loss (kNN-8 edge-pair matching)** — Zero-param structural loss term: matches predicted WSS edge-gradients (over kNN-8 neighbors) to target edge-gradients. Acts on point-PAIR differences, not per-point magnitudes. Addresses Edward H364 #3 suggestion (high-frequency WSS_z error structure). Different from H347 nezuko (variance penalty), H361 (per-point decomposition), H345 (gradient conflict). Phase 1 from H336 EP13. | 🆕 just assigned 06:35Z |
-| **#1561** | frieren | **H367: Anisotropic surface attention via local tangent frame** (JUST ASSIGNED 06:00Z) — Encoder-side, zero new params (only per-layer learnable scalar γ_l for anisotropy gating, init=-10 for step-0 invariance). Q/K rotated into per-vertex local frame (t1,t2,n) constructed from surface normal. Captures surface intrinsic anisotropy directly in attention. Student's natural follow-up to their own H358 close — same physics intuition, applied at ENCODER not OUTPUT. | 🆕 just assigned |
+| **#1561** | frieren | **H367: Anisotropic surface attention via local tangent frame** | ❌ **CLOSED 08:30Z** Finding Q. Reassigning H369 RWPE next. |
 
 ---
 
-## Current Research Focus: ENCODER/REPRESENTATION TIER (DECODER/OUTPUT FULLY SATURATED)
+## Current Research Focus: ENCODER INPUT-FEATURE TIER (NORMAL/GEOMETRY EXISTING-CONTENT SATURATED)
 
-**15 closed axes** all point to the same conclusion: WSS_z floor is representational/upstream. H361 (loss-geometry), H363 (decoder capacity), and now H358 (output-basis) — together a 3-axis discriminator confirming the decoder/output stage is NOT the bottleneck. **All 3 Morgan P-tier WSS architecture directives are exhausted (H355 BL-derivative null, H358 tangent-basis boundary-null, H363 Physics-regime MoE null) — decisive falsification.** The live tier is exclusively encoder/representation modifications.
+**17 closed axes** all point to the same conclusion: WSS_z floor is representational/upstream. **Critical update post-H367**: 4 consecutive encoder/representation hypotheses using **surface normals** (H351 routing, H357 content, H358 output basis, H367 attention frame) ALL closed null — the model is **saturated on existing geometric content**. Next attacks must inject information the encoder DOES NOT CURRENTLY HAVE, not rearrange existing representations.
+
+**Live attack tier**: new information channels — global spectral structure (H360 LapPE), local mesh topology (H369 RWPE, just assigned), structural edge-pair losses (H368 WSS gradient consistency), multi-scale local features (H359 kNN aggregation), BL physics priors (H347), cross-basin TTA (H365 FastSWA).
 
 **Cal-arm failure pattern (2026-06-02 05:30Z)**:
 - alphonse H356 (3-cp K=5): val_cal 5.9206 / test_cal 5.7668 — **FAILED both gates** by 24bp / 31bp
@@ -75,18 +78,21 @@
 - **Pattern**: Cal yields drop to 0-2.4bp when the pre-cal output is already near cal-stable (3-cp averaging, SWA, antithetic K=5). H342 7-8bp cal yield is the exception, not the rule.
 - **Implication**: Future candidates need to pass on val_raw alone OR demonstrate non-trivial cal headroom. The "project ~7bp cal yield" heuristic is dead for averaged/stacked outputs.
 
-**Triangulation map (post-H358 close)**:
-- INPUT (global spectral): H360 LapPE-32 (fern) — eval running
+**Triangulation map (post-H367 close)**:
+- INPUT (global spectral): **H360 LapPE-32 (fern)** — Phase 1 rank0 val_raw 6.012% (≡ H336 baseline 6.017%, neutral-positive); TTA eval running (8cqqpd9x)
 - INPUT (multi-scale local feature): H359 kNN branch (askeladd) — TTA triage
-- ENCODER (attention-pattern: spatial proximity): **H366 kNN proximity attention bias (tanjiro)** — zero-param, learnable per-layer scalar
-- ENCODER (attention-pattern: anisotropic frame): **H367 tangent-frame attention (frieren)** — just assigned — zero-param, per-vertex local frame rotation of Q/K
+- INPUT (local mesh topology): **H369 RWPE-16 (frieren) — JUST ASSIGNED 08:40Z** — random walk return probabilities, k=1..16 steps, zero-param feature, K×n_hidden=3072 projection weights only
+- ENCODER (attention-pattern: spatial proximity): H366 kNN proximity attention bias (tanjiro) — zero-param, learnable per-layer scalar
+- ENCODER (attention-pattern: anisotropic frame): CLOSED (H367 tangent-frame Q/K rotation null, γ_l gates never opened — 17th axis)
 - ENCODER (content/routing): CLOSED (H357 content null, H351 NGSB null)
 - OUTPUT BASIS: CLOSED (H358 tangent-basis boundary-null, 15th axis)
 - DECODER CAPACITY: CLOSED (H363 MoE null, 14th axis)
 - PHYSICS CONSTRAINT: H347 BL priors (nezuko) — long cascade running
 - LOSS (per-point scalar reweighting axis): CLOSED — 6 nulls cumulative (H338, H339, H341, H346, H361, H364)
-- LOSS (structural edge-pair gradient matching): **H368 WSS spatial-gradient consistency (edward)** — just assigned — zero-param, kNN-8 edge gradient L2 matching
+- LOSS (structural edge-pair gradient matching): H368 WSS spatial-gradient consistency (edward) — Phase 1 pickup pending
 - TTA (cross-basin): H365 FastSWA cyclic-LR (thorfinn) — Phase 1 training
+
+**Triangulation logic (3 input-feature axes in flight)**: H359 (multi-scale local kNN aggregation of values) + H360 (global Laplacian eigenfunction spectral) + H369 (local mesh topology random-walk structural) span the three orthogonal axes of "information the encoder currently lacks". If all 3 null, the bottleneck is conclusively capacity not information — pivot to non-capacity-additive structural rewrites (sparse+global attention, inducing-point bottleneck, recurrent state). If any wins, the winning axis identifies the missing information channel.
 
 ### Morgan directive queue (Issue #1056) — ALL P-TIER FALSIFIED
 - P1 (BL derivative decoder): H355 — CLOSED null (Finding K)
@@ -98,11 +104,13 @@
 
 ### Next-tier hypotheses for idle students (per Plateau Protocol)
 
-1. **Mesh-geodesic position encoding** — replace Euclidean Fourier features with surface-geodesic distance (computed via mesh adjacency). Tests whether the encoder's representation gap is using the wrong notion of "distance".
-2. **Sparse + global attention pattern** — replace some slice-attention layers with sparse local (kNN) + global pool attention. Fundamentally changes how surface tokens interact.
-3. **Optimal Transport (Sinkhorn) surface loss** — Earth-Mover-Distance regularizer on WSS predictions instead of pure MSE; captures spatial coherence.
-4. **Curvature-MoE encoder routing** — gate encoder layer specialization by local geometric features (mean curvature, principal directions). Decoder MoE was null but encoder MoE may find different attention patterns per regime.
+1. ~~**RWPE — random-walk PE**~~ — **ASSIGNED to frieren as H369 (PR pending)**
+2. **Sparse + global attention pattern** — replace some slice-attention layers with sparse local (kNN) + global pool attention. Fundamentally changes how surface tokens interact. Not capacity-additive if existing slice-attention layers are replaced.
+3. **Optimal Transport (Sinkhorn) surface loss** — Earth-Mover-Distance regularizer on WSS predictions. Different from H368 kNN-edge structural loss — captures distribution-level coherence, not point-pair gradients.
+4. **Inducing-point attention bottleneck** — replace some slice-attention layers with set-transformer style inducing-point attention. Forces information to compress through M inducing points (M << N), breaks slice-token bottleneck.
 5. **Recurrent decoder refinement (test-time)** — apply decoder N times with cross-attention between iterations. Zero new params, decoder-side but iterative, not capacity expansion.
+6. **Mesh-geodesic landmark distances** — precompute geodesic distance from each surface point to K farthest-point landmarks (heat method on mesh). Different from RWPE (which uses kNN-graph topology) — uses true mesh-edge geodesic via PDE-solve.
+7. **Heat-kernel signature (HKS) PE** — uses eigenvalue + eigenvector heat-diffusion combinations as multi-scale geometric descriptor. Related to H360 LapPE but encodes diffusion dynamics, not raw spectral modes.
 
 ---
 
