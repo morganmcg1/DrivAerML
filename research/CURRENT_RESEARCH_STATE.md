@@ -1,30 +1,33 @@
 # SENPAI Research State
 
-- **2026-06-02 11:42Z** (H193 schedule corrected — 30-EP not 10-EP terminal)
+- **2026-06-02 12:20Z** (boundary cluster all landed — H195 smoke green-lit, H194 EP6 strong descent, H192 mid-EP27 VP plateau)
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → ∂u/∂n → WSS) as highest-leverage untried mechanism, TANGENT-BASIS OUTPUT HEAD as 2nd priority. Both require architectural changes larger than current fleet scope.
 - **Human check-in (issue #1056, 18:39Z):** No new messages since 19:27Z 2026-06-01.
 
-## 11:30Z checkpoint — **4/4 students active**; H192 EP25 VP FRESH LOW; H193 EP9 decoupled; H194 EP5 PASS; H195 assigned awaiting smoke
+## 12:20Z checkpoint — **4/4 students active**; H195 smoke EP1 ON-SHAPE green-lit; H194 EP6 strong descent; H192 VP plateau near fresh low; H193 EP10 VP fresh low
 
-### Actions taken this cycle (11:00–11:30Z)
-- Closed PR #1535 (H191) NON-MERGE — W&B confirmed all 4 components regress, SP floor breach +0.074pp
-- Appended H191 terminal entry to EXPERIMENTS_LOG.md (WSD family RULED OUT on H183 stack)
-- Assigned fern H195 (PR #1565): tau_y_loss_weight=1.3 on H183 stack — isolated τ_y axis upweighting, orthogonal to running fleet
-- Posted ADVISOR EP5 ack on PR #1559 (H194 nezuko) — EP5 PASS confirmed, EP10 gate ~16:20Z
-- Posted ADVISOR EP9 ack on PR #1554 (H193 tanjiro) — VP decoupled confirmed, terminal harvest EP10 ~11:55Z
-- Posted ADVISOR EP25 ack on PR #1541 (H192 frieren) — VP fresh low 3.5304 confirmed, EP30 terminal ~14:00Z
+### Actions taken this cycle (12:00–12:20Z)
+- Posted ADVISOR green-light on PR #1565 (H195 fern) — smoke EP1=12.82 matches H183 EP1 exactly, main DDP8 25-EP authorized
+- Posted ADVISOR EP6 ack on PR #1559 (H194 nezuko) — strong descent 6.8020 (-0.0353), VP descent 3.6670 (-0.0775), 4 EPs ahead of pace for EP10 gate
+- Posted ADVISOR mid-EP27 heartbeat on PR #1541 (H192 frieren) — VP holding at fresh low 3.5306, WSS POS slope flattened
+- Posted ADVISOR EP10 ack on PR #1554 (H193 tanjiro) — VP fresh low 3.7333 (-0.0118), schedule correction posted (30-EP not 10-EP)
 
-### Fleet snapshot at 11:30Z
+### Previous cycle (11:00–11:30Z)
+- Closed PR #1535 (H191) NON-MERGE — WSD family RULED OUT
+- Assigned fern H195 (PR #1565): tau_y_loss_weight=1.3 on H183 stack
+- Posted EP5/EP9/EP25 acks on H194/H193/H192
+
+### Fleet snapshot at 12:20Z
 
 | Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | val_AB | val_SP | Status |
 |---|---|---|---|---:|---:|---:|---:|---:|---|
-| nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | EP5 PASS (5.45h est) | **6.8373 ✓ gate PASS** | 3.7445 | 6.0712 | 3.8997 | EP6 running, next gate EP10 ≤6.80 ~16:20Z |
-| fern | #1565 | H195 tau_y=1.3 on H183 stack | TBD | ASSIGNED, awaiting smoke | — | — | — | — | pod active, no comments yet |
-| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | EP25 (20.76h) | 6.7015 (uptick) | **3.5304 ✅ FRESH LOW -0.113pp** | ~5.94 | ~3.93 | decoupled descent, VP paper-tier, WSS rising; terminal EP30 ~14:00Z |
-| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP9 (~8.05h est) | ~7.676 (rising) | **~3.72 ↓ descent** | ~6.54 | ~3.97 | WSS NON-MERGE, VP harvest at EP10 terminal ~11:55Z |
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap | EP6 (6.07h) | **6.8020 ↓ (-0.0353)** | **3.6670 ↓ (-0.0775)** | 6.0330 | 3.9022 | on-shape H183, 4 EPs ahead of EP10 gate, VP descent strongest in fleet |
+| fern | #1565 | H195 tau_y=1.3 on H183 stack | 1bx92iq5 smoke | smoke EP1 PASS (0.80h) | **12.8244 ✓** | 14.1565 | 13.0190 | 8.7526 | green-light posted, main 25-EP launching imminently |
+| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | mid-EP27 (21.56h) | **6.7001 flat** | **3.5306 plateau ✅** | 5.9420 | 3.9222 | VP camped at fresh-low region, WSS POS slope flattened; terminal ~13:30-14:00Z |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP10 (8.75h) | **7.7030 ↑** | **3.7333 ✅ FRESH LOW** | 6.5615 | 3.9717 | mid 30-EP, decoupled WSS/VP, VP-research note locked NON-MERGE on WSS |
 
 ### H191 fern — CLOSED NON-MERGE (2026-06-02 11:00Z)
 - run `ayg4liye`, rt=25.04h, test_WSS=6.6080, test_ABUPT=5.7714, test_VP=3.6217, test_SP=3.6506
@@ -79,9 +82,9 @@
 2. τ_y + τ_z compound (after H195 and H192 terminals confirm axis mechanisms)
 3. Tangent-basis output head reformulation (2nd human priority)
 
-### Watch items next 3h (from 11:42Z) — CORRECTED H193 schedule
-1. **H192 EP27-30 terminal** ETA ~14:55Z (24h cap) — VP fresh-low series, NON-MERGE close (or merge if SP clears), frieren idle next
-2. **H193 EP10 mid-train landed 11:38Z** (NOT terminal — 30 EP run) — VP fresh low 3.7333, WSS uptick 7.7030; observe for VP test projection
-3. **H195 fern smoke EP1** ETA ~13:00Z — DDP8 8 ranks running, step=2744/0.20h
-4. **H194 EP10 gate** ETA ~16:20Z — key gate ≤6.80%, currently on-shape at EP5=6.8373
-5. **NO IDLE GPUs** — 4/4 active. First idle: frieren@H192 terminal ~14:55Z → assignment needed at that boundary
+### Watch items next 3h (from 12:20Z)
+1. **H195 main launch confirm** ETA ~13:00Z — verify fern posted main rank-0 ID + launched 25-EP DDP8; smoke EP1 already on-shape with H183
+2. **H192 EP28-30 terminal** ETA ~13:30-14:00Z (24h cap may hit at EP28) — VP plateau at fresh low (3.5306), WSS flat 6.7001, NON-MERGE close expected; frieren idle next
+3. **H194 EP7-8 boundaries** ETA ~13:00-13:50Z — continue strong descent expected (~-0.03pp/EP); EP10 gate ≤6.80 should clear easily
+4. **H193 EP11-12** ETA ~12:50-13:40Z — continuation of VP descent watch (mid 30-EP run)
+5. **NO IDLE GPUs** — 4/4 active. First idle: frieren@H192 terminal ~13:30-14:00Z → assignment ready at that boundary (BL derivative decoder is queued per Morgan's directive)
