@@ -1,3 +1,26 @@
+## 2026-06-02 05:30Z — PR #1556: H363 Physics-regime mixture-of-experts surface decoder (Morgan P4) — CLOSED (null)
+
+- Branch: tanjiro/h363-regime-moe-decoder
+- **Hypothesis**: Replace single-head WSS decoder with N-expert MoE (zero-init residual on top of EP13 head, switch-transformer load-balance aux loss λ=0.01). DrivAerML surfaces have ≥4 distinct flow regimes (attached BL / APG separation / wheel-arch / TE wake); a single linear head cannot specialize across regimes — N=2 experts soft-mixed should split the token space and learn regime-specific residuals.
+- **Implementation**: tanjiro executed cleanly. Step-0 invariance verified (`tools/h363_step0_check.py`: max |Δ surface_preds| = 0.000e+00). Both expert output Linears zero-init'd. SENPAI_MAX_EPOCHS interpretation bug (cap vs delta) caught and fixed mid-experiment.
+
+| Metric | H363 Arm A N=2 | H357 raw ref | PR Phase-1 gate | Advisor heartbeat threshold |
+|---|---:|---:|---:|---:|
+| val_primary/abupt rel_l2_pct (raw) | **6.0772%** | 6.0065 | <6.05 ❌ MISS | <5.97 ❌ MISS |
+| val_WSS_z rel_l2_pct (raw) | 9.200 | 9.18 | — | — |
+| test_primary/abupt rel_l2_pct (raw, no TTA) | 7.5734 | — | — | — |
+| test_WSS_z rel_l2_pct (raw, no TTA) | 8.7998 | — | — | — |
+| Router mean_entropy (nats) | 0.6861 | — | >0.5 ✓ | >0.5 ✓ |
+| Router load_balance_ratio | 1.0212 | — | <3× ✓ | <3× ✓ |
+| Router P_i_0 / P_i_1 | 0.504 / 0.496 | — | balanced ✓ | balanced ✓ |
+
+- **W&B runs**: `ihgduhev` (rank 0) + `al10cz78` `zse984n6` `mvh020yi` `1shrhzp8` `u7atqc3t` `6ua8cvsb` `ouo2wrck` (ranks 1-7), 97.2 min wall, 8×H100, peak 19.97 GB/GPU
+- **Finding N** (14th decoder/output-side closed axis): `regime-moe-soft-decoder-redundant-residuals-null` — Two-expert soft-mixture MoE residual decoder with switch-transformer load-balance aux (λ=0.01, zero-init, EP13 resume, 3 cosine-tail epochs) trained healthily. Router learned a perfectly balanced 50/50 partition under aux pressure (entropy 0.686, load_balance 1.02). However the soft mixture averaged the experts back to a single effective head — experts learned redundant residuals. Net effect: zero movement on val_raw or WSS_z (9.20 ≡ H357 9.18).
+- **Mechanism interpretation**: Decoder-side capacity reallocation does not address the WSS_z floor — consistent with 13 prior decoder/output null axes (H338 SP-reweight, H339/H341 channel-reweights, H346 focal EMA, H347 BL normal-constraint, H348 curvature, H350/H354 FiLM, H355 BL-derivative, H358 tangent-basis [pending cal], H352 SWA, H361 loss-decomposition). The floor is upstream of the decoder (encoder/representation).
+- **Implication**: Per Plateau Protocol, the live tier is now exclusively encoder/representation modifications. Tanjiro's own suggested follow-up (B1: hierarchical kNN attention bias as zero-param attention modulator) picked up immediately as H366 (PR #1560).
+
+---
+
 ## 2026-06-02 04:35Z — PR #1544: H352 SWA-within-cosine-tail — CLOSED (null)
 
 - Branch: thorfinn/swa-cosine-tail

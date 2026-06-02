@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-06-02 04:15Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
+**Updated**: 2026-06-02 05:35Z | Branch: `tay` | **SOTA: H342 3-cp output-avg ep13+ep14+ep15 × K=5 TTA — val_cal 5.8962 / test_cal 5.7357 (PR #1526 MERGED)**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Closed axes (do NOT revisit — 12 total)
+## Closed axes (do NOT revisit — 14 total)
 
 | Axis | Finding | Closed by |
 |---|---|---|
@@ -42,49 +42,61 @@
 | GeoTransolver content embedding | `geotransolver-content-embedding-null` | H357 |
 | **SWA within cosine-tail (Finding M)** | `swa-equivalent-to-ema-cosine-tail` — within-trajectory uniform SWA ≡ EMA endpoint, same cal coefs, same basin. Late-trajectory weight averaging cannot find meaningfully different point. **FastSWA cyclic-LR now needed (H365).** | **H352 CLOSED 04:35Z** |
 | **Direction-magnitude decomposed WSS loss (Finding L)** | `wss-direction-magnitude-decomposed-loss-null` — cosine gradient rewards direction-matching at all magnitudes; rel-norm gradient over-weights small-magnitude points. Per-channel MSE IS the correct gradient object. **Discriminator outcome confirmed: WSS_z floor is NOT loss-geometry; it is representation.** | **H361 CLOSED 04:09Z** |
+| **MoE soft-mixture decoder (Finding N)** | `regime-moe-soft-decoder-redundant-residuals-null` — Two-expert soft-mixture MoE with switch-transformer load-balance aux. Router learned perfectly balanced 50/50 partition (entropy 0.686, load_bal 1.02). But soft mixture averaged experts back to single effective head — redundant residuals. WSS_z floor unmoved (9.20 ≡ H357 9.18). **14th decoder/output-side null axis.** | **H363 CLOSED 05:30Z** |
 
 ---
 
-## Active Fleet (2026-06-02 04:15Z — 8/8 WIP students, fleet fully active)
+## Active Fleet (2026-06-02 05:35Z — 8/8 WIP students, fleet fully active)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| **#1548** | alphonse | **H356: 3-cp × K=5 output-avg — SOTA CANDIDATE** — val_raw 5.9206 (best pre-cal after frieren; projects val_cal ~5.84-5.85, LIKELY PASSES gate). Cal arm `0n1xkwic` running silently, ETA terminal ~04:25Z. test arm cascading. | 🔥 SOTA candidate, cal arm landing |
-| **#1550** | frieren | **H358: tangent-basis residual head — BEST PRE-CAL val_raw 5.9191** — Phase 1 done EP16. Phase 2 TTA `6fcumd8m` running silently ~2.78h. Projects val_cal ~5.84, LIKELY PASSES. | 🔥 SOTA candidate, TTA+cal landing |
-| **#1558** | thorfinn | **H365: FastSWA cyclic-LR cross-basin 3-cp output-avg** (JUST ASSIGNED 04:35Z) — 3 cyclic cosine restarts from EP13 (T_max=1 per epoch), output-average 3 cycle-end predictions with H336 TTA recipe. Cross-basin diversity vs H342's within-basin ep13/14/15. Student's own suggested follow-up from H352 close. | 🆕 just assigned |
+| **#1548** | alphonse | **H356: 3-cp × K=5 output-avg — FAILED GATES** — Cal arm `0n1xkwic` finished: val_cal **5.9206** (>gate 5.8962, MISS 24bp) / test_cal **5.7668** (>gate 5.7357, MISS 31bp). Zero cal yield (already near-cal-stable). Awaiting terminal SENPAI-RESULT post then close. | ⏳ awaiting student terminal |
+| **#1550** | frieren | **H358: tangent-basis residual head — LIKELY FAILED CAL** — Phase 2 TTA `6fcumd8m` still running rt 2.78h, current val_cal 5.9191 (>gate 5.8962, MISS 23bp). Same zero-cal-yield pattern as alphonse and thorfinn. Test_cal pending. | 🟡 WIP — likely close |
+| **#1558** | thorfinn | **H365: FastSWA cyclic-LR cross-basin 3-cp output-avg** — 3 cyclic cosine restarts from EP13 (T_max=1 per epoch), output-average 3 cycle-end predictions with H336 TTA recipe. Cross-basin diversity vs H342's within-basin ep13/14/15. | 🟡 WIP — Phase 1 training |
 | **#1538** | nezuko | H347: BL physics priors — Arm A val_cal 5.9253 FAILED gate. Arm B/C cascade auto-chaining. ETA terminal ~18-19Z June 2. | 🟡 WIP — long cascade running |
 | **#1551** | askeladd | H359: Multi-scale surface kNN branch — Phase 1 done (val_raw ~6.013, 10bp behind SOTA). Single-cp TTA `kwe8tynw` triage running. If not approaching ~5.91 val_cal → close as null. | 🟡 WIP — TTA triage |
-| **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 step ~4540 (55% done). Train_loss 0.006-0.010 healthy. ETA Phase 1 complete ~05:30Z. | 🟡 WIP — Phase 1 training |
-| **#1556** | tanjiro | H363: Physics-regime MoE surface decoder (Morgan P4) — Arm A v2 N=2 RUNNING step 8459-8523 rt 32min, train_loss 0.014-0.017 HEALTHY. | 🟢 WIP — Phase 1 training |
-| **#1557** | edward | **H364: Target-magnitude top-decile WSS hotspot reweight** (JUST ASSIGNED 04:10Z) — γ=3 Arm A / γ=5 Arm B conditional. Per-point weight based on ||target_wss|| top-decile. Orthogonal to all prior scalar reweights. Discriminator: is gradient mass concentration the bottleneck? | 🆕 just assigned |
+| **#1552** | fern | H360: LapPE-32 Laplacian eigenfunction PE — Phase 1 step ~4540+ (55%+ done). Train_loss 0.006-0.010 healthy. ETA Phase 1 complete ~05:30Z. | 🟡 WIP — Phase 1 training |
+| **#1560** | tanjiro | **H366: Hierarchical kNN proximity attention bias** (JUST ASSIGNED 05:35Z) — Zero-param encoder-side: pre-softmax bias α_l·1[j∈kNN(i)] on slice-routing logits, per-layer learnable α init=0. Step-0 invariant. Orthogonal to H359 (feature aggregation) and H360 (global LapPE) — attention-pattern modification, not feature richness. Student's own B1 suggestion post-H363. | 🆕 just assigned |
+| **#1557** | edward | **H364: Target-magnitude top-decile WSS hotspot reweight** — γ=3 Arm A / γ=5 Arm B conditional. Per-point weight based on ||target_wss|| top-decile. Orthogonal to all prior scalar reweights. Discriminator: is gradient mass concentration the bottleneck? | 🟡 WIP — Phase 1 running |
 
 ---
 
-## Current Research Focus: ENCODER/INPUT-SIDE + DECODER-CAPACITY + ALIGNED-LOSS ATTACKS
+## Current Research Focus: ENCODER/REPRESENTATION TIER (DECODER FULLY SATURATED)
 
-**12 closed axes** all point to same conclusion: WSS_z floor is representational/upstream. H361 was the definitive discriminator for loss-geometry; result confirmed representation.
+**14 closed axes** all point to the same conclusion: WSS_z floor is representational/upstream. H361 confirmed it is NOT loss-geometry; H363 confirmed decoder capacity reallocation is null. **The live tier is exclusively encoder/representation modifications.**
 
-**4 concurrent SOTA candidates** landing 04:00-05:30Z (frieren best at val_raw 5.9191):
-- If ANY pass both gates (val_cal < 5.8962 AND test_cal < 5.7357) → MERGE-WINNER
-- All 4 project val_cal ~5.84-5.85 from pre-cal val_raw after ~7-8bp cal yield
+**Cal-arm failure pattern (2026-06-02 05:30Z)**:
+- alphonse H356 (3-cp K=5): val_cal 5.9206 / test_cal 5.7668 — **FAILED both gates** by 24bp / 31bp
+- frieren H358 (tangent basis): val_cal 5.9191 (running) — likely FAIL by 23bp
+- thorfinn H352 (SWA): val_cal 5.8985 — **FAILED** by 0.23bp
+- nezuko H347-A (BL priors): val_cal 5.9253 — FAILED
+- **Pattern**: Cal yields drop to 0-2.4bp when the pre-cal output is already near cal-stable (3-cp averaging, SWA, antithetic K=5). H342 7-8bp cal yield is the exception, not the rule.
+- **Implication**: Future candidates need to pass on val_raw alone OR demonstrate non-trivial cal headroom. The "project ~7bp cal yield" heuristic is dead for averaged/stacked outputs.
 
-**Triangulation logic**:
-- INPUT (global spectral): H360 LapPE-32 (fern) — ongoing
-- INPUT (multi-scale local): H359 kNN branch (askeladd) — triage
-- ENCODER: closed (H357 content embedding null, H351 NGSB null)
-- OUTPUT BASIS: H358 tangent basis (frieren) — SOTA candidate
-- DECODER CAPACITY: H363 MoE N=2 (tanjiro) — ongoing
-- PHYSICS CONSTRAINT: H347 BL priors (nezuko) — long cascade
-- LOSS (aligned objective): H364 hotspot reweight (edward) — just assigned
-- TTA STACKING: H352 SWA (thorfinn), H356 3-cp K=5 (alphonse) — SOTA candidates
+**Triangulation map (post-H363)**:
+- INPUT (global spectral): H360 LapPE-32 (fern) — Phase 1 training
+- INPUT (multi-scale local feature): H359 kNN branch (askeladd) — TTA triage
+- ENCODER (attention-pattern modification): **H366 kNN proximity attention bias (tanjiro)** — just assigned — zero-param, orthogonal to H359 and H360
+- ENCODER (content): closed (H357 content embedding null, H351 NGSB null)
+- OUTPUT BASIS: H358 tangent basis (frieren) — TTA+cal likely failing
+- DECODER CAPACITY: CLOSED (H363 MoE null, 14th axis)
+- PHYSICS CONSTRAINT: H347 BL priors (nezuko) — long cascade running
+- LOSS (aligned objective per-point): H364 hotspot reweight (edward) — Phase 1 running
+- TTA (cross-basin): H365 FastSWA cyclic-LR (thorfinn) — Phase 1 training
 
 ### Morgan directive queue (Issue #1056)
 - P1 (BL derivative decoder): H355 closed as null — FALSIFIED
-- P2 (tangent-basis output head): H358 frieren — in flight as SOTA candidate
-- P3 (multi-scale kNN): H359 askeladd — in triage
-- P4 (Physics-regime MoE): H363 tanjiro — Arm A running
+- P2 (tangent-basis output head): H358 frieren — likely failing cal
+- P3 (multi-scale kNN feature): H359 askeladd — TTA triage
+- P4 (Physics-regime MoE decoder): H363 tanjiro — **CLOSED null (Finding N)**
 
-**Next when students idle**: GeoTransolver-style geometric cross-attention (architectural escalation per Plateau Protocol).
+### Next-tier hypotheses for idle students (per Plateau Protocol)
+
+1. **Mesh-geodesic position encoding** — replace Euclidean Fourier features with surface-geodesic distance (computed via mesh adjacency). Tests whether the encoder's representation gap is using the wrong notion of "distance".
+2. **Sparse + global attention pattern** — replace some slice-attention layers with sparse local (kNN) + global pool attention. Fundamentally changes how surface tokens interact.
+3. **Optimal Transport (Sinkhorn) surface loss** — Earth-Mover-Distance regularizer on WSS predictions instead of pure MSE; captures spatial coherence.
+4. **Curvature-MoE encoder routing** — gate encoder layer specialization by local geometric features (mean curvature, principal directions). Decoder MoE was null but encoder MoE may find different attention patterns per regime.
+5. **Recurrent decoder refinement (test-time)** — apply decoder N times with cross-attention between iterations. Zero new params, decoder-side but iterative, not capacity expansion.
 
 ---
 
@@ -99,3 +111,5 @@
 | `sam-flatness-pessimal-wssz` | H336 basin already flat; SAM costs 20-50bp WSS_z |
 | `decoder-pareto-optimal-at-h336-ep13` | Any decoder modification traces strictly worse |
 | `wss-direction-magnitude-decomposed-loss-null` | Loss geometry NOT the bottleneck; representation IS (H361 discriminator) |
+| `regime-moe-soft-decoder-redundant-residuals-null` | Decoder capacity reallocation null; 14th decoder/output axis closed (H363) |
+| `cal-yield-collapses-on-averaged-outputs` | 3-cp/SWA/K=5 outputs already near-cal-stable; cal yield drops 7-8bp → 0-2.4bp |
