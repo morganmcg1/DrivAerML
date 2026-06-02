@@ -25,6 +25,7 @@ from typing import Iterable
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
@@ -146,6 +147,10 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    # H363: Physics-regime mixture-of-experts surface decoder.
+    moe_surface_decoder: bool = False
+    moe_num_experts: int = 2
+    moe_aux_loss_weight: float = 0.01
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -271,6 +276,29 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "moe_surface_decoder": (
+            "H363: Enable a physics-regime mixture-of-experts surface "
+            "decoder. Adds a residual ``soft_mixture(experts(h))`` on top "
+            "of the existing surface head; expert output Linears are "
+            "zero-initialised so the residual is exactly zero at init "
+            "(step-0 prediction matches the resumed checkpoint). A small "
+            "linear router maps each surface token's hidden state to a "
+            "softmax over ``--moe-num-experts`` experts. Switch-Transformer "
+            "load-balance auxiliary loss is added with weight "
+            "``--moe-aux-loss-weight``."
+        ),
+        "moe_num_experts": (
+            "H363: Number of mixture experts when --moe-surface-decoder is "
+            "set. Arm A uses 2, Arm B uses 4. Each expert is a 2-layer MLP."
+        ),
+        "moe_aux_loss_weight": (
+            "H363: Weight on the Switch-Transformer load-balance auxiliary "
+            "loss (Fedus et al. 2022): "
+            "``L_aux = N * sum_i (f_i * P_i)`` where ``f_i`` is the fraction "
+            "of tokens routed to expert i (argmax) and ``P_i`` is the mean "
+            "router probability for expert i. Default 0.01 matches the "
+            "original Switch-Transformer recipe."
         ),
     }
     for field in fields(Config):
@@ -429,7 +457,74 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        moe_surface_decoder=config.moe_surface_decoder,
+        moe_num_experts=config.moe_num_experts,
     )
+
+
+def moe_router_stats(
+    probs: torch.Tensor,
+    mask: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Switch-Transformer load-balance auxiliary loss + router diagnostics.
+
+    Parameters
+    ----------
+    probs:
+        Router probabilities ``[B, N, E]`` (after softmax).
+    mask:
+        Surface-token mask ``[B, N]`` (1.0 for real tokens, 0.0 for padding).
+        Padded positions are ignored everywhere.
+
+    Returns
+    -------
+    L_aux:
+        Differentiable scalar load-balance auxiliary loss.
+    stats:
+        Float diagnostics: per-expert fraction f_i (argmax), per-expert mean
+        router prob P_i, router entropy (mean over tokens of -sum_i p log p),
+        and load-balance ratio max(f) / min(f).
+    """
+
+    if probs is None or mask is None:
+        empty: dict[str, float] = {}
+        return probs.new_zeros(()) if probs is not None else mask.new_zeros(()), empty
+
+    probs_f = probs.float()
+    mask_f = mask.to(dtype=probs_f.dtype, device=probs_f.device)
+    num_experts = probs_f.shape[-1]
+    token_mask = mask_f.unsqueeze(-1)  # [B, N, 1]
+    valid_token_count = mask_f.sum().clamp(min=1.0)
+
+    # Hard-routing fraction f_i: argmax assignment, masked, normalised by
+    # the count of real (non-padding) tokens.
+    argmax_idx = probs_f.argmax(dim=-1)  # [B, N]
+    one_hot = F.one_hot(argmax_idx, num_classes=num_experts).to(probs_f.dtype)  # [B, N, E]
+    f_frac = (one_hot * token_mask).sum(dim=(0, 1)) / valid_token_count  # [E]
+
+    # Soft router-prob P_i averaged over real tokens.
+    P_i = (probs_f * token_mask).sum(dim=(0, 1)) / valid_token_count  # [E]
+
+    # Switch-Transformer aux loss (Fedus et al. 2022).
+    L_aux = float(num_experts) * (f_frac * P_i).sum()
+
+    # Diagnostics (detached).
+    log_probs = torch.log(probs_f.clamp(min=1e-12))
+    per_token_entropy = -(probs_f * log_probs).sum(dim=-1)  # [B, N]
+    mean_entropy = (per_token_entropy * mask_f).sum() / valid_token_count
+    f_frac_min = f_frac.min().clamp(min=1e-12)
+    load_balance_ratio = f_frac.max() / f_frac_min
+
+    stats: dict[str, float] = {
+        "router/mean_entropy": float(mean_entropy.detach().cpu().item()),
+        "router/load_balance_ratio": float(load_balance_ratio.detach().cpu().item()),
+    }
+    f_frac_cpu = f_frac.detach().cpu().tolist()
+    P_i_cpu = P_i.detach().cpu().tolist()
+    for i in range(num_experts):
+        stats[f"router/f_frac_{i}"] = float(f_frac_cpu[i])
+        stats[f"router/P_i_{i}"] = float(P_i_cpu[i])
+    return L_aux, stats
 
 
 def train_loss(
@@ -442,6 +537,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    moe_aux_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -467,13 +563,27 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        moe_metrics: dict[str, float] = {}
+        moe_aux_loss_value = 0.0
+        moe_aux_weighted_value = 0.0
+        if "moe_probs" in out and moe_aux_loss_weight > 0.0:
+            L_aux, moe_metrics = moe_router_stats(out["moe_probs"], batch.surface_mask)
+            moe_aux_loss_value = float(L_aux.detach().cpu().item())
+            weighted_aux = moe_aux_loss_weight * L_aux
+            moe_aux_weighted_value = float(weighted_aux.detach().cpu().item())
+            loss = loss + weighted_aux
+    metrics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if moe_metrics:
+        metrics.update(moe_metrics)
+        metrics["moe/aux_loss"] = moe_aux_loss_value
+        metrics["moe/aux_loss_weighted"] = moe_aux_weighted_value
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -942,7 +1052,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.moe_surface_decoder:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -1081,6 +1191,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["mirror_augmentation"] = config.mirror_augmentation
             wandb.summary["epochs_already_done"] = config.epochs_already_done
             wandb.summary["save_every_epoch"] = config.save_every_epoch
+            wandb.summary["moe/surface_decoder"] = config.moe_surface_decoder
+            wandb.summary["moe/num_experts"] = config.moe_num_experts
+            wandb.summary["moe/aux_loss_weight"] = config.moe_aux_loss_weight
+            if config.moe_surface_decoder:
+                print(
+                    f"H363 MoE surface decoder ENABLED: num_experts="
+                    f"{config.moe_num_experts}, aux_loss_weight="
+                    f"{config.moe_aux_loss_weight}"
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1230,6 +1349,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        moe_aux_loss_weight=(
+                            config.moe_aux_loss_weight if config.moe_surface_decoder else 0.0
+                        ),
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1270,6 +1392,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for key, value in batch_loss_metrics.items():
+                        if key.startswith("router/") or key.startswith("moe/"):
+                            train_log[f"train/{key}"] = value
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

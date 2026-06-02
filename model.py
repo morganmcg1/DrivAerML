@@ -394,6 +394,79 @@ class Transformer(nn.Module):
         return x
 
 
+class MoESurfaceDecoder(nn.Module):
+    """H363: Physics-regime mixture-of-experts surface decoder (residual).
+
+    Adds a soft-mixture residual on top of the existing surface head. Each
+    expert is a 2-layer MLP ``Linear -> GELU -> Linear`` with zero-init on
+    the output Linear weight and bias so the residual is exactly zero at
+    init, preserving the step-0 prediction of the base surface head (and
+    therefore the EP13 resumed-checkpoint validation metric).
+
+    A small linear router maps each surface token's hidden state to a
+    softmax over experts; the per-token output is the soft mixture
+    ``sum_i p_i(h) * expert_i(h)``. Switch-Transformer-style load-balance
+    auxiliary loss is computed in ``train.py`` from the returned ``probs``.
+
+    Parameters
+    ----------
+    hidden_dim:
+        Input hidden width (matches the surface decoder input width).
+    out_dim:
+        Output dimension (surface_output_dim, e.g. 4 = [cp, tau_x, tau_y, tau_z]).
+    num_experts:
+        Number of mixture components (e.g. 2 in Arm A, 4 in Arm B).
+    expert_hidden:
+        Width of each expert's hidden layer; defaults to ``hidden_dim // 2``.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        out_dim: int,
+        num_experts: int = 2,
+        expert_hidden: int | None = None,
+    ):
+        super().__init__()
+        if num_experts < 2:
+            raise ValueError("MoESurfaceDecoder requires num_experts >= 2")
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+        self.num_experts = num_experts
+        expert_hidden = expert_hidden or (hidden_dim // 2)
+        self.expert_hidden = expert_hidden
+        self.experts = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(hidden_dim, expert_hidden),
+                    nn.GELU(),
+                    nn.Linear(expert_hidden, out_dim),
+                )
+                for _ in range(num_experts)
+            ]
+        )
+        # Hidden Linear: trunc_normal init for stable forward dynamics.
+        # Output Linear: zero-init weight and bias so each expert contributes
+        # exactly zero at init, preserving the base-head step-0 prediction.
+        for expert in self.experts:
+            nn.init.trunc_normal_(expert[0].weight, std=0.02)
+            nn.init.zeros_(expert[0].bias)
+            nn.init.zeros_(expert[-1].weight)
+            nn.init.zeros_(expert[-1].bias)
+        self.router = nn.Linear(hidden_dim, num_experts)
+        nn.init.normal_(self.router.weight, std=0.01)
+        nn.init.zeros_(self.router.bias)
+
+    def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # h: [..., hidden_dim]
+        logits = self.router(h)
+        probs = F.softmax(logits, dim=-1)
+        expert_outputs = torch.stack([expert(h) for expert in self.experts], dim=-2)
+        # expert_outputs: [..., num_experts, out_dim]
+        out = (probs.unsqueeze(-1) * expert_outputs).sum(dim=-2)
+        return out, probs
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -419,6 +492,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        moe_surface_decoder: bool = False,
+        moe_num_experts: int = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +509,8 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.moe_surface_decoder = moe_surface_decoder
+        self.moe_num_experts = moe_num_experts
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -537,6 +614,21 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # H363: Physics-regime mixture-of-experts surface decoder.
+        # Lives as a *residual* on top of the existing surface head so the
+        # zero-init expert outputs preserve the step-0 prediction exactly
+        # (otherwise a pure replacement would zero out the EP13-trained base
+        # head and fail the smoke-gate). When enabled, the surface prediction
+        # is computed as ``base_head(h) + moe_decoder(h)``.
+        if moe_surface_decoder:
+            self.moe_decoder = MoESurfaceDecoder(
+                hidden_dim=n_hidden,
+                out_dim=self.surface_output_dim,
+                num_experts=moe_num_experts,
+            )
+        else:
+            self.moe_decoder = None
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -660,8 +752,13 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
+        moe_probs: torch.Tensor | None = None
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden)
+            if self.moe_decoder is not None:
+                moe_residual, moe_probs = self.moe_decoder(surface_hidden)
+                surface_preds = surface_preds + moe_residual
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -672,10 +769,13 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        result: dict[str, torch.Tensor] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if moe_probs is not None:
+            result["moe_probs"] = moe_probs
+        return result
