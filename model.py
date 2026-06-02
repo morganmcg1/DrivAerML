@@ -260,18 +260,43 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        slice_pool_mode: str = "global",
+        slice_pool_neighbors: int = 16,
+        slice_pool_temperature: float = 0.1,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
             raise ValueError("hidden_dim must be divisible by num_heads")
+        if slice_pool_mode not in ("global", "local_adaptive"):
+            raise ValueError(
+                f"slice_pool_mode must be 'global' or 'local_adaptive', got {slice_pool_mode!r}"
+            )
+        if slice_pool_mode == "local_adaptive":
+            if slice_pool_neighbors <= 0:
+                raise ValueError("slice_pool_neighbors must be > 0 in local_adaptive mode")
+            if slice_pool_temperature <= 0.0:
+                raise ValueError(
+                    "slice_pool_temperature must be > 0 in local_adaptive mode"
+                )
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.dim_head = hidden_dim // num_heads
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.slice_pool_mode = slice_pool_mode
+        # Cap k at num_slices so top-k can never exceed S.
+        self.slice_pool_neighbors = min(int(slice_pool_neighbors), int(num_slices))
+        self.slice_pool_temperature = float(slice_pool_temperature)
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
+        if slice_pool_mode == "local_adaptive":
+            # H373: local_adaptive bypasses the learned per-head temperature
+            # in favour of a fixed slice_pool_temperature override, so freeze
+            # the parameter to (a) keep EP13-EMA load behaviour intact via
+            # strict=False, (b) skip DDP gradient sync for an unused param,
+            # and (c) skip EMA bookkeeping (EMA filters on requires_grad).
+            self.temperature.requires_grad = False
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_fx = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_slice = LinearProjection(self.dim_head, num_slices)
@@ -289,8 +314,32 @@ class TransolverAttention(nn.Module):
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
-        slice_logits = self.in_project_slice(x_mid) / self.temperature
+        slice_logits_raw = self.in_project_slice(x_mid)
+        if self.slice_pool_mode == "local_adaptive":
+            # H373: top-k feature-space local adaptive pool. For each
+            # (batch, head, point) row of slice_logits_raw, keep only the k
+            # largest entries (= "k nearest slices in feature space" since
+            # in_project_slice acts as an inner-product with learned slice
+            # query vectors). Mask the rest to -inf before softmax with a
+            # fixed local temperature (0.1 by default). Zero new parameters
+            # — the learned per-head ``self.temperature`` is bypassed in
+            # local_adaptive mode and the EP13 EMA warm-start preserves
+            # ``in_project_slice`` exactly.
+            k = self.slice_pool_neighbors
+            _, topk_idx = slice_logits_raw.topk(k, dim=-1)
+            keep_mask = torch.zeros_like(slice_logits_raw, dtype=torch.bool)
+            keep_mask.scatter_(-1, topk_idx, True)
+            # Clamp before scaling to prevent fp16/bf16 overflow at τ=0.1 (×10).
+            # ±50 raw → ±500 scaled, well within fp32 and bf16 max (~3.4e38/~6.5e4).
+            slice_logits = slice_logits_raw.clamp(-50.0, 50.0) / self.slice_pool_temperature
+            slice_logits = slice_logits.masked_fill(~keep_mask, float("-inf"))
+        else:
+            slice_logits = slice_logits_raw / self.temperature
         slice_weights = F.softmax(slice_logits, dim=-1)
+        # Belt-and-suspenders guard: if an entire row is -inf (e.g. all-masked
+        # degenerate edge case), softmax returns NaN; replace with 0 rather
+        # than propagating NaN through the loss to a silent rank crash.
+        slice_weights = torch.nan_to_num(slice_weights, nan=0.0, posinf=0.0, neginf=0.0)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
                 device=slice_weights.device,
@@ -330,6 +379,9 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_prob: float = 0.0,
+        slice_pool_mode: str = "global",
+        slice_pool_neighbors: int = 16,
+        slice_pool_temperature: float = 0.1,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -340,6 +392,9 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            slice_pool_mode=slice_pool_mode,
+            slice_pool_neighbors=slice_pool_neighbors,
+            slice_pool_temperature=slice_pool_temperature,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
@@ -366,6 +421,9 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_max: float = 0.0,
+        slice_pool_mode: str = "global",
+        slice_pool_neighbors: int = 16,
+        slice_pool_temperature: float = 0.1,
     ):
         super().__init__()
         if depth > 1:
@@ -383,6 +441,9 @@ class Transformer(nn.Module):
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
                     drop_path_prob=drop_path_probs[i],
+                    slice_pool_mode=slice_pool_mode,
+                    slice_pool_neighbors=slice_pool_neighbors,
+                    slice_pool_temperature=slice_pool_temperature,
                 )
                 for i in range(depth)
             ]
@@ -419,6 +480,9 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        slice_pool_mode: str = "global",
+        slice_pool_neighbors: int = 16,
+        slice_pool_temperature: float = 0.1,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -502,6 +566,9 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        self.slice_pool_mode = slice_pool_mode
+        self.slice_pool_neighbors = slice_pool_neighbors
+        self.slice_pool_temperature = slice_pool_temperature
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -511,6 +578,9 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             use_qk_norm=use_qk_norm,
             drop_path_max=drop_path_max,
+            slice_pool_mode=slice_pool_mode,
+            slice_pool_neighbors=slice_pool_neighbors,
+            slice_pool_temperature=slice_pool_temperature,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:

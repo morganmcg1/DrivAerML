@@ -140,6 +140,11 @@ class EvalConfig:
     use_qk_norm: bool = True
     use_surf_to_vol_xattn: bool = True
     drop_path_max: float = 0.1
+    # H373: must match training-time slice-pool config so the loaded
+    # checkpoint reproduces the routing topology used at training time.
+    slice_pool_mode: str = "global"
+    slice_pool_neighbors: int = 16
+    slice_pool_temperature: float = 0.1
 
     amp_mode: str = "bf16"
     debug: bool = False  # 2 val + 2 test cases
@@ -195,6 +200,9 @@ def build_model(cfg: EvalConfig) -> SurfaceTransolver:
         use_qk_norm=cfg.use_qk_norm,
         use_surf_to_vol_xattn=cfg.use_surf_to_vol_xattn,
         drop_path_max=cfg.drop_path_max,
+        slice_pool_mode=cfg.slice_pool_mode,
+        slice_pool_neighbors=cfg.slice_pool_neighbors,
+        slice_pool_temperature=cfg.slice_pool_temperature,
     )
 
 

@@ -97,6 +97,9 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    slice_pool_mode: str = "global"
+    slice_pool_neighbors: int = 16
+    slice_pool_temperature: float = 0.1
     rff_num_features: int = 0
     rff_sigma: float = 1.0
     rff_init_sigmas: str = ""
@@ -272,6 +275,27 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
         ),
+        "slice_pool_mode": (
+            "H373: Transolver slice-pool routing. 'global' (default) is the "
+            "standard Transolver dense softmax over all K slices using the "
+            "learned per-head temperature. 'local_adaptive' restricts the "
+            "softmax to each point's top-k slices in feature space (Wu et "
+            "al., Transolver++, ICML 2025, arxiv:2502.02414): mask all but "
+            "the top-k entries of slice_logits to -inf, apply softmax with "
+            "--slice-pool-temperature. Zero new parameters, preserves the "
+            "N->K->N token bijection."
+        ),
+        "slice_pool_neighbors": (
+            "H373: k for local_adaptive slice pool. Each point's slice "
+            "softmax is restricted to its top-k highest logits across the K "
+            "slices. Capped at K. Ignored when --slice-pool-mode=global."
+        ),
+        "slice_pool_temperature": (
+            "H373: softmax temperature in local_adaptive mode. Overrides the "
+            "learned per-head ``self.temperature`` only inside the masked "
+            "softmax (global mode is unchanged). Lower => sharper "
+            "assignment; default 0.1. Ignored when --slice-pool-mode=global."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -429,6 +453,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        slice_pool_mode=config.slice_pool_mode,
+        slice_pool_neighbors=config.slice_pool_neighbors,
+        slice_pool_temperature=config.slice_pool_temperature,
     )
 
 
