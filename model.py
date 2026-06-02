@@ -33,6 +33,50 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+def _build_local_frame(n: torch.Tensor) -> torch.Tensor:
+    """Build per-vertex rotation matrix from unit normal.
+
+    n: (..., 3) — assumed approximately unit length but renormalised for safety.
+    Returns R: (..., 3, 3) with rows = (t1, t2, n). R @ v rotates v into the
+    local frame where x_local = t1, y_local = t2, z_local = n.
+
+    Reference axis defaults to world-z; switches to world-x when n is parallel
+    to z (|n·z| > 0.99) to avoid a singular Gram-Schmidt step.
+    """
+    n_unit = n / (n.norm(dim=-1, keepdim=True) + 1e-8)
+    z_ref = torch.zeros_like(n_unit)
+    z_ref[..., 2] = 1.0
+    x_ref = torch.zeros_like(n_unit)
+    x_ref[..., 0] = 1.0
+    parallel = (n_unit * z_ref).sum(-1, keepdim=True).abs() > 0.99
+    ref = torch.where(parallel, x_ref, z_ref)
+    t1 = ref - (ref * n_unit).sum(-1, keepdim=True) * n_unit
+    t1 = t1 / (t1.norm(dim=-1, keepdim=True) + 1e-8)
+    t2 = torch.linalg.cross(n_unit, t1, dim=-1)
+    return torch.stack([t1, t2, n_unit], dim=-2)
+
+
+def _rotate_3blocks(features: torch.Tensor, R: torch.Tensor) -> torch.Tensor:
+    """Rotate `features` by `R` over 3-aligned subblocks of the last dim.
+
+    features: (..., D). R: (..., 3, 3) sharing the leading dims with features.
+    Splits D into K = D//3 groups of 3 along the last axis, rotates each
+    group by R (output[..., k, i] = sum_j R[..., i, j] * features[..., k, j]),
+    and leaves any remainder (D mod 3) dims unrotated. Returns same shape.
+    """
+    leading = features.shape[:-1]
+    d = features.shape[-1]
+    d_align = (d // 3) * 3
+    if d_align == 0:
+        return features
+    block = features[..., :d_align].reshape(*leading, d_align // 3, 3)
+    block_rot = torch.einsum("...ij,...kj->...ki", R.to(block.dtype), block)
+    block_rot = block_rot.reshape(*leading, d_align)
+    if d_align == d:
+        return block_rot
+    return torch.cat([block_rot, features[..., d_align:]], dim=-1)
+
+
 class DropPath(nn.Module):
     """Per-sample Stochastic Depth (Huang et al. 2016).
 
@@ -260,6 +304,8 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_aniso_frame_attention: bool = False,
+        aniso_init_gamma: float = -10.0,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -270,6 +316,7 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.use_aniso_frame_attention = use_aniso_frame_attention
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -284,6 +331,13 @@ class TransolverAttention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
+        # H367: per-layer learnable gate on the anisotropic attention branch.
+        # gamma_aniso init very negative (sigmoid ~ 4.5e-5 for -10) so step-0
+        # output is dominated by the standard isotropic attention path.
+        if use_aniso_frame_attention:
+            self.gamma_aniso = nn.Parameter(torch.tensor(float(aniso_init_gamma)))
+        else:
+            self.register_parameter("gamma_aniso", None)
 
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
@@ -300,19 +354,74 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def _slice_frames(
+        self,
+        slice_weights: torch.Tensor,
+        point_normals: torch.Tensor,
+    ) -> torch.Tensor:
+        """Build a per-head per-slice rotation matrix from surface normals.
+
+        slice_weights: (B, H, N, S) — soft per-head assignment of tokens to slices.
+        point_normals: (B, N, 3) — surface normals for surface tokens, zeros for
+            volume tokens (whose contribution is naturally null-weighted).
+
+        Returns slice_R: (B, H, S, 3, 3). Slices that receive negligible surface
+        mass fall back to identity so the rotation effect is null there.
+        """
+        normals = point_normals.to(slice_weights.dtype)
+        weighted_normals = torch.einsum("bhns,bnc->bhsc", slice_weights, normals)
+        norm = weighted_normals.norm(dim=-1, keepdim=True)
+        surface_mass = slice_weights.sum(dim=2)  # (B, H, S)
+        # Identity fallback for slices dominated by volume tokens or whose
+        # surface-weighted normal nearly cancels (e.g. opposite-facing patches).
+        identity = torch.eye(3, device=normals.device, dtype=normals.dtype)
+        fallback = (norm.squeeze(-1) / (surface_mass + 1e-6)) < 1e-3
+        unit_normals = weighted_normals / (norm + 1e-6)
+        R = _build_local_frame(unit_normals)  # (B, H, S, 3, 3)
+        R = torch.where(
+            fallback.unsqueeze(-1).unsqueeze(-1),
+            identity.expand_as(R),
+            R,
+        )
+        return R
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
             q = self.q_norm(q)
             k = self.k_norm(k)
-        out_slice = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            dropout_p=self.dropout if self.training else 0.0,
-        )
+        if (
+            self.use_aniso_frame_attention
+            and self.gamma_aniso is not None
+            and point_normals is not None
+        ):
+            # Pre-softmax score mixing per PR math: softmax((1-g) S_std + g S_aniso) V
+            R = self._slice_frames(slice_weights, point_normals)
+            q_aniso = _rotate_3blocks(q, R)
+            k_aniso = _rotate_3blocks(k, R)
+            scale = self.dim_head ** -0.5
+            scores_std = torch.einsum("bhsc,bhtc->bhst", q, k) * scale
+            scores_aniso = torch.einsum("bhsc,bhtc->bhst", q_aniso, k_aniso) * scale
+            gate = torch.sigmoid(self.gamma_aniso).to(scores_std.dtype)
+            scores = scores_std + gate * (scores_aniso - scores_std)
+            attn_weights = F.softmax(scores, dim=-1)
+            if self.training and self.dropout > 0.0:
+                attn_weights = F.dropout(attn_weights, p=self.dropout)
+            out_slice = torch.einsum("bhst,bhtc->bhsc", attn_weights, v)
+        else:
+            out_slice = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                dropout_p=self.dropout if self.training else 0.0,
+            )
         out_x = torch.einsum("bhsc,bhns->bhnc", out_slice, slice_weights)
         out_x = out_x.permute(0, 2, 1, 3).contiguous().view(x.shape[0], x.shape[1], self.hidden_dim)
         out_x = _apply_token_mask(out_x, attn_mask)
@@ -330,6 +439,8 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_prob: float = 0.0,
+        use_aniso_frame_attention: bool = False,
+        aniso_init_gamma: float = -10.0,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -340,15 +451,24 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_aniso_frame_attention=use_aniso_frame_attention,
+            aniso_init_gamma=aniso_init_gamma,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
         self.drop_path_attn = DropPath(drop_path_prob)
         self.drop_path_mlp = DropPath(drop_path_prob)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path_attn(self.attention(self.norm1(x), attn_mask=attn_mask))
+        x = x + self.drop_path_attn(
+            self.attention(self.norm1(x), attn_mask=attn_mask, point_normals=point_normals)
+        )
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path_mlp(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
@@ -366,6 +486,8 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_max: float = 0.0,
+        use_aniso_frame_attention: bool = False,
+        aniso_init_gamma: float = -10.0,
     ):
         super().__init__()
         if depth > 1:
@@ -383,14 +505,21 @@ class Transformer(nn.Module):
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
                     drop_path_prob=drop_path_probs[i],
+                    use_aniso_frame_attention=use_aniso_frame_attention,
+                    aniso_init_gamma=aniso_init_gamma,
                 )
                 for i in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, point_normals=point_normals)
         return x
 
 
@@ -419,6 +548,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_anisotropic_frame_attention: bool = False,
+        aniso_init_gamma: float = -10.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +565,8 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_anisotropic_frame_attention = use_anisotropic_frame_attention
+        self.aniso_init_gamma = aniso_init_gamma
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -511,6 +644,8 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             use_qk_norm=use_qk_norm,
             drop_path_max=drop_path_max,
+            use_aniso_frame_attention=use_anisotropic_frame_attention,
+            aniso_init_gamma=aniso_init_gamma,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
@@ -634,7 +769,19 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        point_normals = None
+        if self.use_anisotropic_frame_attention and surface_x is not None:
+            # surface_x = [x, y, z, nx, ny, nz, area]; volume tokens have no
+            # normals so they contribute zero-weight to slice-frame aggregation.
+            surface_normals = surface_x[..., 3 : 3 + self.space_dim]
+            if surface_normals.shape[-1] == self.space_dim and volume_tokens > 0:
+                pad = surface_normals.new_zeros(
+                    surface_normals.shape[0], volume_tokens, self.space_dim
+                )
+                point_normals = torch.cat([surface_normals, pad], dim=1)
+            else:
+                point_normals = surface_normals
+        hidden = self.backbone(hidden, attn_mask=attn_mask, point_normals=point_normals)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 

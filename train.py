@@ -104,6 +104,8 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    use_anisotropic_frame_attention: bool = False
+    aniso_init_gamma: float = -10.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -243,6 +245,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the attention and MLP branches with a linear schedule from "
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
+        ),
+        "use_anisotropic_frame_attention": (
+            "H367: enable anisotropic surface attention in the local tangent "
+            "frame. Each Transolver slice gets an effective rotation matrix "
+            "R_s built from the slice_weights-aggregated surface normal "
+            "(volume tokens contribute zero). Q/K are rotated in 3-aligned "
+            "subblocks of dim_head; attention scores are mixed pre-softmax "
+            "between standard and anisotropic via a per-layer learnable "
+            "scalar gate sigmoid(gamma_aniso). gamma_aniso starts at "
+            "--aniso-init-gamma so the model is approximately identical to "
+            "baseline at step 0 and learns its own anisotropy ramp."
+        ),
+        "aniso_init_gamma": (
+            "H367: per-layer init for the anisotropic-attention gate logit. "
+            "Default -10 -> sigmoid ~ 4.5e-5 at step 0, dominated by the "
+            "standard attention path; very negative values (e.g. -20) give "
+            "bit-identical step-0 behaviour for invariance checks."
         ),
         "mirror_augmentation": (
             "H148/H183/H185: per-sample y=0 yaw mirror augmentation with "
@@ -429,6 +448,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_anisotropic_frame_attention=config.use_anisotropic_frame_attention,
+        aniso_init_gamma=config.aniso_init_gamma,
     )
 
 
