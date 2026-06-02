@@ -146,6 +146,15 @@ class Config:
     epochs_already_done: int = 0
     save_every_epoch: bool = False
     debug: bool = False
+    # H358: tangent-basis residual head for wall shear (physics-correct τ·n=0).
+    use_tangent_resid_head: bool = False
+    tangent_resid_hidden: int = 128
+    # H358: control strict checkpoint loading. Default "false" matches the
+    # pre-existing strict=False behaviour of the W&B resume path so adding a
+    # new head (with no entries in the H185 EP13 state_dict) loads cleanly.
+    # Accepts "true"/"false" (string, to support the literal smoke-command
+    # form `--checkpoint-strict-load false`).
+    checkpoint_strict_load: str = "false"
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -271,6 +280,25 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "H244: save EMA checkpoint as 'checkpoint_ep{N}.pt' alongside "
             "the best-only checkpoint after every validation event. Used "
             "to keep EP14/15/16 EMA checkpoints for downstream TTA eval."
+        ),
+        "use_tangent_resid_head": (
+            "H358: enable tangent-basis residual head on the wall-shear "
+            "output channels. Adds a small SiLU MLP that predicts a 2D "
+            "shear in the per-point local tangent basis (t1, t2) and "
+            "projects to global xyz; the residual is added to wss_xyz only. "
+            "Output layer is zero-init so behaviour is identical to "
+            "baseline at step 0 (safe warm-start)."
+        ),
+        "tangent_resid_hidden": (
+            "H358: hidden width of the tangent-basis residual MLP. "
+            "Default 128 → ~50K params at d_model=512."
+        ),
+        "checkpoint_strict_load": (
+            "H358: control strict checkpoint loading on the resume path. "
+            "'true' / 'false' (case-insensitive). Default 'false' matches "
+            "the pre-existing strict=False behaviour, allowing the model "
+            "to add new heads (e.g. tangent_resid_head) on top of a "
+            "warm-start checkpoint."
         ),
     }
     for field in fields(Config):
@@ -429,6 +457,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_tangent_resid_head=config.use_tangent_resid_head,
+        tangent_resid_hidden=config.tangent_resid_hidden,
     )
 
 
@@ -901,7 +931,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             ck = torch.load(ckpt_path_str, map_location="cpu", weights_only=False)
             state_dict = ck["model"]
             state_dict = {k.removeprefix("module."): v for k, v in state_dict.items()}
-            missing, unexpected = model.load_state_dict(state_dict, strict=False)
+            strict_load = config.checkpoint_strict_load.strip().lower() == "true"
+            missing, unexpected = model.load_state_dict(state_dict, strict=strict_load)
+            # H358: when warm-starting onto a model with a new head (e.g.
+            # tangent_resid_head), the only acceptable missing keys are those
+            # belonging to the new head. Anything else means the checkpoint
+            # does not match the requested architecture.
+            if config.use_tangent_resid_head:
+                unexpected_missing = [k for k in missing if "tangent_resid_head" not in k]
+                if unexpected_missing:
+                    raise RuntimeError(
+                        f"Unexpected missing keys when loading checkpoint: "
+                        f"{unexpected_missing}"
+                    )
             resume_epoch_info = {
                 "resume_epoch": ck.get("epoch"),
                 "resume_checkpoint_source": ck.get("checkpoint_source"),
@@ -909,12 +951,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "resume_alias": config.resume_alias,
                 "resume_missing": len(missing),
                 "resume_unexpected": len(unexpected),
+                "resume_strict_load": strict_load,
             }
             if state.is_main:
                 print(
                     f"Resumed from W&B {config.resume_from_wandb}:{config.resume_alias} "
                     f"epoch={ck.get('epoch')} source={ck.get('checkpoint_source')} "
-                    f"missing={len(missing)} unexpected={len(unexpected)}"
+                    f"missing={len(missing)} unexpected={len(unexpected)} "
+                    f"strict={strict_load}"
                 )
 
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry

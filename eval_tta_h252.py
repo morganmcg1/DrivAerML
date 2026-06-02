@@ -140,6 +140,11 @@ class EvalConfig:
     use_qk_norm: bool = True
     use_surf_to_vol_xattn: bool = True
     drop_path_max: float = 0.1
+    # H358: tangent-basis residual head on wall-shear output (physics-correct
+    # τ·n=0). Must match the trained checkpoint's architecture; flip this on
+    # when evaluating an H358-trained checkpoint.
+    use_tangent_resid_head: bool = False
+    tangent_resid_hidden: int = 128
 
     amp_mode: str = "bf16"
     debug: bool = False  # 2 val + 2 test cases
@@ -195,6 +200,8 @@ def build_model(cfg: EvalConfig) -> SurfaceTransolver:
         use_qk_norm=cfg.use_qk_norm,
         use_surf_to_vol_xattn=cfg.use_surf_to_vol_xattn,
         drop_path_max=cfg.drop_path_max,
+        use_tangent_resid_head=cfg.use_tangent_resid_head,
+        tangent_resid_hidden=cfg.tangent_resid_hidden,
     )
 
 

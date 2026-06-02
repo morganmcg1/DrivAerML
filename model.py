@@ -240,6 +240,71 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+def _compute_tangent_basis(
+    normals: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Deterministic per-point orthonormal tangent basis (t1, t2) from normals.
+
+    For each surface point, picks the global axis e_i with smallest |n·e_i| as
+    an auxiliary direction, builds t1 = normalize(n × e_aux), then t2 = n × t1.
+    By construction t1 and t2 are unit-length, mutually orthogonal, and lie in
+    the tangent plane (t·n = 0).
+
+    Note: with axis-min selection, the basis is per-vertex discontinuous near
+    the n_x≈n_y or n_y≈n_z diagonals (an aux-axis switch). The model can
+    learn to absorb this gauge inconsistency; if it ever shows as a
+    bottleneck, swap in Duff et al. JCGT 2017's branchless ONB.
+
+    Args:
+        normals: [..., 3], expected (approximately) unit-norm.
+    Returns:
+        t1, t2 each [..., 3]; both unit-norm, both ⊥ n, mutually orthogonal.
+    """
+    # Pick aux axis per-point as the global basis vector least aligned with n.
+    n_abs = normals.abs()  # [..., 3]
+    aux_idx = n_abs.argmin(dim=-1)  # [...]
+    eye = torch.eye(3, device=normals.device, dtype=normals.dtype)  # [3, 3]
+    aux = eye[aux_idx]  # [..., 3]
+    t1 = torch.linalg.cross(normals, aux, dim=-1)
+    t1 = t1 / (t1.norm(dim=-1, keepdim=True) + 1e-8)
+    t2 = torch.linalg.cross(normals, t1, dim=-1)
+    return t1, t2
+
+
+class TangentResidualHead(nn.Module):
+    """2-channel tangent-frame shear residual, projected to global frame.
+
+    Predicts (τ_t1, τ_t2) in the surface-local tangent basis, then rotates
+    back to xyz: τ_xyz = t1·τ_t1 + t2·τ_t2. The output is tangent by
+    construction (τ_xyz · n = 0), removing the non-physical normal-component
+    degree of freedom from the wall-shear prediction.
+
+    Output layer is zero-initialised so the residual is exactly 0 at step 0,
+    keeping the warm-started model identical to the baseline at the start of
+    training.
+    """
+
+    def __init__(self, d_model: int, hidden: int = 128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, 2),
+        )
+        self.net.apply(_init_linear)
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(
+        self, features: torch.Tensor, normals: torch.Tensor
+    ) -> torch.Tensor:
+        tau_local = self.net(features)  # [..., 2]
+        t1, t2 = _compute_tangent_basis(normals)  # both [..., 3]
+        return t1 * tau_local[..., 0:1] + t2 * tau_local[..., 1:2]
+
+
 class UpActDownMlp(nn.Module):
     def __init__(self, hidden_dim: int, mlp_hidden_dim: int):
         super().__init__()
@@ -419,6 +484,8 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_tangent_resid_head: bool = False,
+        tangent_resid_hidden: int = 128,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +501,8 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_tangent_resid_head = use_tangent_resid_head
+        self.tangent_resid_hidden = tangent_resid_hidden
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -558,6 +627,19 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H358: physics-aware tangent-basis residual head for wall shear.
+        # τ_w is tangent to the surface by no-slip (τ·n = 0). This head
+        # predicts a 2-component shear in the per-point tangent basis (t1, t2)
+        # and projects to global xyz; the residual is added to the wss_xyz
+        # channels of surface_out. Zero-init output ⇒ identity at step 0 so
+        # warm-starts (e.g. H185 EP13) load without behaviour drift.
+        if use_tangent_resid_head:
+            self.tangent_resid_head = TangentResidualHead(
+                d_model=n_hidden, hidden=tangent_resid_hidden
+            )
+        else:
+            self.tangent_resid_head = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -661,7 +743,24 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden)
+            if self.tangent_resid_head is not None:
+                # surface_x[..., 3:6] = surface_normals (loader concatenates
+                # [xyz, normals, area]). The residual is tangent by
+                # construction (τ_resid · n = 0); add it only to wss_xyz
+                # channels (1-3), leaving cp (channel 0) unchanged.
+                surface_normals = surface_x[..., 3:6]
+                tangent_resid_wss = self.tangent_resid_head(
+                    surface_hidden, surface_normals
+                )
+                surface_preds = torch.cat(
+                    [
+                        surface_preds[..., 0:1],
+                        surface_preds[..., 1:4] + tangent_resid_wss,
+                    ],
+                    dim=-1,
+                )
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
