@@ -1,11 +1,60 @@
 # SENPAI Research State
 
-- **2026-06-02 06:25Z**
+- **2026-06-02 08:55Z**
 - **Advisor branch:** drivaerml-long-20260504
 - **dl24 SOTA:** ⭐ **H183 (PR #1510, run `guw83mge`) — test_WSS=6.4427%, test_VP=3.4415%, test_SP=3.5187%, test_ABUPT=5.6152% (ALL 4 FLOORS CLEARED)**
 - **Paper SOTA to beat:** Transolver-3 test_WSS < 5.85% (remaining gap: −0.59pp)
 - **Human directive (issue #1056, 13:15Z + 13:27Z advisor response):** Morgan posted WALL SHEAR STRESS NOTES 1+2 — comprehensive architectural critique of current symptomatic WSS approaches (loss reweighting, post-hoc projection, channel splits). Identifies BL DERIVATIVE DECODER (off-wall ghost-point probe → differentiable ∂u/∂n → WSS) as highest-leverage untried mechanism, with TANGENT-BASIS OUTPUT HEAD as 2nd priority. Advisor committed to queueing BL probe for next-round assignment.
 - **Human check-in (issue #1056, 18:39Z):** Morgan asked "tay, dl24 are you both there?" — dl24 advisor (this branch) responded 19:25Z with fleet status + H189 VP leader finding. No new human messages since 19:27Z 2026-06-01.
+
+## 08:55Z checkpoint — **H191 EP29 FRESH LOWS ON ALL 4 METRICS** (WSD recovery deepening, rt=23.32h cuts at ~09:20Z); **H192 EP22 SLOPE 2ND REVERSAL** (now positive again, late-cosine drift confirmed pattern); **H193 EP6 WSS PLATEAU CONFIRMED** (5 EP flat at 7.64, VP descending steeply -0.0065/1k); **H194 main EP3 hold** (step=28905 mid-EP3 85%, ETA ~09:15Z first hard gate ≤7.10)
+
+### Actions taken this cycle
+- Heartbeat on PR #1535 (H191): EP29 all 4 fresh lows posted, WSD recovery genuinely active, terminal test projections updated
+- Heartbeat on PR #1541 (H192): EP22 2nd slope reversal posted, late-cosine drift confirmed as dominant pattern, multi-metric NON-MERGE-likely despite VP win
+- Heartbeat on PR #1554 (H193): EP6 WSS plateau confirmed (5 EP flat), VP slope -0.0065/1k fleet-leading, VP-isolated win case emerging
+- Survey confirmed: 0 review-ready, 4/4 WIP, 0 idle students
+- Human issues #1056: no new messages since 19:27Z 2026-06-01, no response needed
+
+### Fleet snapshot at 08:55Z
+
+| Student | PR | Hyp | Run | EP/State | val_WSS | val_VP | val_AB | val_SP | Status |
+|---|---|---|---|---:|---:|---:|---:|---:|---|
+| nezuko | #1559 | H194 lr=9e-5 on H189 stack | tne4wsap (rank-0) | EP2 (2.60h) | 7.259 (tied H183) | 4.840 | 6.647 | 4.205 | EP3 ETA ~09:15Z first gate ≤7.10 |
+| fern | #1535 | H191 sharper WSD 30EP | ayg4liye | EP29 (23.32h) | **6.6443 (fresh low)** | **3.6433 (fresh low, +0.0003 over floor)** | 5.9278 (fresh low) | 3.8908 (fresh low) | ⚠️ 24h cut ~09:20Z, WSD recovery active but multi-metric NON-MERGE-likely |
+| frieren | #1541 | H192 τ_z=1.5 only 30EP | lokhvm6y | EP22 (18.05h) | 6.6892 (uptick) | **3.5364 ✅ −0.107pp under floor** | 5.9358 | 3.9205 | ⚠️ 2nd slope reversal POS, VP merge eligible only |
+| tanjiro | #1554 | H193 wss_normal_penalty λ=0.2 30EP | vuvpegip | EP6 (5.25h) | **7.6358 (plateau confirmed)** | **3.8302 (steep descent)** | 6.5229 | 3.9693 | WSS plateau, VP-isolated win emerging |
+
+### H191 fern — WSD recovery confirmed active, multi-metric merge math problematic
+EP24-29 trajectory: WSS 6.676 → 6.660 → 6.654 → 6.658 → 6.649 → **6.6443 (fresh low)**. All 4 metrics show fresh lows at EP29. Slopes now all NEGATIVE (-0.0005 WSS, -0.0006 VP, -0.0004 AB, -0.0001 SP).
+
+**Test projection (val→test gap ~0.20pp):**
+- WSS 6.6443 → test ~6.32-6.45 = LIKELY TIE or marginal win vs SOTA 6.4427
+- VP 3.6433 → test ~3.45-3.55 = REGRESS vs H183 baseline 3.4415 (+0.01 to +0.11pp over floor 3.643)
+- AB 5.9278 → test ~5.70-5.85 = borderline floor 5.844
+- SP 3.8908 → test ~3.55-3.70 = borderline floor 3.577
+
+**24h budget cut imminent** at ~09:20Z (28 min from 08:55Z). One more epoch boundary may land before timeout.
+
+### H192 frieren — late-cosine drift confirmed (2nd slope reversal)
+EP20: all slopes flipped POSITIVE. EP21: flipped back NEGATIVE. EP22: flipped POSITIVE AGAIN (+0.0006 WSS, +0.0004 VP, +0.0005 AB, +0.0002 SP). Pattern: model has reached local minimum, oscillating in noise band ±0.01pp around floor.
+
+VP cleanest in fleet (3.5364, -0.107pp under floor). Test projection val_VP→test_VP ~3.36-3.45 = paper-tier VP win. But SP val 3.92 likely lands test_SP at/above 3.577 floor → multi-metric NON-MERGE-likely.
+
+### H193 tanjiro — WSS plateau confirmed (5 EP flat), VP descending fleet-leading
+EP3-6 WSS reads: 7.67, 7.62, 7.64, 7.64 → essentially flat 4 EP. Mechanism doing exactly what it should: WSS pinned to plateau (penalty bounds), VP/AB descending freely.
+
+VP slope -0.0065/1k = steepest in fleet. EP6 VP=3.83, EP10 ETA val_VP ~3.55 (paper-tier). Continuation policy: run to EP10 (~10:55Z), expect WSS gate ≤6.85 to miss, but VP could land terminal ≤3.55 for VP-isolated win research note (NON-MERGE per multi-metric rules).
+
+### H194 nezuko — main EP3 not yet landed (mid-EP3 85%)
+EP2 tied H183 EP2=7.26 (initial -0.72pp EP1 lead erased). Trajectory now on-shape with H183. EP3 ETA ~09:15Z, gate ≤7.10 (H183 EP3=6.98). If lands ≤7.10, trajectory healthy; if >7.10, lr=9e-5 too conservative, kill at EP5.
+
+### Watch items next 4h
+1. **H194 main EP3 (~09:15Z)** — first hard gate ≤7.10; most critical next decision
+2. **H191 24h budget cut (~09:20Z)** — terminal harvest + test eval write-up
+3. **H193 EP7-10 (~09:55-10:55Z)** — VP descent rate confirmation
+4. **H192 EP23-24 (~09:55-10:35Z)** — noise band oscillation rate
+5. **NO IDLE GPUs** — 4/4 students active
 
 ## 06:25Z checkpoint — **H194 MAIN 8/8 RANKS LIVE** (group `h194-h189-stack-lr-9e-5-main-25ep`, student corrected: per-channel-heads is default post-#1531 cleanup, smoke was fine); **H191 EP26 VP SLOPE FLATTENING** (−0.0007 → −0.0000, recovery weakening); **H192 EP20 ALL 4 SLOPES POSITIVE** (cohort uptick, late-cosine drift); **H193 EP3 hold (EP4 ETA ~07:00Z)**
 
