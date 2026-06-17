@@ -140,6 +140,7 @@ class Config:
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
     tau_z_loss_weight: float = 1.0
+    tau_y_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
 
 
@@ -357,6 +358,7 @@ def train_loss(
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
     tau_z_loss_weight: float = 1.0,
+    tau_y_loss_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -416,8 +418,10 @@ def train_loss(
             # L0 absorbs the scaling so the lever acts through gradient
             # magnitudes (c_tau_z / G_bar) and the total backward signal,
             # without disturbing cp/tau_x/tau_y budgets.
+            # H195: same mechanism extended to tau_y (index 2) via
+            # tau_y_loss_weight, mirroring H36's per-axis injection.
             tau_z_scale = surface_per_ch.new_tensor(
-                [1.0, 1.0, 1.0, tau_z_loss_weight]
+                [1.0, 1.0, tau_y_loss_weight, tau_z_loss_weight]
             )
             surface_per_ch = surface_per_ch * tau_z_scale
             if loss_vol_p_charb is not None:
@@ -752,6 +756,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     vol_p_charbonnier_weight=config.vol_p_charbonnier_weight,
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
                     tau_z_loss_weight=config.tau_z_loss_weight,
+                    tau_y_loss_weight=config.tau_y_loss_weight,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -802,6 +807,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/tau_y_loss_weight": config.tau_y_loss_weight,
                         }
                     )
                     if "loss_wss_charb_unweighted" in batch_loss_metrics:
