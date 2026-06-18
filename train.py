@@ -325,7 +325,7 @@ def apply_y_symmetry_aug(batch, prob: float) -> torch.Tensor:
     - surface_x: [x, y, z, nx, ny, nz, area]  -> negate idx 1 and idx 4
     - surface_y: [cp, tau_x, tau_y, tau_z]    -> negate idx 2
     - volume_x:  [x, y, z, sdf]               -> negate idx 1
-    - volume_y:  [pressure]                   -> invariant
+    - volume_y:  [pressure, Ux, Uy, Uz]        -> negate Uy idx 2
     """
     B = batch.surface_x.shape[0]
     flip_mask = torch.rand(B, device=batch.surface_x.device) < prob
@@ -335,6 +335,7 @@ def apply_y_symmetry_aug(batch, prob: float) -> torch.Tensor:
         batch.surface_x[idx, :, 4] = -batch.surface_x[idx, :, 4]
         batch.surface_y[idx, :, 2] = -batch.surface_y[idx, :, 2]
         batch.volume_x[idx, :, 1] = -batch.volume_x[idx, :, 1]
+        batch.volume_y[idx, :, 2] = -batch.volume_y[idx, :, 2]
     return flip_mask
 
 
@@ -388,8 +389,8 @@ def train_loss(
         # landscape, otherwise the H19 mechanism is invisible to the
         # dynamic-weight balancing — root cause flagged in run i4zt1zrl).
         if vol_p_charbonnier_weight > 0.0:
-            pred_vol_p = out["volume_preds"]  # [B, N_vol, 1]
-            target_vol_p = volume_target
+            pred_vol_p = out["volume_preds"][..., :1]
+            target_vol_p = volume_target[..., :1]
             loss_vol_p_charb = masked_charbonnier(
                 pred_vol_p,
                 target_vol_p,
@@ -427,16 +428,22 @@ def train_loss(
                 # now w_vol_p * Charb_vol_p via the weighted sum below —
                 # adding a separate `vol_p_charb_weight * Charb` term would
                 # double-count.
-                volume_per_ch = loss_vol_p_charb.unsqueeze(0) * volume_loss_weight  # [1]
+                volume_mse_per_ch = per_channel_masked_mse(
+                    out["volume_preds"], volume_target, batch.volume_mask
+                )
+                volume_per_ch = volume_mse_per_ch * volume_loss_weight
+                volume_per_ch = torch.cat(
+                    [loss_vol_p_charb.unsqueeze(0) * volume_loss_weight, volume_per_ch[1:]]
+                )
             else:
                 volume_per_ch = per_channel_masked_mse(
                     out["volume_preds"], volume_target, batch.volume_mask
-                ) * volume_loss_weight  # [1]: vol_p MSE
-            task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
+                ) * volume_loss_weight  # [4]: vol_p, Ux, Uy, Uz
+            task_losses = torch.cat([surface_per_ch, volume_per_ch])  # cp, tau_x/y/z, vol_p, vol_Ux/y/z
             w_detached = gradnorm_weights.weights.detach()
             loss = (w_detached * task_losses).sum()
             weighted_surface_loss = (w_detached[:4] * surface_per_ch).sum()
-            weighted_volume_loss = w_detached[4] * volume_per_ch[0]
+            weighted_volume_loss = (w_detached[4:] * volume_per_ch).sum()
         else:
             task_losses = None
             weighted_surface_loss = surface_loss_weight * surface_loss
@@ -643,8 +650,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         gradnorm_weights: GradNormWeights | None = None
         gradnorm_opt: torch.optim.Optimizer | None = None
         gradnorm_L0: torch.Tensor | None = None
-        gradnorm_n_tasks = 5  # cp, tau_x, tau_y, tau_z, vol_p
-        gradnorm_task_names = ("cp", "tau_x", "tau_y", "tau_z", "vol_p")
+        gradnorm_task_names = ("cp", "tau_x", "tau_y", "tau_z", "vol_p", "vol_u", "vol_v", "vol_w")
+        gradnorm_n_tasks = len(gradnorm_task_names)
         if config.use_gradnorm:
             gradnorm_weights = GradNormWeights(n_tasks=gradnorm_n_tasks).to(device)
             gradnorm_opt = torch.optim.Adam(

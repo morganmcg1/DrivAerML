@@ -14,8 +14,10 @@ The processed dataset provides one directory per case containing `.npy` arrays:
 - `volume_xyz.npy`
 - `volume_sdf.npy`
 - `volume_pressure.npy`
+- `volume_velocity.npy`
 
-This repo predicts surface pressure, wall shear / friction, and volume pressure.
+This repo predicts surface pressure, wall shear / friction, volume pressure,
+and volume velocity.
 """
 
 from __future__ import annotations
@@ -38,9 +40,9 @@ DEFAULT_MANIFEST = Path(__file__).with_name("split_manifest.json")
 SURFACE_X_DIM = 7  # xyz(3) + normals(3) + panel area(1)
 SURFACE_Y_DIM = 4  # cp(1) + wall shear stress(3)
 VOLUME_X_DIM = 4  # xyz(3) + sdf(1)
-VOLUME_Y_DIM = 1  # volume pressure
+VOLUME_Y_DIM = 4  # volume pressure + velocity
 SURFACE_TARGET_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z")
-VOLUME_TARGET_NAMES = ("volume_pressure",)
+VOLUME_TARGET_NAMES = ("volume_pressure", "volume_velocity_x", "volume_velocity_y", "volume_velocity_z")
 EXPECTED_SURFACE_SPLIT_COUNTS = {"train": 400, "val": 34, "test": 50}
 EXPECTED_EXCLUDED_CASE_COUNT = 0
 REQUIRED_RESTORED_CASE_IDS = frozenset(
@@ -294,7 +296,12 @@ def load_case(
         ],
         axis=1,
     )
-    volume_y = _column(_load_npy_rows(case_dir / "volume_pressure.npy", volume_rows))
+    volume_pressure = _column(_load_npy_rows(case_dir / "volume_pressure.npy", volume_rows))
+    volume_velocity = _three_column(
+        _load_npy_rows(case_dir / "volume_velocity.npy", volume_rows),
+        "volume_velocity.npy",
+    )
+    volume_y = np.concatenate([volume_pressure, volume_velocity], axis=1)
     return DrivAerMLCase(
         case_id=case_id,
         surface_x=torch.from_numpy(surface_x),
@@ -527,11 +534,12 @@ def target_stats_from_normalizers(store: DrivAerMLCaseStore) -> dict[str, torch.
     surface_cp_mean, surface_cp_std = _normalizer_tensor(raw, "surface_cp", 1)
     wall_shear_mean, wall_shear_std = _normalizer_tensor(raw, "surface_wallshearstress", 3)
     volume_pressure_mean, volume_pressure_std = _normalizer_tensor(raw, "volume_pressure", 1)
+    volume_velocity_mean, volume_velocity_std = _normalizer_tensor(raw, "volume_velocity", 3)
     return {
         "surface_y_mean": torch.cat([surface_cp_mean, wall_shear_mean]),
         "surface_y_std": torch.cat([surface_cp_std, wall_shear_std]),
-        "volume_y_mean": volume_pressure_mean,
-        "volume_y_std": volume_pressure_std,
+        "volume_y_mean": torch.cat([volume_pressure_mean, volume_velocity_mean]),
+        "volume_y_std": torch.cat([volume_pressure_std, volume_velocity_std]),
     }
 
 

@@ -1011,6 +1011,10 @@ EVAL_KEYS = (
     "wall_shear_y",
     "wall_shear_z",
     "volume_pressure",
+    "volume_velocity",
+    "volume_velocity_x",
+    "volume_velocity_y",
+    "volume_velocity_z",
 )
 
 
@@ -1130,6 +1134,15 @@ def accumulate_eval_batch(
         volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
         accumulator.abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
         accumulator.abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
+        velocity_abs = volume_abs[:, 1:4]
+        accumulator.abs_sums["volume_velocity"] += float(velocity_abs.sum().detach().cpu().item())
+        accumulator.abs_counts["volume_velocity"] += int(velocity_abs.numel())
+        for offset, axis in enumerate(("x", "y", "z")):
+            channel = velocity_abs[:, offset]
+            accumulator.abs_sums[f"volume_velocity_{axis}"] += float(
+                channel.sum().detach().cpu().item()
+            )
+            accumulator.abs_counts[f"volume_velocity_{axis}"] += int(channel.numel())
 
     for case_idx, case_id in enumerate(batch.case_ids):
         surface_valid = batch.surface_mask[case_idx].bool()
@@ -1157,12 +1170,27 @@ def accumulate_eval_batch(
                 )
         volume_valid = batch.volume_mask[case_idx].bool()
         if bool(volume_valid.any()):
+            volume_pred_valid = volume_pred[case_idx][volume_valid]
+            volume_target_valid = batch.volume_y[case_idx][volume_valid]
             _accumulate_case_rel_l2(
                 accumulator.case_sums["volume_pressure"],
                 case_id=case_id,
-                pred=volume_pred[case_idx][volume_valid],
-                target=batch.volume_y[case_idx][volume_valid],
+                pred=volume_pred_valid[:, 0:1],
+                target=volume_target_valid[:, 0:1],
             )
+            _accumulate_case_rel_l2(
+                accumulator.case_sums["volume_velocity"],
+                case_id=case_id,
+                pred=volume_pred_valid[:, 1:4],
+                target=volume_target_valid[:, 1:4],
+            )
+            for channel, axis in enumerate(("x", "y", "z"), start=1):
+                _accumulate_case_rel_l2(
+                    accumulator.case_sums[f"volume_velocity_{axis}"],
+                    case_id=case_id,
+                    pred=volume_pred_valid[:, channel : channel + 1],
+                    target=volume_target_valid[:, channel : channel + 1],
+                )
 
 
 def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccumulator:
@@ -1191,6 +1219,10 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     wall_shear_y_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_y"])
     wall_shear_z_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_z"])
     volume_pressure_rel_l2, volume_cases = _rel_l2(accumulator.case_sums["volume_pressure"])
+    volume_velocity_rel_l2, _ = _rel_l2(accumulator.case_sums["volume_velocity"])
+    volume_velocity_x_rel_l2, _ = _rel_l2(accumulator.case_sums["volume_velocity_x"])
+    volume_velocity_y_rel_l2, _ = _rel_l2(accumulator.case_sums["volume_velocity_y"])
+    volume_velocity_z_rel_l2, _ = _rel_l2(accumulator.case_sums["volume_velocity_z"])
     abupt_axis_mean_rel_l2 = _finite_mean(
         [
             surface_pressure_rel_l2,
@@ -1221,6 +1253,10 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "wall_shear_y_mae": mae_values["wall_shear_y"],
         "wall_shear_z_mae": mae_values["wall_shear_z"],
         "volume_pressure_mae": mae_values["volume_pressure"],
+        "volume_velocity_mae": mae_values["volume_velocity"],
+        "volume_velocity_x_mae": mae_values["volume_velocity_x"],
+        "volume_velocity_y_mae": mae_values["volume_velocity_y"],
+        "volume_velocity_z_mae": mae_values["volume_velocity_z"],
         "surface_pressure_rel_l2": surface_pressure_rel_l2,
         "surface_pressure_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
         "wall_shear_rel_l2": wall_shear_rel_l2,
@@ -1233,6 +1269,14 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "wall_shear_z_rel_l2_pct": wall_shear_z_rel_l2 * 100.0,
         "volume_pressure_rel_l2": volume_pressure_rel_l2,
         "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
+        "volume_velocity_rel_l2": volume_velocity_rel_l2,
+        "volume_velocity_rel_l2_pct": volume_velocity_rel_l2 * 100.0,
+        "volume_velocity_x_rel_l2": volume_velocity_x_rel_l2,
+        "volume_velocity_x_rel_l2_pct": volume_velocity_x_rel_l2 * 100.0,
+        "volume_velocity_y_rel_l2": volume_velocity_y_rel_l2,
+        "volume_velocity_y_rel_l2_pct": volume_velocity_y_rel_l2 * 100.0,
+        "volume_velocity_z_rel_l2": volume_velocity_z_rel_l2,
+        "volume_velocity_z_rel_l2_pct": volume_velocity_z_rel_l2 * 100.0,
         "abupt_axis_mean_rel_l2": abupt_axis_mean_rel_l2,
         "abupt_axis_mean_rel_l2_pct": abupt_axis_mean_rel_l2 * 100.0,
         "cases": max(surface_cases, wall_shear_cases, volume_cases),
@@ -1346,6 +1390,7 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
         f"abupt_axis_rel_l2_pct={metrics['abupt_axis_mean_rel_l2_pct']:.4f} "
         f"surface_p_mae={metrics['surface_pressure_mae']:.5f} "
         f"volume_p_mae={metrics['volume_pressure_mae']:.5f} "
+        f"volume_u_mae={metrics['volume_velocity_mae']:.5f} "
         f"wall_shear_mae={metrics['wall_shear_mae']:.5f} "
         f"cases={int(metrics['cases'])}"
     )
@@ -1357,12 +1402,17 @@ PRIMARY_METRIC_KEYS = (
     "surface_pressure_mae",
     "wall_shear_mae",
     "volume_pressure_mae",
+    "volume_velocity_mae",
     "surface_pressure_rel_l2_pct",
     "wall_shear_rel_l2_pct",
     "wall_shear_x_rel_l2_pct",
     "wall_shear_y_rel_l2_pct",
     "wall_shear_z_rel_l2_pct",
     "volume_pressure_rel_l2_pct",
+    "volume_velocity_rel_l2_pct",
+    "volume_velocity_x_rel_l2_pct",
+    "volume_velocity_y_rel_l2_pct",
+    "volume_velocity_z_rel_l2_pct",
 )
 
 
