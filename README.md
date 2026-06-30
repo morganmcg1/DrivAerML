@@ -124,6 +124,49 @@ python scripts/audit_sdf_distribution.py \
   --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
 
+### Full-Resolution Test Evaluation
+
+Some training runs were fit and initially tested on processed roots whose
+volume arrays were subsampled. To report full-case numbers, first regenerate a
+test-only processed root with `scripts/preprocess_drivaerml_raw.py` and
+`--sample-ratio 1.0`, then evaluate saved W&B model artifacts with
+`scripts/evaluate_full_test_wandb_artifacts.py`. This harness does not train:
+it downloads the selected checkpoints, rebuilds the matching historical code
+ref, runs only the requested test split, and logs aggregate full-test metrics
+back to the W&B project.
+
+Full DrivAerML test cases are large, so the evaluator defaults to a one-case
+CPU cache per rank and case-shards the split across distributed ranks. This
+preserves the deterministic `eval_chunk` point assignment: each surface and
+volume point is evaluated exactly once, with no padded duplicate views and no
+prediction averaging needed. If a checkpoint was trained with curvature
+attention, generate `surface_curvature_proxy_k16_v1.npy` caches first with
+`scripts/precompute_curvature_proxy.py` and pass the matching
+`curvature_proxy_stats_k16_v1.json`.
+
+Example:
+
+```
+torchrun --standalone --nnodes=1 --nproc-per-node=8 -- \
+  scripts/evaluate_full_test_wandb_artifacts.py \
+  --code-ref codex/h147-volume-velocity \
+  --full-test-root /mnt/new-pvc/Processed/drivaerml_processed_fulltest_20260630 \
+  --manifest data/split_manifest.json \
+  --split test \
+  --run v7ushy6q \
+  --entity wandb-applied-ai-team \
+  --project senpai-v1-drivaerml-ddp8 \
+  --selection-metric val_primary/surface_pressure_rel_l2_pct \
+  --allow-alias-fallback \
+  --batch-size 1 \
+  --eval-surface-points 65536 \
+  --eval-volume-points 65536 \
+  --num-workers 0 \
+  --cache-full-cases \
+  --case-shard-cache \
+  --curvature-stats /mnt/new-pvc/Processed/drivaerml_processed_fulltest_20260630/curvature_proxy_stats_k16_v1.json
+```
+
 If the PVC is mounted somewhere other than `/mnt/pvc` or `/mnt/new-pvc`, set:
 
 ```
