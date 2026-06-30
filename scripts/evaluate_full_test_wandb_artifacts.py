@@ -125,11 +125,28 @@ def checkout_candidate_repo(
     if args.use_current_code:
         return REPO_ROOT
 
+    code_ref = candidate.get("code_ref") or args.code_ref
+    if code_ref:
+        safe_ref = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(code_ref)).strip("-")
+        repo_dir = args.work_root / f"rank{rank}" / f"repo-{safe_ref}-{candidate['run_id']}"
+        if repo_dir.exists():
+            shutil.rmtree(repo_dir)
+        repo_dir.parent.mkdir(parents=True, exist_ok=True)
+        run_cmd(["git", "clone", "--no-tags", "--depth", "1", authenticated_repo_url(args.repo_url), str(repo_dir)])
+        run_cmd(["git", "remote", "set-url", "origin", args.repo_url], cwd=repo_dir)
+        run_cmd(["git", "fetch", "--depth", "1", "origin", str(code_ref)], cwd=repo_dir)
+        run_cmd(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=repo_dir)
+        candidate["code_ref"] = str(code_ref)
+        candidate["code_ref_sha"] = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True
+        ).strip()
+        return repo_dir
+
     pr_number = candidate.get("pr")
     if pr_number is None:
         raise ValueError(
             f"Run {candidate['run_id']} needs a PR number in candidate JSON, "
-            "or run with --use-current-code if the current checkout matches the checkpoint."
+            "a --code-ref, or --use-current-code if the current checkout matches the checkpoint."
         )
 
     repo_dir = args.work_root / f"rank{rank}" / f"repo-pr{int(pr_number)}-{candidate['run_id']}"
@@ -423,6 +440,8 @@ def evaluate_candidate(candidate: dict[str, Any], args: argparse.Namespace, api,
         "run_url": candidate.get("run_url", ""),
         "pr": candidate.get("pr"),
         "pr_head_sha": candidate.get("pr_head_sha"),
+        "code_ref": candidate.get("code_ref"),
+        "code_ref_sha": candidate.get("code_ref_sha"),
         "artifact": artifact.name,
         "artifact_aliases": list(artifact.aliases),
         "artifact_selection": candidate.get("artifact_selection"),
@@ -477,6 +496,7 @@ def main() -> None:
     parser.add_argument("--repo-url", default=os.environ.get("REPO_URL", DEFAULT_REPO_URL))
     parser.add_argument("--data-fix-ref", default=os.environ.get("DATA_FIX_REF", DEFAULT_DATA_FIX_REF))
     parser.add_argument("--use-current-code", action="store_true")
+    parser.add_argument("--code-ref", default=os.environ.get("CODE_REF", ""))
     parser.add_argument("--work-root", type=Path, default=Path("/workspace/full-test-eval"))
     parser.add_argument("--artifact-root", type=Path, default=Path("/workspace/full-test-eval/artifacts"))
     parser.add_argument("--output-dir", type=Path, default=Path("/mnt/new-pvc/Reports/drivaerml_full_test_eval"))
