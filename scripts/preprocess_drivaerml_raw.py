@@ -389,9 +389,12 @@ def process_case(
     centers, fields, n_cells = read_vtu_volume(vtu_path)
 
     sample_count = max(1, int(n_cells * sample_ratio))
-    rng = np.random.default_rng(run_id)
-    indices = rng.permutation(n_cells)[:sample_count]
-    indices.sort()
+    if sample_count == n_cells:
+        indices = np.arange(n_cells, dtype=np.int64)
+    else:
+        rng = np.random.default_rng(run_id)
+        indices = rng.permutation(n_cells)[:sample_count]
+        indices.sort()
     xyz = np.asarray(centers[indices], dtype=np.float32)
     del centers
     gc.collect()
