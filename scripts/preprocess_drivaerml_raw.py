@@ -344,13 +344,19 @@ def raw_parts_info(raw_case_dir: Path, run_id: int, merged_vtu: Path) -> dict[st
     parts = sorted(raw_case_dir.glob(f"volume_{run_id}.vtu.*.part"))
     parts_size = sum(part.stat().st_size for part in parts)
     merged_size = merged_vtu.stat().st_size
-    if parts and parts_size != merged_size:
-        raise RuntimeError(
-            f"Raw VTU part mismatch for {merged_vtu}: merged={merged_size}, parts={parts_size}, n_parts={len(parts)}"
+    parts_match_merged = not parts or parts_size == merged_size
+    if not parts_match_merged:
+        print(
+            f"  warning: raw VTU part size mismatch for {merged_vtu}: "
+            f"merged={merged_size}, parts={parts_size}, n_parts={len(parts)}; "
+            "using merged VTU",
+            flush=True,
         )
     return {
         "raw_volume_part_count": len(parts),
         "raw_volume_parts_size": parts_size,
+        "raw_volume_parts_match_merged": parts_match_merged,
+        "raw_volume_parts_size_delta": parts_size - merged_size,
         "raw_volume_part_names": [part.name for part in parts],
     }
 
