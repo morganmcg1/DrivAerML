@@ -290,14 +290,22 @@ def download_artifact(artifact, *, artifact_root: Path, run_id: str, rank: int) 
     return artifact_dir
 
 
-def make_config(train_module, raw_config: dict[str, Any], args: argparse.Namespace):
+def resolve_manifest_path(manifest: str, repo_dir: Path) -> str:
+    path = Path(manifest)
+    if path.is_absolute():
+        return str(path)
+    repo_path = repo_dir / path
+    return str(repo_path if repo_path.exists() else path)
+
+
+def make_config(train_module, raw_config: dict[str, Any], args: argparse.Namespace, repo_dir: Path):
     config_class = getattr(train_module, "Config")
     config = config_class()
     allowed = {field.name for field in fields(config)} if is_dataclass(config) else set(vars(config))
     for key, value in raw_config.items():
         if key in allowed:
             setattr(config, key, value)
-    config.manifest = args.manifest
+    config.manifest = resolve_manifest_path(args.manifest, repo_dir)
     config.data_root = args.full_test_root
     config.output_dir = str(args.output_dir)
     config.batch_size = args.batch_size
@@ -416,7 +424,7 @@ def evaluate_candidate(candidate: dict[str, Any], args: argparse.Namespace, api,
     raw_config = yaml.safe_load((artifact_dir / "config.yaml").read_text()) or {}
 
     train_module, runtime, data_loader = import_repo(repo_dir)
-    config = make_config(train_module, raw_config, args)
+    config = make_config(train_module, raw_config, args, repo_dir)
     model = train_module.build_model(config).to(state.device)
     checkpoint = load_checkpoint(model, artifact_dir / "checkpoint.pt", state.device)
 
