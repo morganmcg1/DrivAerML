@@ -9,6 +9,11 @@ This is a test-only harness for the reporting pass where volume arrays have
 been regenerated with ``--sample-ratio 1.0``. Evaluation uses the repo's
 deterministic ``eval_chunk`` point views, so every loaded surface and volume
 point is evaluated exactly once with no duplicate prediction averaging.
+
+For full DrivAerML cases, the historical dataset's row-indexed ``np.load``
+path is prohibitively slow because each chunk performs scattered mmap reads
+from PVC. The default path below loads one full case at a time in each rank and
+then serves the same deterministic chunk indices from memory.
 """
 
 from __future__ import annotations
@@ -347,8 +352,167 @@ def load_checkpoint(model: torch.nn.Module, checkpoint_path: Path, device: torch
     return checkpoint if isinstance(checkpoint, dict) else {"model": state_dict}
 
 
+class CachedEvalChunkDataset(torch.utils.data.Dataset):
+    """Serve deterministic eval chunks from a one-case in-process cache."""
+
+    def __init__(
+        self,
+        case_ids: list[str],
+        *,
+        store,
+        data_loader,
+        max_surface_points: int,
+        max_volume_points: int,
+    ):
+        self.case_ids = list(case_ids)
+        self.store = store
+        self.data_loader = data_loader
+        self.max_surface_points = max_surface_points
+        self.max_volume_points = max_volume_points
+        self.views = self._build_views()
+        self._cached_case_id: str | None = None
+        self._cached_case = None
+
+    def __len__(self) -> int:
+        return len(self.views)
+
+    @staticmethod
+    def _view_count(total: int, points_per_view: int) -> int:
+        if points_per_view <= 0 or total <= points_per_view:
+            return 1
+        return max(1, math.ceil(total / points_per_view))
+
+    def _build_views(self) -> list[dict[str, int | str]]:
+        views: list[dict[str, int | str]] = []
+        for case_id in self.case_ids:
+            counts = self.store.case_point_counts(case_id)
+            surface_views = self._view_count(counts["n_surface"], self.max_surface_points)
+            volume_views = self._view_count(counts["n_volume"], self.max_volume_points)
+            view_count = max(surface_views, volume_views)
+            for view_index in range(view_count):
+                views.append(
+                    {
+                        "case_id": case_id,
+                        "view_index": view_index,
+                        "view_count": view_count,
+                        "surface_view_count": surface_views,
+                        "volume_view_count": volume_views,
+                        "n_surface": int(counts["n_surface"]),
+                        "n_volume": int(counts["n_volume"]),
+                    }
+                )
+        return views
+
+    @staticmethod
+    def _indices(
+        *,
+        total: int,
+        count: int,
+        view_index: int,
+        group_view_count: int,
+    ) -> torch.Tensor | None:
+        if view_index >= group_view_count:
+            return torch.empty(0, dtype=torch.long)
+        if count <= 0 or total <= count:
+            return None if view_index == 0 else torch.empty(0, dtype=torch.long)
+        return torch.arange(view_index, total, group_view_count, dtype=torch.long)
+
+    def _load_full_case(self, case_id: str):
+        if self._cached_case_id != case_id:
+            rank = int(os.environ.get("RANK", "0"))
+            print(f"[rank {rank}] caching full case {case_id}", flush=True)
+            self._cached_case = self.store.load_case(case_id)
+            self._cached_case_id = case_id
+        return self._cached_case
+
+    @staticmethod
+    def _take_rows(tensor: torch.Tensor, rows: torch.Tensor | None) -> torch.Tensor:
+        if rows is None:
+            return tensor
+        return tensor.index_select(0, rows)
+
+    def __getitem__(self, idx: int):
+        view = self.views[idx]
+        case_id = str(view["case_id"])
+        view_index = int(view["view_index"])
+        case = self._load_full_case(case_id)
+        surface_idx = self._indices(
+            total=int(view["n_surface"]),
+            count=self.max_surface_points,
+            view_index=view_index,
+            group_view_count=int(view["surface_view_count"]),
+        )
+        volume_idx = self._indices(
+            total=int(view["n_volume"]),
+            count=self.max_volume_points,
+            view_index=view_index,
+            group_view_count=int(view["volume_view_count"]),
+        )
+
+        metadata = dict(case.metadata)
+        if "surface_curvature" in metadata:
+            metadata["surface_curvature"] = self._take_rows(metadata["surface_curvature"], surface_idx)
+        metadata["n_surface_full"] = int(view["n_surface"])
+        metadata["n_surface_loaded"] = int(
+            case.surface_x.shape[0] if surface_idx is None else surface_idx.numel()
+        )
+        metadata["surface_view_index"] = view_index
+        metadata["surface_view_count"] = int(view["surface_view_count"])
+        metadata["surface_sampling_mode"] = "eval_chunk"
+        metadata["n_volume_full"] = int(view["n_volume"])
+        metadata["n_volume_loaded"] = int(
+            case.volume_x.shape[0] if volume_idx is None else volume_idx.numel()
+        )
+        metadata["volume_view_index"] = view_index
+        metadata["volume_view_count"] = int(view["volume_view_count"])
+        metadata["volume_sampling_mode"] = "eval_chunk"
+        metadata["joint_view_count"] = int(view["view_count"])
+
+        return self.data_loader.DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=self._take_rows(case.surface_x, surface_idx),
+            surface_y=self._take_rows(case.surface_y, surface_idx),
+            volume_x=self._take_rows(case.volume_x, volume_idx),
+            volume_y=self._take_rows(case.volume_y, volume_idx),
+            metadata=metadata,
+        )
+
+
+def load_curvature_stats_for_eval(runtime, args: argparse.Namespace) -> dict[str, Any]:
+    candidate_paths = []
+    if args.curvature_stats:
+        candidate_paths.append(Path(args.curvature_stats))
+    candidate_paths.append(REPO_ROOT / "curvature_proxy_stats_k16_v1.json")
+    for path in candidate_paths:
+        if path.exists():
+            return json.loads(path.read_text())
+    return runtime.load_curvature_stats()
+
+
+def make_case_store(data_loader, runtime, config, args: argparse.Namespace):
+    if getattr(config, "use_curvature_attention_bias", False):
+        stats = load_curvature_stats_for_eval(runtime, args)
+        return runtime.CurvatureAugmentedCaseStore(
+            manifest_path=config.manifest,
+            root=config.data_root,
+            stats=stats,
+        )
+    return data_loader.DrivAerMLCaseStore(manifest_path=config.manifest, root=config.data_root)
+
+
+def build_loader_from_dataset(runtime, dataset, config, *, distributed_state, use_runtime_sampler: bool):
+    if use_runtime_sampler:
+        return runtime.eval_loader_for_dataset(dataset, config, distributed_state=distributed_state)
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        **runtime.loader_kwargs(config),
+    )
+
+
 def build_test_loader(data_loader, runtime, config, args: argparse.Namespace, distributed_state):
-    store = data_loader.DrivAerMLCaseStore(manifest_path=config.manifest, root=config.data_root)
+    store = make_case_store(data_loader, runtime, config, args)
     case_ids = store.case_ids(args.split)
     if args.case_id:
         wanted = set(args.case_id)
@@ -358,14 +522,34 @@ def build_test_loader(data_loader, runtime, config, args: argparse.Namespace, di
         case_ids = [case_id for case_id in case_ids if case_id in wanted]
     if args.limit_cases > 0:
         case_ids = case_ids[: args.limit_cases]
-    dataset = data_loader.DrivAerMLSurfaceDataset(
-        case_ids,
-        store=store,
-        max_surface_points=config.eval_surface_points,
-        max_volume_points=config.eval_volume_points,
-        sampling_mode="eval_chunk",
+    rank_case_ids = case_ids
+    use_runtime_sampler = True
+    if args.cache_full_cases and args.case_shard_cache and distributed_state.enabled:
+        rank_case_ids = case_ids[distributed_state.rank :: distributed_state.world_size]
+        use_runtime_sampler = False
+    if args.cache_full_cases:
+        dataset = CachedEvalChunkDataset(
+            rank_case_ids,
+            store=store,
+            data_loader=data_loader,
+            max_surface_points=config.eval_surface_points,
+            max_volume_points=config.eval_volume_points,
+        )
+    else:
+        dataset = data_loader.DrivAerMLSurfaceDataset(
+            rank_case_ids,
+            store=store,
+            max_surface_points=config.eval_surface_points,
+            max_volume_points=config.eval_volume_points,
+            sampling_mode="eval_chunk",
+        )
+    loader = build_loader_from_dataset(
+        runtime,
+        dataset,
+        config,
+        distributed_state=distributed_state,
+        use_runtime_sampler=use_runtime_sampler,
     )
-    loader = runtime.eval_loader_for_dataset(dataset, config, distributed_state=distributed_state)
     stats = data_loader.target_stats_from_normalizers(store)
     return loader, stats, case_ids
 
@@ -465,6 +649,10 @@ def evaluate_candidate(candidate: dict[str, Any], args: argparse.Namespace, api,
         "eval_volume_points": getattr(config, "eval_volume_points", None),
         "batch_size": getattr(config, "batch_size", None),
         "world_size": state.world_size,
+        "cache_full_cases": args.cache_full_cases,
+        "case_shard_cache": args.case_shard_cache,
+        "use_curvature_attention_bias": bool(getattr(config, "use_curvature_attention_bias", False)),
+        "curvature_stats": args.curvature_stats or str(REPO_ROOT / "curvature_proxy_stats_k16_v1.json"),
         "checkpoint_epoch": checkpoint.get("epoch") if isinstance(checkpoint, dict) else None,
         "checkpoint_selection_metric": checkpoint.get("selection_metric") if isinstance(checkpoint, dict) else None,
         "checkpoint_keys": sorted(k for k in checkpoint if isinstance(k, str)) if isinstance(checkpoint, dict) else [],
@@ -515,6 +703,12 @@ def main() -> None:
     parser.add_argument("--prefetch-factor", type=int, default=2)
     parser.add_argument("--amp-mode", default="bf16")
     parser.add_argument("--wandb-group", default=os.environ.get("WANDB_GROUP", "full-test-eval"))
+    parser.set_defaults(cache_full_cases=True, case_shard_cache=True)
+    parser.add_argument("--cache-full-cases", dest="cache_full_cases", action="store_true")
+    parser.add_argument("--no-cache-full-cases", dest="cache_full_cases", action="store_false")
+    parser.add_argument("--case-shard-cache", dest="case_shard_cache", action="store_true")
+    parser.add_argument("--no-case-shard-cache", dest="case_shard_cache", action="store_false")
+    parser.add_argument("--curvature-stats", default=os.environ.get("CURVATURE_STATS", ""))
     parser.add_argument("--no-wandb-log", action="store_true")
     args = parser.parse_args()
 
@@ -571,6 +765,8 @@ def main() -> None:
                         "eval_surface_points": args.eval_surface_points,
                         "eval_volume_points": args.eval_volume_points,
                         "world_size": state.world_size,
+                        "cache_full_cases": args.cache_full_cases,
+                        "case_shard_cache": args.case_shard_cache,
                     },
                     mode=os.environ.get("WANDB_MODE", "online"),
                 )
