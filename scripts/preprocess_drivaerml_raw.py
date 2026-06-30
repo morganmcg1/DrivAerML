@@ -78,7 +78,7 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
 def write_csv_rows(path: Path, rows: list[dict[str, Any]]) -> None:
     if not rows:
         raise ValueError(f"No rows to write: {path}")
-    fieldnames = list(rows[0])
+    fieldnames = sorted({key for row in rows for key in row})
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -344,13 +344,19 @@ def raw_parts_info(raw_case_dir: Path, run_id: int, merged_vtu: Path) -> dict[st
     parts = sorted(raw_case_dir.glob(f"volume_{run_id}.vtu.*.part"))
     parts_size = sum(part.stat().st_size for part in parts)
     merged_size = merged_vtu.stat().st_size
-    if parts and parts_size != merged_size:
-        raise RuntimeError(
-            f"Raw VTU part mismatch for {merged_vtu}: merged={merged_size}, parts={parts_size}, n_parts={len(parts)}"
+    parts_match_merged = not parts or parts_size == merged_size
+    if not parts_match_merged:
+        print(
+            f"  warning: raw VTU part size mismatch for {merged_vtu}: "
+            f"merged={merged_size}, parts={parts_size}, n_parts={len(parts)}; "
+            "using merged VTU",
+            flush=True,
         )
     return {
         "raw_volume_part_count": len(parts),
         "raw_volume_parts_size": parts_size,
+        "raw_volume_parts_match_merged": parts_match_merged,
+        "raw_volume_parts_size_delta": parts_size - merged_size,
         "raw_volume_part_names": [part.name for part in parts],
     }
 
@@ -389,9 +395,12 @@ def process_case(
     centers, fields, n_cells = read_vtu_volume(vtu_path)
 
     sample_count = max(1, int(n_cells * sample_ratio))
-    rng = np.random.default_rng(run_id)
-    indices = rng.permutation(n_cells)[:sample_count]
-    indices.sort()
+    if sample_count == n_cells:
+        indices = np.arange(n_cells, dtype=np.int64)
+    else:
+        rng = np.random.default_rng(run_id)
+        indices = rng.permutation(n_cells)[:sample_count]
+        indices.sort()
     xyz = np.asarray(centers[indices], dtype=np.float32)
     del centers
     gc.collect()
